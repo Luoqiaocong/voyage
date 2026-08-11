@@ -27,6 +27,9 @@ dependencies = [
 url = "https://mirrors.aliyun.com/pypi/simple/"
 default = true
 
+[tool.setuptools.packages.find]
+include = ["app*"]
+
 [tool.uv.workspace]
 members = [
     "voyage",
