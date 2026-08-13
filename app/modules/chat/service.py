@@ -1,6 +1,5 @@
 import json
 from typing import Any
-from app.core.agent import get_agent
 from app.modules.chat.factory import astream_chat
 
 

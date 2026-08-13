@@ -1,4 +1,5 @@
 from __future__ import annotations
+from fastapi import Request
 from langchain.agents import create_agent
 from app.core.llm import get_llm
 from typing import Any
@@ -10,21 +11,25 @@ SUPERVISOR_PROMPT =\
 You are a helpful assistant. Please answer the following question as best as you can.
 """
 
-_agent: Any | None = None
-def build_agent(checkpointer: BaseCheckpointSaver) -> Any:
-    """用 checkpointer 编译全局 Agent（只应调用一次）。"""
-    global _agent
-    _agent = create_agent(
-        model= get_llm(),  # 模型
-        tools=[],          #工具列表
-        checkpointer=checkpointer,
-        system_prompt=SUPERVISOR_PROMPT,
-        # middleware=[...],   # 可选：滑窗 trim
-    )
-    return _agent
+class AgentFactory:
+    _instance: Any | None = None  # 类级别的内部单例
 
-def get_agent() -> Any:
-    
-    if _agent is None:
-        raise RuntimeError("Agent 未初始化，请先在 lifespan 中调用 build_agent()")
-    return _agent
+    @classmethod
+    def initialize(cls, checkpointer: BaseCheckpointSaver) -> None:
+        """在 lifespan 中调用，初始化并编译 Agent (仅一次)"""
+        if cls._instance is not None:
+            return
+            
+        cls._instance = create_agent(
+            model=get_llm(),
+            tools=[],
+            checkpointer=checkpointer,
+            system_prompt=SUPERVISOR_PROMPT,
+        )
+
+    @classmethod
+    def get_agent(cls) -> Any:
+        """Service 层随时调用，直接获取已编译的 Agent"""
+        if cls._instance is None:
+            raise RuntimeError("Agent 尚未初始化！请检查 lifespan 配置。")
+        return cls._instance
