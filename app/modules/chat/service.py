@@ -1,10 +1,10 @@
-from app.core.supervisor import supervisor_agent
+import json
+from typing import Any
+from app.core.agent import get_agent
+from app.modules.chat.factory import astream_chat
 
 
 class ChatService:
-    async def process_message(self, message: str, session_id: str | None = None) -> tuple[str, str]:
-        # TODO: use supervisor_agent with proper streaming
-        return f"Echo: {message}", session_id or "new-session"
-
-
-chat_service = ChatService()
+    async def process_message(self, message: str, session_id: str):
+        async for chunk in astream_chat(message,session_id):
+            yield chunk

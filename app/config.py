@@ -19,18 +19,11 @@ class VoyageConfig(BaseSettings):
     DEEPSEEK_LLM_MODEL_PRO: str
     RERANK_MODEL: str
 
-    MILVUS_ALIYUN_URI: str
-    MILVUS_COLLECTION_NAME: str
-    MILVUS_DIM: int = 1156
-    MILVUS_ALIYUN_ACCOUNT: str
-    MILVUS_ALIYUN_PASSWORD: str
-
     CHUNK_SIZE: int = 1024
     CHUNK_OVERLAP: int = 200
     TOP_K: int = 10
     RERANK_TOP_N: int = 5
 
-    POSTGRESQL_DATABASE_URL: str
 
     model_config = SettingsConfigDict(
         env_file=ENV_PATH,

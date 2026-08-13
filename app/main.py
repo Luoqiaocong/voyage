@@ -1,18 +1,29 @@
+from contextlib import asynccontextmanager
+from langgraph.checkpoint.memory import InMemorySaver
 from fastapi import FastAPI
+from app.core.agent import build_agent
 from app.modules.auth.router import router as auth_router
 from app.modules.chat.router import router as chat_router
 from app.modules.itineraries.router import router as itineraries_router
 from app.modules.knowledge.router import router as knowledge_router
 
-API_STR = "/api/v1"
+API_V1_STR = "/api/v1"
 
 app = FastAPI()
 
-app.include_router(auth_router)
-app.include_router(chat_router)
-app.include_router(itineraries_router)
-app.include_router(knowledge_router)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    checkpointer = InMemorySaver()  # 全局一个即可
+    build_agent(checkpointer)
+    yield
+    # InMemory 无需关闭连接
+    
+app = FastAPI(title="VOYAGE AI TRAVEL PLANNER",lifespan=lifespan)
 
+app.include_router(auth_router,prefix=API_V1_STR)
+app.include_router(chat_router,prefix=API_V1_STR)
+app.include_router(itineraries_router,prefix=API_V1_STR)
+app.include_router(knowledge_router,prefix=API_V1_STR)
 
 @app.get("/")
 async def root():
