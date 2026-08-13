@@ -1,9 +1,9 @@
 import pytest
 from langchain.messages import HumanMessage
 
-from app.core.agent import get_agent
+from app.core.agent import AgentFactory
 
-agent = get_agent()
+agent = AgentFactory.get_agent()
 @pytest.mark.asyncio
 async def test_supervisor_agent():
     stream = agent.astream(
