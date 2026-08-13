@@ -31,6 +31,12 @@ class VoyageConfig(BaseSettings):
     RERANK_TOP_N: int = 5
 
     POSTGRESQL_DATABASE_URL: str
+    
+    REDIS_URL: str = "redis://localhost:6379/2"  # 新增，带默认值
+    MEMORY_MODE: str = "sliding"                 # sliding | summary | semantic
+    MEMORY_WINDOW_SIZE: int = 10                 # 窗口大小
+    MEMORY_TTL: int = 7200                       # 2小时
+    MEMORY_SUMMARY_MODEL: str = "qwen3.5-flash"  # 摘要用轻量模型
 
     model_config = SettingsConfigDict(
         env_file=ENV_PATH,
