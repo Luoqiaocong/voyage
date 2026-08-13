@@ -5,10 +5,11 @@ from fastapi_utils.cbv import cbv
 from starlette import status
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from collections.abc import AsyncIterable
-from app.modules.chat.service import ChatService
-from app.modules.chat.schemas import ChatRequest, SessionResponse
+from .service import ChatService
+from .schemas import ChatRequest, SessionResponse
+from app.core.route import UnifiedRoute
 
-router = APIRouter(prefix="/chat", tags=["chat"])
+router = APIRouter(prefix="/chat", tags=["chat"],route_class=UnifiedRoute)
 
 @cbv(router)
 class ChatRouter:
@@ -21,7 +22,7 @@ class ChatRouter:
     """
     @router.post("/sessions", 
                  status_code=status.HTTP_201_CREATED,
-                 response_model=SessionResponse,
+                #  response_model=SessionResponse,
                  summary="创建会话"
                  )  
     async def create_session(self):

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from fastapi import Request
 from langchain.agents import create_agent
-from app.core.llm import get_llm
+from app.core.ai.llm import get_llm
 from typing import Any
 from langgraph.checkpoint.base import BaseCheckpointSaver
 

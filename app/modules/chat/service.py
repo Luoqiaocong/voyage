@@ -1,6 +1,6 @@
 import json
 from typing import Any
-from app.modules.chat.factory import astream_chat
+from .factory import astream_chat
 
 
 class ChatService:

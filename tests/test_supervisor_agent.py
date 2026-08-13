@@ -1,7 +1,7 @@
 import pytest
 from langchain.messages import HumanMessage
 
-from app.core.agent import AgentFactory
+from app.core.ai import AgentFactory
 
 agent = AgentFactory.get_agent()
 @pytest.mark.asyncio

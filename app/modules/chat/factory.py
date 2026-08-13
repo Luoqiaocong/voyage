@@ -2,7 +2,7 @@ from typing import Any
 
 from langchain.messages import AIMessage, HumanMessage
 
-from app.core.agent import AgentFactory
+from app.core.ai import AgentFactory
 
 
 def _thread_config(session_id: str) -> dict[str, Any]:
