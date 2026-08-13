@@ -5,8 +5,8 @@ from typing import Any
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 
-
-SUPERVISOR_PROMPT = """
+SUPERVISOR_PROMPT =\
+"""
 You are a helpful assistant. Please answer the following question as best as you can.
 """
 
@@ -24,6 +24,7 @@ def build_agent(checkpointer: BaseCheckpointSaver) -> Any:
     return _agent
 
 def get_agent() -> Any:
+    
     if _agent is None:
         raise RuntimeError("Agent 未初始化，请先在 lifespan 中调用 build_agent()")
     return _agent

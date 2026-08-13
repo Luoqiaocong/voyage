@@ -19,24 +19,11 @@ class VoyageConfig(BaseSettings):
     DEEPSEEK_LLM_MODEL_PRO: str
     RERANK_MODEL: str
 
-    MILVUS_ALIYUN_URI: str
-    MILVUS_COLLECTION_NAME: str
-    MILVUS_DIM: int = 1156
-    MILVUS_ALIYUN_ACCOUNT: str
-    MILVUS_ALIYUN_PASSWORD: str
-
     CHUNK_SIZE: int = 1024
     CHUNK_OVERLAP: int = 200
     TOP_K: int = 10
     RERANK_TOP_N: int = 5
 
-    POSTGRESQL_DATABASE_URL: str
-    
-    REDIS_URL: str = "redis://localhost:6379/2"  # 新增，带默认值
-    MEMORY_MODE: str = "sliding"                 # sliding | summary | semantic
-    MEMORY_WINDOW_SIZE: int = 10                 # 窗口大小
-    MEMORY_TTL: int = 7200                       # 2小时
-    MEMORY_SUMMARY_MODEL: str = "qwen3.5-flash"  # 摘要用轻量模型
 
     model_config = SettingsConfigDict(
         env_file=ENV_PATH,
