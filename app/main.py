@@ -4,6 +4,8 @@ from app.modules.chat.router import router as chat_router
 from app.modules.itineraries.router import router as itineraries_router
 from app.modules.knowledge.router import router as knowledge_router
 
+API_STR = "/api/v1"
+
 app = FastAPI()
 
 app.include_router(auth_router)
