@@ -15,11 +15,15 @@ router = APIRouter(prefix="/chat", tags=["chat"],route_class=UnifiedRoute)
 class ChatRouter:
     service : ChatService = Depends()
     
+    """
+    未来不能一次性返回全部会话，要分批，所有有skip，limit，pageSize等参数（查询参数）
+    """
+    
     @router.get("/sessions/{session_id}", 
                 status_code=status.HTTP_200_OK,
                 summary="获取会话")
     async def get_sessions(self,sess_req:SessionRequest=Depends()):
-        return {"session_id":sess_req.session_id,"messages": [{"assistant": "AI", "content": "hello,how can I help you today?"}]}
+        return await self.service.get_messages(sess_req.session_id)
     
     
     """

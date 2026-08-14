@@ -16,7 +16,7 @@ def _base_response(
     return JSONResponse(
         status_code=status_code,
         content={
-            "business_code": business_code,
+            "code": business_code,
             "message": message,
             "data": jsonable_encoder(data),
         },

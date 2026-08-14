@@ -47,4 +47,11 @@ def get_llm(
         api_key=api_key,
         base_url=base_url,
         temperature=temperature,
+        extra_body={
+        "enable_thinking": False,           # Qwen3 / 很多国内兼容网关
+        # "chat_template_kwargs": {"enable_thinking": False},  # vLLM / SGLang 常见
+        # "thinking": {"type": "disabled"},  # 部分网关
+        # "reasoning": {"enabled": False},   # 部分 DeepSeek 兼容
+        # "reasoning_effort": "none",        # 支持 effort 的推理模型
+    },
     )
