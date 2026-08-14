@@ -1,5 +1,5 @@
 # app/shared/response/__init__.py
-from .code import ResponseCode
+from .code import BusinessCode
 from .exception import (
     BaseBusinessException,
     AuthException,
@@ -10,7 +10,7 @@ from .exception import (
 from .util import success_response
 
 __all__ = [
-    "ResponseCode",
+    "BusinessCode",
     "BaseBusinessException",
     "AuthException",
     "UserException",

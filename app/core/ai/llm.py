@@ -1,12 +1,12 @@
-from enum import Enum
-from typing import Literal, Optional
+from enum import StrEnum
+from typing import Literal
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from app.config import config
 
 
-class VoyageModel(str, Enum):
+class VoyageModel(StrEnum):
     """Voyage 平台支持的模型枚举"""
     DEEPSEEK_V4_FLASH = "deepseek-v4-flash"
     DEEPSEEK_V4_PRO = "deepseek-v4-pro"
@@ -17,31 +17,33 @@ class VoyageModel(str, Enum):
 
 def get_llm(
     model: str | VoyageModel = VoyageModel.QWEN_3_5_FLASH,
-    temperature: float = 0.2,
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
-    model_provider: Literal["openai", "deepseek"] = "openai",
+    temperature: float = 1.4,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    model_provider: Literal["openai", "deepseek"] | None = None,
 ) -> BaseChatModel:
     """
     统一的 LLM 实例获取工厂函数
     
-    能够根据传入的 model 动态推断适配的 API Key 与 Base URL，避免参数错配。
+    能够根据传入的 model 动态推断适配的 API Key、Base URL 与 Provider。
     """
-    # 1. 确保 model 拿到的是字符串值
-    model_name = getattr(model, "value", model)
+    # 1. 因为是 StrEnum，直接转为标准 str 类型即可（兼顾兼容外部传入的字符串）
+    model_name = str(model)
 
+    # 2. 动态推断 API Key 与 Base URL
     if "deepseek" in model_name:
         base_url = base_url or config.DEEPSEEK_BASE_URL
         api_key = api_key or config.DEEPSEEK_API_KEY
-        model_provider = "openai"
     else:
         base_url = base_url or config.DASHSCOPE_BASE_URL
         api_key = api_key or config.DASHSCOPE_API_KEY
-        model_provider = "openai"
+
+    # 3. 只有当外部没有指定 provider 时，才提供默认值 "openai"
+    provider = model_provider or "openai"
 
     return init_chat_model(
         model=model_name,
-        model_provider=model_provider,
+        model_provider=provider,
         api_key=api_key,
         base_url=base_url,
         temperature=temperature,

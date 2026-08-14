@@ -4,14 +4,14 @@ from typing import Callable
 from fastapi import Response, Request
 from starlette.responses import JSONResponse
 
-from app.core.response  import ResponseCode
-from app.core.response import success_response
+from .business import BusinessCode
+from .business import success_response
 
 # 映射表：将 HTTP 标准状态码映射为符合你项目规范的业务逻辑状态码
 CODE_MAP = {
-    201: ResponseCode.CREATED,     # 201 Created -> 映射为业务规范中的创建成功码
-    204: ResponseCode.NO_CONTENT,  # 204 No Content -> 映射为业务规范中的删除/空内容成功码
-    200: ResponseCode.SUCCESS      # 200 OK -> 映射为通用成功码
+    201: BusinessCode.CREATED,     # 201 Created -> 映射为业务规范中的创建成功码
+    204: BusinessCode.NO_CONTENT,  # 204 No Content -> 映射为业务规范中的删除/空内容成功码
+    200: BusinessCode.SUCCESS      # 200 OK -> 映射为通用成功码
 }
 
 class UnifiedRoute(APIRoute):
@@ -41,7 +41,7 @@ class UnifiedRoute(APIRoute):
                 http_status = response.status_code
 
                 # 依据映射表，将 HTTP 状态码转化为对应的内部业务 Code（如果未映射，则默认为通用成功 SUCCESS）
-                business_code = CODE_MAP.get(http_status, ResponseCode.SUCCESS)
+                business_code = CODE_MAP.get(http_status, BusinessCode.SUCCESS)
                 
                 # 4. 提取原始响应体内容：
                 # response.body 拿到的是二进制字节数据（如 b'{"id": 1}' 或 b'null'）
@@ -60,14 +60,14 @@ class UnifiedRoute(APIRoute):
                 # 情况 A: data is None (即业务接口没有写 return，或者返回了 None)
                 # 情况 B: 数据是个字典，但是里面没有 "code" 键 (说明是普通的业务数据字典，不是手动包装过的对象)
                 # 情况 C: 数据是个纯列表 list (例如返回新闻卡片列表：[{"id": 1}, {"id": 2}])
-                if data is None or not (isinstance(data, dict) and "code" in data):
+                if data is None or not (isinstance(data, dict) and "businsess_code" in data):
                     
                     # 6. 调用统一成功包装工具函数：
                     # 将剥离出来的 data 重新组装，并带入刚刚根据 HTTP 状态码推导出来的业务代码（business_code）。
                     # success_response 内部会将其重新打包成一个全新的 JSONResponse 并返回。
 
                     # 1. 现场生成新 Response 壳
-                    new_response = success_response(data=data, success_code=business_code)
+                    new_response = success_response(data=data, business_code=business_code)
     
                     # 2. 🌟 灵魂移植 A：把原来路由挂载的后台任务（BackgroundTask）原封不动拷贝过来
                     new_response.background = response.background 

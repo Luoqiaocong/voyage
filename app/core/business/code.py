@@ -12,16 +12,16 @@ from enum import Enum
 """
 
 
-class ResponseCode(Enum):
+class BusinessCode(Enum):
     """
     统一响应码枚举
     格式: (code, message)
     """
 
     # ========== 通用成功状态 ==========
-    SUCCESS = (20000, "ok")
-    CREATED = (20100, "操作成功")
-    NO_CONTENT = (20400, "操作成功")
+    SUCCESS = (20000, "success")
+    CREATED = (20100, "success")
+    NO_CONTENT = (20400, "success")
 
     # ========== 通用错误 (1xxxx) ==========
     PARAM_ERROR = (10001, "参数错误")
@@ -96,6 +96,6 @@ class ResponseCode(Enum):
         return self.value[1]
 
 
-def get_response_info(res_code: ResponseCode):
+def get_response_info(res_code: BusinessCode):
     """便捷获取码和信息的工具函数"""
     return res_code.code, res_code.message

@@ -1,35 +1,38 @@
 from typing import Any, Optional
+
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from fastapi.encoders import jsonable_encoder  # 核心：用于解析模型和对象
-from .code import ResponseCode
+
+from .code import BusinessCode
+
 
 def _base_response(
-    status_code,
-    code: int,
+    status_code: int,
+    business_code: int,
     message: str,
     data: Any = None,
 ) -> JSONResponse:
-    """底层响应封装"""
+    """底层统一响应封装"""
     return JSONResponse(
         status_code=status_code,
         content={
-            "code": code,
+            "business_code": business_code,
             "message": message,
-            "data": jsonable_encoder(data)  # 自动处理 Pydantic/ORM/Datetime
-        }
+            "data": jsonable_encoder(data),
+        },
     )
+
 
 def success_response(
     status_code: int = 200,
-    success_code: ResponseCode = ResponseCode.SUCCESS,
+    business_code: BusinessCode = BusinessCode.SUCCESS,
     message: Optional[str] = None,
     data: Any = None,
-
 ) -> JSONResponse:
-    """成功响应 - 默认返回 HTTP 200"""
+    """成功响应"""
     return _base_response(
         status_code=status_code,
-        code=success_code.code,
-        message=message or success_code.message,
+        business_code=business_code.code,
+        message=message or business_code.message,
         data=data,
     )

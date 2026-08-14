@@ -6,7 +6,7 @@ from starlette import status
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from collections.abc import AsyncIterable
 from .service import ChatService
-from .schemas import ChatRequest, SessionResponse
+from .schemas import ChatRequest, SessionResponse,SessionRequest
 from app.core.route import UnifiedRoute
 
 router = APIRouter(prefix="/chat", tags=["chat"],route_class=UnifiedRoute)
@@ -14,6 +14,13 @@ router = APIRouter(prefix="/chat", tags=["chat"],route_class=UnifiedRoute)
 @cbv(router)
 class ChatRouter:
     service : ChatService = Depends()
+    
+    @router.get("/sessions/{session_id}", 
+                status_code=status.HTTP_200_OK,
+                summary="获取会话")
+    async def get_sessions(self,sess_req:SessionRequest=Depends()):
+        return {"session_id":sess_req.session_id,"messages": [{"assistant": "AI", "content": "hello,how can I help you today?"}]}
+    
     
     """
     TODO:
