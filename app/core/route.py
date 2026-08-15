@@ -60,7 +60,7 @@ class UnifiedRoute(APIRoute):
                 # 情况 A: data is None (即业务接口没有写 return，或者返回了 None)
                 # 情况 B: 数据是个字典，但是里面没有 "code" 键 (说明是普通的业务数据字典，不是手动包装过的对象)
                 # 情况 C: 数据是个纯列表 list (例如返回新闻卡片列表：[{"id": 1}, {"id": 2}])
-                if data is None or not (isinstance(data, dict) and "businsess_code" in data):
+                if data is None or not (isinstance(data, dict) and "code" in data):
                     
                     # 6. 调用统一成功包装工具函数：
                     # 将剥离出来的 data 重新组装，并带入刚刚根据 HTTP 状态码推导出来的业务代码（business_code）。
