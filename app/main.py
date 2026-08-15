@@ -20,8 +20,8 @@ app = FastAPI()
 async def lifespan(app: FastAPI):
     async with AsyncSqliteSaver.from_conn_string(str(SQLITE_PATH)) as checkpointer:
         # 若 API 需要：await checkpointer.setup()
-        AgentFactory.initialize()
-        # AgentFactory.initialize(checkpointer)
+        # AgentFactory.initialize()
+        AgentFactory.initialize(checkpointer)
         # app.state.checkpointer = checkpointer  # 可选：事后读 state 用
         yield
     AgentFactory.reset()  # 关闭前清掉，避免指着已关连接
