@@ -1,8 +1,8 @@
-# config/agents/weather.py
+# agents/weather.py
 from langchain.agents import create_agent
 
-from app.core.ai.config.mcp import get_namespace_tools
 from app.core.ai.llm import get_llm
+from app.core.ai.mcp import get_namespace_tools
 
 WEATHER_AGENT_PROMPT = """你是一个气象与出行环境分析专家（Weather Agent）。
 查询目的地指定日期范围的天气，给出出行建议。

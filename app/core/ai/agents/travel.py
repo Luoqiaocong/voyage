@@ -1,8 +1,8 @@
-# config/agents/travel.py
+# agents/travel.py
 from langchain.agents import create_agent
 
-from app.core.ai.config.mcp import get_namespace_tools
 from app.core.ai.llm import get_llm
+from app.core.ai.mcp import get_namespace_tools
 
 TRAVEL_AGENT_PROMPT = """你是一个目的地综合规划专家（Travel Agent）。
 结合到站信息、天气与用户预算约束，进行推荐。
