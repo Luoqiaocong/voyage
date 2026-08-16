@@ -20,26 +20,51 @@ router = APIRouter(
 )
 
 
+"""
+TODO:
+    1.根据某个用户uid获取所有对话历史
+"""
+
+
 @cbv(router)
 class ConversationRouter:
     service: ConversationService = Depends()
 
     """
-    未来不能一次性返回全部对话，要分批，所有有 skip，limit，pageSize 等参数（查询参数）
+    TODO：未来不能一次性返回全部对话，要分批，按轮次返回（
+    从一条 HumanMessage 开始
+    → 后面的 AI / Tool / AI ...
+    → 直到下一条 HumanMessage 之前
+    ）
     """
 
     @router.get(
         "/{id}/messages",
         status_code=status.HTTP_200_OK,
-        summary="获取对话历史消息",
+        summary="获取历史对话消息",
     )
     async def get_messages(
         self,
-        # start: Annotated[int, Query(ge=1, description="页码", alias="page")] = 1,
-        # end: Annotated[int, Query(ge=1, le=50, description="每页数量", alias="pagesize")] = 10,
-       id: Annotated[str, Path(pattern=r"^[a-zA-Z0-9]{12}$")],
+        id: Annotated[str, Path(pattern=r"^[a-zA-Z0-9]{12}$")],
+        # offset: Annotated[int, Query(ge=1, description="消息跳过数量", alias="offset")],
+        # limit: Annotated[int, Query(ge=2, le=50, description="消息数量", alias="limit")] = 10,
     ):
         return await self.service.get_messages(id)
+    
+    """
+    TODO： 以后要验证用户是否有权限访问此会话id，会话id是否存在
+    """
+    
+    @router.delete(
+         "/{id}/messages",
+        status_code=status.HTTP_204_NO_CONTENT,
+        summary="删除历史对话消息",
+    )
+    async def delete_messages(
+        self,
+        id: Annotated[str, Path(pattern=r"^[a-zA-Z0-9]{12}$")],
+    ):
+       return await self.service.delete_messages(id)
 
     """
     TODO:

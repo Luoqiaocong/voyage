@@ -55,3 +55,10 @@ class ConversationFactory:
         if not state.values:
             return []
         return convert_to_openai_messages(state.values["messages"])
+    
+    async def delete_messages(self, conversation_id: str):
+        agent = AgentFactory.get_checkpointer()
+        try:
+           return  await agent.adelete_thread(conversation_id)
+        except Exception as e:
+            print(e)

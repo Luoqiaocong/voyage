@@ -15,5 +15,8 @@ class ConversationService:
         async for chunk in self.factory.astream_chat(message, conversation_id):
             yield chunk
 
-    async def get_messages(self, conversation_id: str):
-        return await self.factory.get_messages(conversation_id)
+    async def get_messages(self, conversation_id: str,**kwargs):
+        return await self.factory.get_messages(conversation_id, **kwargs)
+
+    async def delete_messages(self, conversation_id: str):
+        return await self.factory.delete_messages(conversation_id)
