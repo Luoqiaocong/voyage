@@ -28,8 +28,9 @@ async def get_location():
 
 @tool
 async def get_today():
-    "获取当前日期与时间，格式为 YYYY-MM-DD"
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    "获取当前日期与时间，格式为 YYYY-MM-DD。"
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # noqa: DTZ005 - 面向中国用户的本地时间即可
+
 
 
 @tool
@@ -40,7 +41,9 @@ async def ticket_schedule(
     requirements: str,
     runtime: ToolRuntime,
 ) -> str:
-    """查询火车票。
+    """查询火车票/车次：当用户明确要查出发地与目的地之间的车票、票价、车次、时刻、坐席余票时调用。
+
+    仅在用户明确给出（或能自然推断出）出发地、目的地、日期时使用；缺任一关键信息时请先向用户追问，不要乱猜。
 
     参数:
         origin: 出发地（如 北京西）
@@ -64,7 +67,9 @@ async def weather_forecast(
     destination: str,
     runtime: ToolRuntime,
 ) -> str:
-    """查询目的地天气，并给出穿衣与户外建议。
+    """查询某地某段时间的天气，并给出穿衣与户外建议：当用户明确要查目的地天气、气温、是否适合出行时调用。
+
+    仅在用户明确给出目的地和日期范围时使用；缺信息时先补问。若用户只是闲聊或问常识性天气知识，直接回答即可，不必调用。
 
     参数:
         date_range: 如 "2026-08-15 到 2026-08-16"
@@ -88,17 +93,21 @@ async def travel_recommend(
     hotel_budget: str,
     hotel_dates: str,
     extra_requirements: str,
-    runtime: ToolRuntime,
+    mode: str = "full",
 ) -> str:
-    """根据天气与车次信息推荐景点、美食、酒店。
+    """综合推荐酒店、景点、美食：当用户要「一整套行程/完整攻略/住在哪吃啥玩啥」时才调用。
+
+    这是在已拿到天气与车次信息之后做的综合推荐。若用户只问单个信息（比如只问景点、只问吃），
+    不必硬凑整套，可直接基于已有信息回答。
 
     参数:
         destination: 目的地
         weather_summary: 天气工具返回摘要（尽量原文）
-        ticket_summary: 票务工具返回摘要（含到站时间/车站）
-        hotel_budget: 如 "500元以内"
-        hotel_dates: 如 "2026-08-14 入住 2026-08-16 退房"
-        extra_requirements: 如 "陕菜、商务型、靠近西安北站"
+        ticket_summary: 票务工具返回摘要（含到站时间/车站），没有可填空字符串
+        hotel_budget: 如 "500元以内"，没有预算信息传空
+        hotel_dates: 如 "2026-08-14 入住 2026-08-16 退房"，没有传空
+        extra_requirements: 如 "陕菜、商务型、靠近西安北站"，没有传空
+        mode: "full"（完整攻略：酒店+景点+美食）或 "brief"（精简要点，用户只要快速建议时用）
     """
     destination = destination.strip()
     if not destination:
@@ -108,12 +117,16 @@ async def travel_recommend(
 
     msg = (
         f"目的地：{destination}\n"
-        f"天气情况：{weather_summary}\n"
-        f"车次信息：{ticket_summary}\n"
-        f"酒店预算：{hotel_budget}\n"
-        f"入住日期：{hotel_dates}\n"
-        f"其他要求：{extra_requirements}\n"
-        "请结合以上信息，推荐景点、美食和酒店。"
+        f"天气情况：{weather_summary or '（未提供）'}\n"
+        f"车次信息：{ticket_summary or '（未提供）'}\n"
+        f"酒店预算：{hotel_budget or '（未明确）'}\n"
+        f"入住日期：{hotel_dates or '（未明确）'}\n"
+        f"其他要求：{extra_requirements or '（无）'}\n"
+        f"输出模式：{'full' if mode == 'full' else 'brief'}\n"
     )
+    if mode == "brief":
+        msg += "请只输出精简要点（每个维度 1-2 条，不要长篇幅、不要完整攻略框架），突出最推荐的可执行建议。"
+    else:
+        msg += "请结合以上信息，推荐景点、美食和酒店。"
     response = await agent.ainvoke({"messages": [HumanMessage(content=msg)]})
     return response["messages"][-1].content
