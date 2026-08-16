@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 from app.shared.utils import get_id
 
 
-
 class ConversationResponse(BaseModel):
     conversation_id: str = Field(
         description="对话ID",

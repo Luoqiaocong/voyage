@@ -1,18 +1,22 @@
 from langchain.messages import HumanMessage, ToolMessage
 from langchain_core.messages import AIMessageChunk, convert_to_openai_messages
 from langchain_core.runnables import RunnableConfig
+
 from app.core.ai import AgentFactory
+from app.core.business import BusinessCode, SessionException
 
 
 def _thread_config(conversation_id: str) -> RunnableConfig:
     return {"configurable": {"thread_id": conversation_id}}
 
 
-class ConversationFactory:
+class ConversationGateway:
+    """对话网关：封装与 langgraph Agent 的交互（流式对话、历史读取、线程删除）。"""
+
     def __init__(self):
         pass
 
-    async def astream_chat(self, message: str, conversation_id: str):
+    async def stream_message(self, message: str, conversation_id: str):
         agent = AgentFactory.get_agent()
         config = _thread_config(conversation_id)
 
@@ -55,10 +59,13 @@ class ConversationFactory:
         if not state.values:
             return []
         return convert_to_openai_messages(state.values["messages"])
-    
-    async def delete_messages(self, conversation_id: str):
-        agent = AgentFactory.get_checkpointer()
+
+    async def delete_conversation_thread(self, conversation_id: str):
+        checkpointer = AgentFactory.get_checkpointer()
         try:
-           return  await agent.adelete_thread(conversation_id)
-        except Exception as e:
-            print(e)
+            await checkpointer.adelete_thread(conversation_id)
+        except Exception as exc:  # 底层删除失败统一映射为业务异常
+            raise SessionException(
+                BusinessCode.SESSION_DELETE_FAILED,
+                msg=f"删除对话失败：{exc}",
+            ) from exc

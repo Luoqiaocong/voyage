@@ -2,7 +2,7 @@ import json
 from collections.abc import AsyncIterable
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi_utils.cbv import cbv
 from starlette import status
@@ -56,15 +56,15 @@ class ConversationRouter:
     """
     
     @router.delete(
-         "/{id}/messages",
+         "/{id}",
         status_code=status.HTTP_204_NO_CONTENT,
-        summary="删除历史对话消息",
+        summary="删除整个对话",
     )
-    async def delete_messages(
+    async def delete_conversation(
         self,
         id: Annotated[str, Path(pattern=r"^[a-zA-Z0-9]{12}$")],
     ):
-       return await self.service.delete_messages(id)
+       return await self.service.delete_conversation(id)
 
     """
     TODO:
@@ -90,12 +90,12 @@ class ConversationRouter:
         response_class=EventSourceResponse,
         summary="流式对话",
     )
-    async def chat(
+    async def send_message(
         self,
         id: Annotated[str, Path(pattern=r"^[a-zA-Z0-9]{12}$")],
         req: ConversationMessageRequest,
     ) -> AsyncIterable[ServerSentEvent]:
-        async for chunk in self.service.process_message(req.message, id):
+        async for chunk in self.service.send_message(req.message, id):
             yield ServerSentEvent(
                 raw_data=json.dumps(chunk, ensure_ascii=False),
                 event="message",
