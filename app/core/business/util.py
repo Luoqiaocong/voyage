@@ -1,12 +1,14 @@
-from typing import Any, Optional
-from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
-from .exception import BaseBusinessException
-from .code import BusinessCode
+from typing import Any
+
 from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from .code import BusinessCode
+from .exception import BaseBusinessException
+
 
 def _base_response(
     status_code: int,
@@ -27,7 +29,7 @@ def _base_response(
 def success_response(
     status_code: int = 200,
     business_code: BusinessCode = BusinessCode.SUCCESS,
-    message: Optional[str] = None,
+    message: str | None = None,
     data: Any = None,
 ) -> JSONResponse:
     """成功响应"""
