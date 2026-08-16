@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from langchain.messages import HumanMessage
 from langchain.tools import ToolRuntime, tool
 
@@ -23,6 +25,11 @@ async def get_location():
         None
     """
     return "中国北京"
+
+@tool
+async def get_today():
+    "获取当前日期与时间，格式为 YYYY-MM-DD"
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 @tool

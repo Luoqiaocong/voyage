@@ -10,8 +10,9 @@ from .tools import (
     ticket_schedule,
     travel_recommend,
     weather_forecast,
+     get_today
 )
-
+from .middleware import CUSTOM_MIDDLEWARE
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
@@ -64,8 +65,9 @@ class AgentFactory:
         cls._checkpointer = checkpointer
         cls._instance = create_agent(
             model=get_llm(),
-            tools=[ticket_schedule, weather_forecast, travel_recommend],
+            tools=[ticket_schedule, weather_forecast, travel_recommend,get_today],
             checkpointer=checkpointer if checkpointer is not None else None,
+            middleware=CUSTOM_MIDDLEWARE,
             system_prompt=SUPERVISOR_PROMPT,
         )
 

@@ -14,6 +14,9 @@ class VoyageModel(StrEnum):
     QWEN_3_5_FLASH = "qwen3.5-flash"
     QWEN_MAX = "qwen-max"
     DASHCOPE_GLM_5 = "glm-5"
+    DASHCOPE_QWEN_PLUS_1220 = "qwen-plus-1220"
+    DASHCOPE_QWEN_3_7_PLUS_2026_05_26 = "qwen3.7-plus-2026-05-26"
+    DASHCOPE_QWEN_3_6_FLASH_2026_04_16="qwen3.6-flash-2026-04-16"
 
 
 def get_llm(

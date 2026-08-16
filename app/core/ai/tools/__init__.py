@@ -3,10 +3,12 @@ from app.core.ai.tools.travel_tools import (
     ticket_schedule,
     travel_recommend,
     weather_forecast,
+    get_today,
 )
 
 __all__ = [
     "ticket_schedule",
     "travel_recommend",
     "weather_forecast",
+    "get_today",
 ]
