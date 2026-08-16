@@ -20,23 +20,19 @@ router = APIRouter(
 )
 
 
-"""
-TODO:
-    1.根据某个用户uid获取所有对话历史
-"""
-
-
 @cbv(router)
 class ConversationRouter:
     service: ConversationService = Depends()
 
-    """
-    TODO：未来不能一次性返回全部对话，要分批，按轮次返回（
-    从一条 HumanMessage 开始
-    → 后面的 AI / Tool / AI ...
-    → 直到下一条 HumanMessage 之前
-    ）
-    """
+    # ===================== TODO / 已知限制 =====================
+    # 1. 鉴权与归属：目前无用户模块，所有 /{id} 端点只校验 id 格式(12位)，
+    #    不校验“会话是否创建过/是否属于当前用户”。将来绑定 user_id 后需补：
+    #    - create: 写 conversation 表(user_id, id, created_at)
+    #    - read/update/delete: 先校验存在 + ownership
+    # 2. 列表/分页：GET /conversations（按用户 id 拉全部）尚未实现；
+    #    GET /{id}/messages 将来需支持 offset/limit 分批返回。
+    # 3. 消息按轮次返回：从一条 HumanMessage → AI/Tool → 至下一条 HumanMessage 前的分组。
+    # =============================================================
 
     @router.get(
         "/{id}/messages",
@@ -50,11 +46,7 @@ class ConversationRouter:
         # limit: Annotated[int, Query(ge=2, le=50, description="消息数量", alias="limit")] = 10,
     ):
         return await self.service.get_messages(id)
-    
-    """
-    TODO： 以后要验证用户是否有权限访问此会话id，会话id是否存在
-    """
-    
+
     @router.delete(
          "/{id}",
         status_code=status.HTTP_204_NO_CONTENT,
@@ -66,12 +58,6 @@ class ConversationRouter:
     ):
        return await self.service.delete_conversation(id)
 
-    """
-    TODO:
-    后续必须携带鉴权，以标识是用户；认证后创建 conversation，
-    但不对 conversation 作存储，只在后续有对话时进行存储
-    """
-
     @router.post(
         "/",
         status_code=status.HTTP_201_CREATED,
@@ -80,9 +66,6 @@ class ConversationRouter:
     )
     async def create_conversation(self):
         return ConversationResponse()
-
-    """
-    """
 
     @router.post(
         "/{id}/messages",
