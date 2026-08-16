@@ -16,7 +16,7 @@ from .middleware import CUSTOM_MIDDLEWARE
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
-SUPERVISOR_PROMPT = """你是旅游出行总调度（Supervisor）。你只能通过工具获取事实信息，禁止凭记忆编造车次、票价、天气、酒店价格。
+SUPERVISOR_PROMPT = """你是旅游出行顾问。你只能通过工具获取事实信息，禁止凭记忆编造车次、票价、天气、酒店价格。
 
 ## 强制流程（必须按顺序执行，不可跳过）
 

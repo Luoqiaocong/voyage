@@ -29,28 +29,28 @@ def on_tool_error(exc: Exception, request: ToolCallRequest) -> str | None:
 
 CUSTOM_MIDDLEWARE = [
     # ---------- 输入侧 PII ----------
-    PIIMiddleware(
-        "phone_number",
-        detector=(
-            r"(?:\+?\d{1,3}[\s.-]?)?"
-            r"(?:\(?\d{2,4}\)?[\s.-]?)?"
-            r"\d{3,4}[\s.-]?\d{4}"
-        ),
-        strategy="mask",
-        apply_to_input=True,
-    ),
-    PIIMiddleware(
-        "email",
-        strategy="redact",
-        apply_to_input=True,
-        apply_to_output=False,
-    ),
+    # PIIMiddleware(
+    #     "phone_number",
+    #     detector=(
+    #         r"(?:\+?\d{1,3}[\s.-]?)?"
+    #         r"(?:\(?\d{2,4}\)?[\s.-]?)?"
+    #         r"\d{3,4}[\s.-]?\d{4}"
+    #     ),
+    #     strategy="mask",
+    #     apply_to_input=True,
+    # ),
+    # PIIMiddleware(
+    #     "email",
+    #     strategy="redact",
+    #     apply_to_input=True,
+    #     apply_to_output=False,
+    # ),
     # ---------- 上下文压缩 ----------
-    SummarizationMiddleware(
-        model=get_llm(model=VoyageModel.DASHCOPE_QWEN_PLUS_1220),
-        trigger=("tokens", 4000),
-        keep=("messages", 20),
-    ),
+    # SummarizationMiddleware(
+    #     model=get_llm(model=VoyageModel.DASHCOPE_QWEN_PLUS_1220),
+    #     trigger=("tokens", 4000),
+    #     keep=("messages", 20),
+    # ),
     # ---------- 模型韧性：先同模型重试，再降级 ----------
     ModelRetryMiddleware(
         max_retries=3,
@@ -69,7 +69,7 @@ CUSTOM_MIDDLEWARE = [
         # exit_behavior="continue",  # 默认：超限工具被拦截，其它逻辑可继续
     ),
     # ---------- 待办（旅行规划需要时可保留，纯闲聊可去掉）----------
-    TodoListMiddleware(),
+    # TodoListMiddleware(),
     # ---------- 工具：先重试，耗尽后再交给错误处理 ----------
     ToolRetryMiddleware(
         max_retries=3,
@@ -79,10 +79,10 @@ CUSTOM_MIDDLEWARE = [
     ),
     ToolErrorMiddleware(on_error=on_tool_error),
     # ---------- 输出侧 PII ----------
-    PIIMiddleware(
-        "ip",
-        strategy="redact",
-        apply_to_input=True,
-        apply_to_output=True,
-    ),
+    # PIIMiddleware(
+    #     "ip",
+    #     strategy="redact",
+    #     apply_to_input=True,
+    #     apply_to_output=True,
+    # ),
 ]
