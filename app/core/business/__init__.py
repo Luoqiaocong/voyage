@@ -7,7 +7,7 @@ from .exception import (
     SessionException,
     AgentException,
 )
-from .util import success_response
+from .util import success_response, register_exception
 
 __all__ = [
     "BusinessCode",
@@ -17,4 +17,5 @@ __all__ = [
     "SessionException",
     "AgentException",
     "success_response",
+    "register_exception",
 ]

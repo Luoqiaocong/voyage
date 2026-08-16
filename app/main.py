@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
+from fastapi.responses import RedirectResponse
 from langgraph.checkpoint.memory import InMemorySaver
 from fastapi import FastAPI
 from app.core.ai import AgentFactory
+from app.core.business import register_exception
 from app.modules.auth.router import router as auth_router
 from app.modules.conversation.router import router as conversation_router
 from app.modules.itineraries.router import router as itineraries_router
@@ -33,6 +35,8 @@ app.include_router(conversation_router,prefix=API_V1_STR)
 app.include_router(itineraries_router,prefix=API_V1_STR)
 app.include_router(knowledge_router,prefix=API_V1_STR)
 
+
+register_exception(app)
 @app.get("/")
-async def root():
-    return {"message": "Hello World"}
+def read_root():
+    return RedirectResponse(url="/docs")

@@ -57,8 +57,6 @@ class ConversationRouter:
         return ConversationResponse()
 
     """
-    # TODO:
-    后续还有工具调用的流式返回
     """
 
     @router.post(
