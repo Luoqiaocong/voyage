@@ -3,6 +3,10 @@ from pathlib import Path
 
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
+"""
+这里其实都是AI的配置，并非项目配置（即所有模块可共享的部分），后续考虑移植到app.core.ai下
+"""
+
 
 class VoyageConfig(BaseSettings):
     DASHSCOPE_API_KEY: str
