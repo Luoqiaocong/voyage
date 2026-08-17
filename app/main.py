@@ -4,7 +4,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from fastapi import FastAPI
 from app.core.ai import AgentFactory
 from app.core.business import register_exception
-from app.modules.auth.router import router as auth_router
+from app.modules.user.router import router as auth_router
 from app.modules.conversation.router import router as conversation_router
 from app.modules.itineraries.router import router as itineraries_router
 from app.modules.knowledge.router import router as knowledge_router
