@@ -9,7 +9,7 @@ import sys, os
 # 把【项目根目录】加进 sys.path，这样下面 import app.xxx 才找得到包。
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))   # 让项目根可 import / 将当前文件所在目录的父目录，临时添加到 Python 的模块搜索路径（sys.path）的最前面
 
-from app.shared.db.base import Base
+from app.shared.db import Base
 import app.shared.db.models   # 必须有，才会把模型注册进 Base.metadata
 # 关键：必须 import 到 models.py，否则 SQLAlchemy 不知道你有 User/Conversation 表，
 #       autogenerate 时也就没法帮你生成建表脚本。
