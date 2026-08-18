@@ -1,11 +1,15 @@
-from pydantic import BaseModel
+from typing import Annotated
+
+from pydantic import BaseModel, EmailStr, Field
 
 
-class AuthRequest(BaseModel):
-    username: str
-    password: str
+class UserRequest(BaseModel):
+    email: Annotated[EmailStr, Field(description="邮箱地址")]
+    password: Annotated[str, Field(description="密码", min_length=8)]
 
 
-class AuthResponse(BaseModel):
-    token: str
-    user_id: int
+class RegisterUserRequest(UserRequest):
+    username: Annotated[str, Field(description="昵称", min_length=2, max_length=10)]
+    
+class LoginUserRequest(UserRequest):
+    pass
