@@ -3,7 +3,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
-from app.shared.utils import get_id
+from .util import get_id
 
 
 class ConversationResponse(BaseModel):
