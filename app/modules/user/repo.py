@@ -5,7 +5,7 @@ from fastapi import Depends
 from pydantic import EmailStr
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from .util import PasswordManager
+from .auth import PasswordManager
 from app.shared.db import get_db
 from app.shared.db.models import User
 
@@ -49,7 +49,7 @@ class UserRepo:
         stmt = select(User).where(User.email == email)
         result = await self.db.execute(stmt)
         user = result.scalar_one_or_none()
-        return user if user is not None else None
+        return user if user else None
 
     async def set_token(self, user_id: int, token: str):
         # 无论之前是否有token，都换成新token
