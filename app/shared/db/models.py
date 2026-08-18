@@ -24,7 +24,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True, comment="用户邮箱")
     
     username: Mapped[str] = mapped_column(
-            String(64), unique=True, index=True, nullable=False
+            String(64), index=True, nullable=False
         )
     
     password: Mapped[str] = mapped_column(String(255), nullable=False)
