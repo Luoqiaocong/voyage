@@ -8,7 +8,7 @@ from pydantic import EmailStr
 from app.core.business.code import BusinessCode
 from app.core.business.exception import UserException
 from app.shared.utils import TransactionMixin
-from .util import PasswordManager
+from .auth import PasswordManager, create_access_token, create_refresh_token, get_hashed_id
 from app.shared.db.models import User
 from app.shared.db import get_db
 
@@ -16,6 +16,9 @@ from .repo import UserRepo
 
 
 class UserService(TransactionMixin):
+    
+    _business_exception_type = UserException  # 注册为用户异常
+    
     def __init__(
         self,repo: Annotated[UserRepo, Depends()],
         db: Annotated[AsyncSession, Depends(get_db)]  # 掌握事务主动权
@@ -39,4 +42,17 @@ class UserService(TransactionMixin):
     
     async def to_login(self, email:EmailStr, pwd:str):
         
-        return self.repo.login(email)
+        user = await self.repo.login(email)
+        
+        if user is None or not PasswordManager.verify(pwd, user.password):
+            raise UserException(code=BusinessCode.USER_LOGIN_FAILED)
+        
+        access_token = create_access_token({"sub": get_hashed_id(user.id)})
+
+        refresh_token = create_refresh_token()
+        
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer"
+        }
