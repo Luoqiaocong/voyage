@@ -10,7 +10,7 @@ from app.modules.itineraries.router import router as itineraries_router
 from app.modules.knowledge.router import router as knowledge_router
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pathlib import Path
-
+from fastapi.middleware.cors import CORSMiddleware
 
 API_V1_STR = "/api/v1"
 SQLITE_PATH = Path(__file__).resolve().parent.parent / "data" / "exports" / "checkpoints.sqlite"
@@ -35,6 +35,14 @@ app.include_router(conversation_router,prefix=API_V1_STR)
 app.include_router(itineraries_router,prefix=API_V1_STR)
 app.include_router(knowledge_router,prefix=API_V1_STR)
 
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 开发环境允许所有来源
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 register_exception(app)
 @app.get("/")
