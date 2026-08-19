@@ -29,9 +29,9 @@ class UserException(BaseBusinessException):
         super().__init__(code=code, msg=msg, data=data)
 
 
-class SessionException(BaseBusinessException):
+class ConversationException(BaseBusinessException):
     """会话与对话记忆模块异常"""
-    def __init__(self, code: BusinessCode = BusinessCode.SESSION_NOT_FOUND, msg: str | None = None, data: Any = None):
+    def __init__(self, code: BusinessCode = BusinessCode.CONVERSATION_NOT_FOUND, msg: str | None = None, data: Any = None):
         super().__init__(code=code, msg=msg, data=data)
 
 

@@ -3,7 +3,7 @@ from langchain_core.messages import AIMessageChunk, convert_to_openai_messages
 from langchain_core.runnables import RunnableConfig
 
 from app.core.ai import AgentFactory
-from app.core.business import BusinessCode, SessionException
+from app.core.business import BusinessCode, ConversationException
 
 
 def _thread_config(conversation_id: str) -> RunnableConfig:
@@ -65,7 +65,7 @@ class ConversationGateway:
         try:
             await checkpointer.adelete_thread(conversation_id)
         except Exception as exc:  # 底层删除失败统一映射为业务异常
-            raise SessionException(
-                BusinessCode.SESSION_DELETE_FAILED,
+            raise ConversationException(
+                BusinessCode.CONVERSATION_DELETE_FAILED,
                 msg=f"删除对话失败：{exc}",
             ) from exc

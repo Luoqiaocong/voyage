@@ -56,11 +56,11 @@ class BusinessCode(Enum):
     USER_PWD_SAME = (20011, "新密码不能与当前密码相同")
 
     # ========== 会话与记忆模块 (3xxxx) ==========
-    SESSION_NOT_FOUND = (30001, "会话不存在或已过期，请重新创建")
-    SESSION_CREATE_FAILED = (30002, "创建会话失败")
-    SESSION_UPDATE_FAILED = (30003, "更新会话状态失败")
-    SESSION_DELETE_FAILED = (30004, "删除会话失败")
-    SESSION_PERMISSION_DENIED = (30005, "无权访问此会话")
+    CONVERSATION_NOT_FOUND = (30001, "会话不存在或已过期")
+    CONVERSATION_CREATE_FAILED = (30002, "创建会话失败")
+    CONVERSATION_UPDATE_FAILED = (30003, "更新会话状态失败")
+    CONVERSATION_DELETE_FAILED = (30004, "删除会话失败")
+    CONVERSATION_PERMISSION_DENIED = (30005, "无权访问此会话")
     MEMORY_READ_FAILED = (30006, "读取对话短期记忆失败")
     MEMORY_CLEAR_FAILED = (30007, "清空会话记忆失败")
 

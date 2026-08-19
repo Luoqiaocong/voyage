@@ -4,7 +4,7 @@ from .exception import (
     AgentException,
     AuthException,
     BaseBusinessException,
-    SessionException,
+    ConversationException,
     UserException,
 )
 from .util import register_exception, success_response
@@ -14,7 +14,7 @@ __all__ = [
     "AuthException",
     "BaseBusinessException",
     "BusinessCode",
-    "SessionException",
+    "ConversationException",
     "UserException",
     "register_exception",
     "success_response",
