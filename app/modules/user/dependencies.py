@@ -3,7 +3,6 @@ from typing import Annotated
 from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
 from jose import ExpiredSignatureError, JWTError, jwt
-\
 from app.config import config
 from app.core.business.code import BusinessCode
 from app.core.business.exception import UserException
