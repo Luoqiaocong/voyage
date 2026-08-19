@@ -1,29 +1,23 @@
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 from .util import get_id
 
 
 class ConversationResponse(BaseModel):
-    conversation_id: str = Field(
-        description="对话ID",
-        default_factory=get_id,
-        pattern=r"^[a-zA-Z0-9]{12}$",
-    )
-    created_at: datetime = Field(description="创建时间", default_factory=datetime.now)
-
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "conversation_id": "123456",
-                    "created_at": "2026-09-01T12:34:56.789Z",
-                }
-            ]
-        }
-    }
+    """会话响应"""
+    id: str = Field(description="会话ID", pattern=r"^[a-zA-Z0-9]{12}$")
+    title: str | None = Field(description="会话标题")
+    created_at: datetime = Field(description="创建时间（UTC）")
+    
+    # ✅ 返回时格式化时间（可选）
+    @field_serializer('created_at')
+    def serialize_datetime(self, dt: datetime) -> str:
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    
+    model_config = {"from_attributes": True}
 
 
 class ConversationMessageRequest(BaseModel):

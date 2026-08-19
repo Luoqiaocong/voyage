@@ -1,14 +1,13 @@
 import json
 from collections.abc import AsyncIterable
 from typing import Annotated
-
 from fastapi import APIRouter, Depends, Path
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi_utils.cbv import cbv
 from starlette import status
-
 from app.core.route import UnifiedRoute
-
+from app.modules.user.dependencies import get_current_user
+from app.shared.db.models import User
 from .schemas import (
     ConversationMessageRequest,
     ConversationResponse,
@@ -23,7 +22,7 @@ router = APIRouter(
 @cbv(router)
 class ConversationRouter:
     service: ConversationService = Depends()
-
+    current_user: User = Depends(get_current_user)
     # ===================== TODO / 已知限制 =====================
     # 1. 鉴权与归属：目前无用户模块，所有 /{id} 端点只校验 id 格式(12位)，
     #    不校验“会话是否创建过/是否属于当前用户”。将来绑定 user_id 后需补：
@@ -65,7 +64,8 @@ class ConversationRouter:
         summary="创建对话",
     )
     async def create_conversation(self):
-        return ConversationResponse()
+        conversation =  await self.service.create_conversations(self.current_user.id)
+        return ConversationResponse.model_validate(conversation)
 
     @router.post(
         "/{id}/messages",
