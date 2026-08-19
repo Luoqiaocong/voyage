@@ -16,6 +16,17 @@ class ConversationGateway:
     def __init__(self):
         pass
 
+    # -------------------- 1. 查询历史消息 --------------------
+    async def get_messages(self, conversation_id: str):
+        agent = AgentFactory.get_agent()
+        config = _thread_config(conversation_id)
+
+        state = await agent.aget_state(config)
+        if not state.values:
+            return []
+        return convert_to_openai_messages(state.values["messages"])
+
+    # -------------------- 2. 流式发送消息 --------------------
     async def stream_message(self, message: str, conversation_id: str):
         agent = AgentFactory.get_agent()
         config = _thread_config(conversation_id)
@@ -51,15 +62,7 @@ class ConversationGateway:
                 if chunk.content and isinstance(chunk.content, str):
                     yield {"type": "text", "content": chunk.content}
 
-    async def get_messages(self, conversation_id: str):
-        agent = AgentFactory.get_agent()
-        config = _thread_config(conversation_id)
-
-        state = await agent.aget_state(config)
-        if not state.values:
-            return []
-        return convert_to_openai_messages(state.values["messages"])
-
+    # -------------------- 3. 删除会话 --------------------
     async def delete_conversation_thread(self, conversation_id: str):
         checkpointer = AgentFactory.get_checkpointer()
         try:
