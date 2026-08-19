@@ -52,10 +52,12 @@ class ConversationService(TransactionMixin):
         return await self.gateway.get_messages(conversation_id, **kwargs)
 
     async def delete_conversation(self, conversation_id: str):
+        """先删除内存会话再删除数据库会话数据"""
+        await self.gateway.delete_conversation_thread(conversation_id)
         async with self.transaction_scope():
             await self.repo.remove(conversation_id)
-        return await self.gateway.delete_conversation_thread(conversation_id)
-    
+            
+            
     async def create_conversations(self,user_id:int):
         conversation_id = get_id()
         async with self.transaction_scope():

@@ -64,8 +64,9 @@ class ConversationGateway:
         checkpointer = AgentFactory.get_checkpointer()
         try:
             await checkpointer.adelete_thread(conversation_id)
+            """后续要记录日志为什么删除失败"""
         except Exception as exc:  # 底层删除失败统一映射为业务异常
             raise ConversationException(
                 BusinessCode.CONVERSATION_DELETE_FAILED,
-                msg=f"删除对话失败：{exc}",
+                msg=f"删除对话失败",
             ) from exc
