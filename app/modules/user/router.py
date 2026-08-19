@@ -12,6 +12,14 @@ from .dependencies import get_current_user
 router = APIRouter(prefix="/user", tags=["user"], route_class=UnifiedRoute)
 
 
+# TODO: 
+# 1.用户注销
+# 2.用户密码更改
+# 3.用户密码强校验（测试阶段不做，否则接口不好调试）
+# 4.用户信息更改考虑（头像就固定那么几个吧，不要用户上传了；username可更改）
+# 5.refresh token的真正实现（需引入redis，稍复杂，后续整个项目功能差不多了再做）
+
+
 @cbv(router)
 class UserRouter:
     service: UserService = Depends()

@@ -5,7 +5,7 @@ from enum import Enum
 - 20000: 成功
 - 1xxxx: 通用与鉴权错误
 - 2xxxx: 用户模块
-- 3xxxx: 会话与记忆模块 (Session & Memory)
+- 3xxxx: 会话与记忆模块 (Conversation & Memory)
 - 4xxxx: AI Agent & 大模型模块 (LLM & Agent Execution)
 - 5xxxx: 知识库与 RAG 模块 (Knowledge & Vector DB)
 - 6xxxx: 行程规划模块 (Itinerary & Travel Plan)

@@ -71,5 +71,5 @@ class ConversationGateway:
         except Exception as exc:  # 底层删除失败统一映射为业务异常
             raise ConversationException(
                 BusinessCode.CONVERSATION_DELETE_FAILED,
-                msg=f"删除对话失败",
+                msg="删除对话失败",
             ) from exc

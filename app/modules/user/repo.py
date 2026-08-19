@@ -40,7 +40,7 @@ class UserRepo:
 
         return None
 
-    # -------------------- 2. 创建用户 --------------------
+    # -------------------- 2. 注册用户  --------------------
     async def create(self, email: EmailStr, pwd: str, username: str):
         user = User(email=email, password=pwd, username=username)
         self.db.add(user)
@@ -53,40 +53,40 @@ class UserRepo:
         user = result.scalar_one_or_none()
         return user if user else None
 
-    # -------------------- 4. 设置 Token --------------------
-    async def set_token(self, user_id: int, token: str):
-        # 无论之前是否有token，都换成新token
-        query = update(User).where(User.id == user_id).values(token=token)
-        await self.db.execute(query)
-        await self.db.flush()
+    # # -------------------- 4. 设置 Token --------------------
+    # async def set_token(self, user_id: int, token: str):
+    #     # 无论之前是否有token，都换成新token
+    #     query = update(User).where(User.id == user_id).values(token=token)
+    #     await self.db.execute(query)
+    #     await self.db.flush()
 
     # -------------------- 5. 更新用户信息 --------------------
-    async def update(self, email: str, user_update_data: dict[str, Any]) -> User | None:
-        """更新用户信息并返回更新后的用户对象"""
-        # 1. 查询用户是否存在
-        user = await self.get_user_dynamic(email=email)
-        if not user:
-            return None
+    # async def update(self, email: str, user_update_data: dict[str, Any]) -> User | None:
+    #     """更新用户信息并返回更新后的用户对象"""
+    #     # 1. 查询用户是否存在
+    #     user = await self.get_user_dynamic(email=email)
+    #     if not user:
+    #         return None
 
-        # 2. 更新字段（ORM 方式，避免使用 Update 语句）
-        for key, value in user_update_data.items():
-            if hasattr(user, key):
-                setattr(user, key, value)
+    #     # 2. 更新字段（ORM 方式，避免使用 Update 语句）
+    #     for key, value in user_update_data.items():
+    #         if hasattr(user, key):
+    #             setattr(user, key, value)
 
-        # 3. flush 让 SQLAlchemy 同步到数据库（但不提交，由 Service 层控制事务）
-        await self.db.flush()
+    #     # 3. flush 让 SQLAlchemy 同步到数据库（但不提交，由 Service 层控制事务）
+    #     await self.db.flush()
 
-        # 4. 返回更新后的用户对象（此时 user 已经是最新状态）
-        return user
+    #     # 4. 返回更新后的用户对象（此时 user 已经是最新状态）
+    #     return user
 
-    # -------------------- 6. 修改密码 --------------------
-    async def change_password(self, new_pwd: str, user: User):
-        user.password = PasswordManager.hash(new_pwd)
-        await self.db.flush()
+    # # -------------------- 6. 修改密码 --------------------
+    # async def change_password(self, new_pwd: str, user: User):
+    #     user.password = PasswordManager.hash(new_pwd)
+    #     await self.db.flush()
 
-    # -------------------- 7. 删除用户 --------------------
-    async def delete_user(self, user_email: str):
-        stmt = delete(User).where(User.email == user_email)
-        row = await self.db.execute(stmt)
-        await self.db.flush()
-        return row.rowcount > 0  # type: ignore
+    # # -------------------- 7. 删除用户 --------------------
+    # async def delete_user(self, user_email: str):
+    #     stmt = delete(User).where(User.email == user_email)
+    #     row = await self.db.execute(stmt)
+    #     await self.db.flush()
+    #     return row.rowcount > 0  # type: ignore

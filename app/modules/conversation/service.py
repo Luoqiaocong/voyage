@@ -59,7 +59,7 @@ class ConversationService(TransactionMixin):
 
     # -------------------- 5. 删除 --------------------
     async def delete_conversation(self, conversation_id: str):
-        # 先删除内存会话再删除数据库会话数据
+        # 先删除内存会话再删除数据库会话数据,还是要事务处理，如果某一个环节崩了会有残留
         await self.gateway.delete_conversation_thread(conversation_id)
         async with self.transaction_scope():
             await self.repo.remove(conversation_id)
