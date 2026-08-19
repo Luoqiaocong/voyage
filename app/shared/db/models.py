@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 # ── ORM 语法基础（建议记牢）────────────────────────────────────
 # Mapped[str]      : 类型标注，配合下方 mapped_column 声明列的类型
@@ -7,9 +6,8 @@ from typing import Optional
 # ForeignKey       : 外键，建立表关联（如 conversations.user_id → users.id）
 # relationship     : ORM 层的“对象关系”，用于 Python 侧便捷访问关联数据
 #                    （它只影响 ORM 对象访问，不影响数据库表结构本身）
-# func.now()       : 调用数据库当前时间，作 server_default 默认值
 # ────────────────────────────────────────────────────────────────
-from sqlalchemy import DateTime, ForeignKey, Index, String, func
+from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -39,7 +37,10 @@ class User(Base):
     # back_populates: 关联到 Conversation.user，二者互为反向
     # cascade       : 删用户时级联删其会话(all, delete-orphan)
     created_at: Mapped[datetime] = mapped_column(
-            DateTime, server_default=func.now(), nullable=False
+        DateTime,
+            default=datetime.now(),
+            nullable=False,
+            comment="创建时间（北京时间）",
         )
    
     conversations: Mapped[list["Conversation"]] = relationship(
@@ -67,7 +68,10 @@ class Conversation(Base):
     title: Mapped[str | None] = mapped_column(String(255), nullable=True,comment="会话标题")
     # str | None + nullable=True：该列允许 NULL（会话标题可空）
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False,comment="会话创建时间"
+        DateTime,
+        default=datetime.now(),
+        nullable=False,
+        comment="会话创建时间（北京时间）",
     )
 
     user: Mapped[User] = relationship(back_populates="conversations")
