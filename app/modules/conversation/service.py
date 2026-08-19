@@ -2,7 +2,11 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import Depends
+from sqlalchemy import select
 
+from app.core.business.code import BusinessCode
+from app.core.business.exception import ConversationException
+from app.shared.db.models import Conversation
 from app.shared.db.session import get_db
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +35,14 @@ class ConversationService(TransactionMixin):
         self.gateway = gateway
         self.repo = repo
         self.db = db
+     
+    async def check_authorization(self,*,user_id:int,conversation_id:str):
+        conv = await self.repo.check(conversation_id)
+        if not conv:
+            raise ConversationException(code=BusinessCode.CONVERSATION_NOT_FOUND)
+        if user_id != conv.user_id:
+            raise ConversationException(code=BusinessCode.CONVERSATION_PERMISSION_DENIED)
+        
 
     async def send_message(self, message: str, conversation_id: str):
         async for chunk in self.gateway.stream_message(message, conversation_id):
@@ -40,6 +52,8 @@ class ConversationService(TransactionMixin):
         return await self.gateway.get_messages(conversation_id, **kwargs)
 
     async def delete_conversation(self, conversation_id: str):
+        async with self.transaction_scope():
+            await self.repo.remove(conversation_id)
         return await self.gateway.delete_conversation_thread(conversation_id)
     
     async def create_conversations(self,user_id:int):
