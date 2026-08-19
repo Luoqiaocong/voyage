@@ -16,8 +16,6 @@ API_V1_STR = "/api/v1"
 SQLITE_PATH = Path(__file__).resolve().parent.parent / "data" / "exports" / "checkpoints.sqlite"
 
 
-app = FastAPI()
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with AsyncSqliteSaver.from_conn_string(str(SQLITE_PATH)) as checkpointer:
