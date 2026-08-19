@@ -11,6 +11,7 @@ from app.shared.db.models import User
 from .schemas import (
     ConversationMessageRequest,
     ConversationResponse,
+    UserConversationsResponse
 )
 from .service import ConversationService
 
@@ -72,6 +73,16 @@ class ConversationRouter:
     async def create_conversation(self):
         conversation =  await self.service.create_conversations(self.current_user.id)
         return ConversationResponse.model_validate(conversation)
+    
+    @router.get(
+        "/",
+        status_code=status.HTTP_200_OK,
+        # response_model=ConversationResponse,
+        summary="获取对话列表",
+    )
+    async def get_conversations(self):
+        conversations = await self.service.get_conversations(self.current_user.id)
+        return UserConversationsResponse(conversations=[ConversationResponse.model_validate(i) for i in conversations])
     
 
     @router.post(

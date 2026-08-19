@@ -61,3 +61,5 @@ class ConversationService(TransactionMixin):
         async with self.transaction_scope():
             return await self.repo.create(user_id=user_id,id=conversation_id, title=f"会话 {datetime.now().strftime('%Y-%m-%d %H:%M')}")
         
+    async def get_conversations(self,user_id:int):
+        return await self.repo.get(user_id)

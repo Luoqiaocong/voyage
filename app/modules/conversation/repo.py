@@ -18,6 +18,12 @@ class ConversationRepo:
         await self.db.flush()
         return conversation
     
+    async def get(self,user_id:int):
+        stmt = select(Conversation).where(Conversation.user_id == user_id)
+        result  =await self.db.execute(stmt)
+        return result.scalars().all()
+        
+    
     async def check(self,conversation_id:str):
         stmt = select(Conversation).where(Conversation.id == conversation_id)
         result  = await self.db.execute(stmt)

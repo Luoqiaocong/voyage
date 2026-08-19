@@ -35,3 +35,6 @@ class ConversationMessageRequest(BaseModel):
             ]
         }
     }
+
+class UserConversationsResponse(BaseModel):
+    conversations: list[ConversationResponse]
