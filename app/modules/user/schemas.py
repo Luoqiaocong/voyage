@@ -1,7 +1,5 @@
 from typing import Annotated
-
-from pydantic import BaseModel, EmailStr, Field, HttpUrl, field_serializer
-
+from pydantic import BaseModel, EmailStr, Field, field_serializer
 from .auth import get_hashed_id
 
 
@@ -9,11 +7,11 @@ class UserIdentity(BaseModel):
     id: Annotated[int, Field(description="用户ID")]
     email: Annotated[EmailStr, Field(description="邮箱地址")]
 
-class UserRequest(BaseModel):
+class UserBaseRequest(BaseModel):
     email: Annotated[EmailStr, Field(description="邮箱地址")]
     password: Annotated[str, Field(description="用户密码", min_length=8)] 
 
-class RegisterUserRequest(UserRequest):
+class RegisterUserRequest(UserBaseRequest):
     username: Annotated[str, Field(description="用户昵称", min_length=2, max_length=10)]
     
     model_config = {
@@ -28,7 +26,7 @@ class RegisterUserRequest(UserRequest):
                 }
             }
     
-class LoginUserRequest(UserRequest):
+class LoginUserRequest(UserBaseRequest):
     model_config = {
                 "json_schema_extra": {
                     "examples": [
@@ -46,13 +44,24 @@ class UserChangePassWordRequest(BaseModel):
 
 class UserProfileBase(BaseModel):
     username: Annotated[str | None, Field(description="昵称", max_length=10)] = None
-    avatar: Annotated[HttpUrl, Field(description="头像链接")]
-
+    avatar: Annotated[str | None, Field(description="头像文件名（如 photographer.png）")] = None
 
 class UserInfo(UserIdentity, UserProfileBase):
 
     @field_serializer('id')
-    def serialize_id(self, id: int, _info):
+    def serialize_id(self, id: int):
         return get_hashed_id(id)
 
     model_config = {"from_attributes": True}
+    
+class UserProfileUpdate(UserProfileBase):
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "username": "admin",
+                    "avatar": "photographer.png"
+                }
+            ]
+        }
+    }

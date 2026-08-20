@@ -29,8 +29,8 @@ class User(Base):
     
     avatar: Mapped[str] = mapped_column(
         String(255),
-        default="https://img.heiseven.top/file/avatar/oA0kQtm9.jpeg",
-        comment="头像URL"
+        default="photographer.png",
+        comment="头像文件名（不含域名，如 photographer.png）"
     )
 
     # relationship : 让 Python 侧能用 user.conversations 拿到该用户的所有会话
