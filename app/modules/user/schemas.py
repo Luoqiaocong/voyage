@@ -28,7 +28,6 @@ class RegisterUserRequest(UserRequest):
                 }
             }
     
-    
 class LoginUserRequest(UserRequest):
     model_config = {
                 "json_schema_extra": {
@@ -41,7 +40,9 @@ class LoginUserRequest(UserRequest):
                 }
             }
 
-
+class UserChangePassWordRequest(BaseModel):
+    current_password: Annotated[str, Field(description="当前密码", min_length=8)]
+    new_password: Annotated[str, Field(description="新密码", min_length=8)]
 
 class UserProfileBase(BaseModel):
     username: Annotated[str | None, Field(description="昵称", max_length=10)] = None

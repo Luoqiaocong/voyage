@@ -47,11 +47,11 @@ class UserRepo:
         await self.db.flush()
 
     # -------------------- 3. 登录查询 --------------------
-    async def login(self, email: EmailStr) -> User | None:
-        stmt = select(User).where(User.email == email)
-        result = await self.db.execute(stmt)
-        user = result.scalar_one_or_none()
-        return user if user else None
+    # async def login(self, email: EmailStr) -> User | None:
+    #     stmt = select(User).where(User.email == email)
+    #     result = await self.db.execute(stmt)
+    #     user = result.scalar_one_or_none()
+    #     return user if user else None
 
     # # -------------------- 4. 设置 Token --------------------
     # async def set_token(self, user_id: int, token: str):
@@ -79,10 +79,10 @@ class UserRepo:
     #     # 4. 返回更新后的用户对象（此时 user 已经是最新状态）
     #     return user
 
-    # # -------------------- 6. 修改密码 --------------------
-    # async def change_password(self, new_pwd: str, user: User):
-    #     user.password = PasswordManager.hash(new_pwd)
-    #     await self.db.flush()
+    # -------------------- 6. 修改密码 --------------------
+    async def change(self, new_pwd_hash: str, user: User):
+        user.password = new_pwd_hash
+        await self.db.flush()
 
     # # -------------------- 7. 删除用户 --------------------
     # async def delete_user(self, user_email: str):

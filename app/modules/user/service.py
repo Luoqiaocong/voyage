@@ -43,7 +43,7 @@ class UserService(TransactionMixin):
 
     # -------------------- 2. 登录 --------------------
     async def to_login(self, email: EmailStr, pwd: str):
-        user = await self.repo.login(email)
+        user = await self.repo.get_user_dynamic(email=email)
 
         if user is None or not PasswordManager.verify(pwd, user.password):
             raise UserException(code=BusinessCode.USER_LOGIN_FAILED)
@@ -56,3 +56,11 @@ class UserService(TransactionMixin):
             "refresh_token": refresh_token,
             "token_type": "bearer",
         }
+
+    async def to_change_pwd(self, user_id: int, current_pwd: str, new_pwd: str):
+        user = await self._get_user(user_id=user_id)
+        if not PasswordManager.verify(current_pwd, user.password):
+            raise UserException(code=BusinessCode.USER_PWD_AUTH_FAILED)
+        new_pwd_hash  = PasswordManager.hash(new_pwd)
+        async with self.transaction_scope():
+            await self.repo.change(new_pwd_hash,user)
