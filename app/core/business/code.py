@@ -54,6 +54,7 @@ class BusinessCode(Enum):
     USER_PWD_AUTH_FAILED = (20007, "密码验证失败")
     USER_PWD_WEAK = (20010, "密码强度不足")
     USER_PWD_SAME = (20011, "新密码不能与当前密码相同")
+    USER_AVATAR_INVALID = (20012, "头像暂且不支持")
 
     # ========== 会话与记忆模块 (3xxxx) ==========
     CONVERSATION_NOT_FOUND = (30001, "会话不存在或已过期")
