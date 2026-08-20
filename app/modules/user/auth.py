@@ -12,19 +12,9 @@ from app.config import config
 from app.core.business.code import BusinessCode
 from app.core.business.exception import UserException
 
-OPTIONAL_AVATARS = [
-    "adventure_plaid.png",
-    "mountain_bucket.png",
-    "photographer.png",
-    "navigator_beanie.png",
-    "world_explorer.png",
-    "nature_botanist.png",
-]
-
-AVATAR_BASE_URL = "https://yunimg.heiseven.top/voyage-avatar/"
-
 
 class PasswordManager:
+    """密码管理器"""
     _ph = PasswordHasher()
 
     @classmethod
@@ -40,6 +30,7 @@ class PasswordManager:
 
 
 def validate_password_strength(password: str):
+    """检查密码强度"""
     if len(password) < 8:
         raise UserException(code=BusinessCode.USER_PWD_WEAK)
     if not re.search(r'[a-z]', password):
@@ -91,11 +82,11 @@ hashids = Hashids(salt=config.HASH_SALT, min_length=12)
 
 
 def get_hashed_id(real_id: int) -> str:
+    """将真实ID转换为哈希ID"""
     return hashids.encode(real_id)
 
 
-def get_real_id(hashed_id: str) -> int:
+def get_real_id(hashed_id: str) -> int | None:
+    """从哈希ID还原真实ID，失败返回 None"""
     decoded = hashids.decode(hashed_id)
-    if not decoded:
-        raise UserException(code=BusinessCode.USER_ACCOUNT_DISABLED, msg="登录异常，请重新登录")
-    return decoded[0]
+    return decoded[0] if decoded else None

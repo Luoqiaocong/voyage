@@ -20,8 +20,9 @@ class BusinessCode(Enum):
 
     # ========== 通用成功状态 ==========
     SUCCESS = (20000, "success")
-    CREATED = (20100, "success")
-    NO_CONTENT = (20400, "success")
+    CREATED = (20100, "created")
+    NO_CONTENT = (20400, "no content")
+    UPDATED = (20001, "updated")
 
     # ========== 通用错误 (1xxxx) ==========
     PARAM_ERROR = (10001, "参数错误")
@@ -36,6 +37,7 @@ class BusinessCode(Enum):
     TOKEN_INVALID = (10103, "无效的令牌")
     FORBIDDEN = (10104, "禁止访问")
     PERMISSION_DENIED = (10105, "权限不足")
+    TOKEN_DECODE_FAILED = (10106, "令牌解码失败")
 
     NOT_FOUND = (10201, "资源不存在")
     RESOURCE_EXISTS = (10202, "资源已存在")

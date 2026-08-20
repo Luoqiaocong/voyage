@@ -10,6 +10,10 @@ class UserIdentity(BaseModel):
 class UserBaseRequest(BaseModel):
     email: Annotated[EmailStr, Field(description="邮箱地址")]
     password: Annotated[str, Field(description="用户密码", min_length=8)] 
+    
+class UserProfileBase(BaseModel):
+    username: Annotated[str | None, Field(description="昵称", max_length=10)] = None
+    avatar: Annotated[str | None, Field(description="头像文件名（如 photographer.png）")] = None
 
 class RegisterUserRequest(UserBaseRequest):
     username: Annotated[str, Field(description="用户昵称", min_length=2, max_length=10)]
@@ -27,6 +31,7 @@ class RegisterUserRequest(UserBaseRequest):
             }
     
 class LoginUserRequest(UserBaseRequest):
+    
     model_config = {
                 "json_schema_extra": {
                     "examples": [
@@ -38,13 +43,22 @@ class LoginUserRequest(UserBaseRequest):
                 }
             }
 
-class UserChangePassWordRequest(BaseModel):
+class UserChangePasswordRequest(BaseModel):
     current_password: Annotated[str, Field(description="当前密码", min_length=8)]
     new_password: Annotated[str, Field(description="新密码", min_length=8)]
+    
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "current_password": "1234567890",
+                    "new_password": "1234567890abc"
+                }
+            ]
+        }
+    }
 
-class UserProfileBase(BaseModel):
-    username: Annotated[str | None, Field(description="昵称", max_length=10)] = None
-    avatar: Annotated[str | None, Field(description="头像文件名（如 photographer.png）")] = None
+
 
 class UserInfo(UserIdentity, UserProfileBase):
 
@@ -58,10 +72,9 @@ class UserProfileUpdate(UserProfileBase):
     model_config = {
         "json_schema_extra": {
             "examples": [
-                {
-                    "username": "admin",
-                    "avatar": "photographer.png"
-                }
+                {"username": "new username"},
+                {"avatar": "photographer.png"},
+                {"username": "new username", "avatar": "photographer.png"},
             ]
         }
     }

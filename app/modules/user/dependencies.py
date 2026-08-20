@@ -23,8 +23,7 @@ async def _verify_token_logic(token: str, repo: UserRepo) -> User:
     except JWTError:
         raise UserException(code=BusinessCode.TOKEN_INVALID)
 
-    user_id = get_real_id(str(payload.get("sub")))
-    if not user_id:
+    if not (sub := payload.get("sub")) or not (user_id := get_real_id(str(sub))):
         raise UserException(code=BusinessCode.TOKEN_INVALID)
 
     user = await repo.get_user_dynamic(user_id)
@@ -32,7 +31,6 @@ async def _verify_token_logic(token: str, repo: UserRepo) -> User:
         raise UserException(code=BusinessCode.TOKEN_INVALID)
 
     return user
-
 
 async def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)],
