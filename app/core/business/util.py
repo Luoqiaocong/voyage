@@ -97,7 +97,7 @@ def register_exception(app: FastAPI):
         loc = first_err.get("loc") or ()
         field_name = str(loc[-1]) if loc else "unknown"
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,  # 或保持 200，团队统一即可
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,  # 或保持 200，团队统一即可
             content={
                 "code": BusinessCode.PARAM_ERROR.code,
                 "message": "Param Error",
