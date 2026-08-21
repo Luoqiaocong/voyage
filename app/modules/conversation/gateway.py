@@ -1,3 +1,5 @@
+import asyncio
+
 from langchain.messages import HumanMessage, ToolMessage
 from langchain_core.messages import AIMessageChunk, convert_to_openai_messages
 from langchain_core.runnables import RunnableConfig
@@ -12,9 +14,6 @@ def _thread_config(conversation_id: str) -> RunnableConfig:
 
 class ConversationGateway:
     """对话网关：封装与 langgraph Agent 的交互（流式对话、历史读取、线程删除）。"""
-
-    def __init__(self):
-        pass
 
     # -------------------- 1. 查询历史消息 --------------------
     async def get_messages(self, conversation_id: str):
@@ -63,13 +62,21 @@ class ConversationGateway:
                     yield {"type": "text", "content": chunk.content}
 
     # -------------------- 3. 删除会话 --------------------
-    async def delete_conversation_thread(self, conversation_id: str):
+    async def delete_conversation(self, conversation_id: str):
         checkpointer = AgentFactory.get_checkpointer()
         try:
             await checkpointer.adelete_thread(conversation_id)
-            """后续要记录日志为什么删除失败"""
-        except Exception as exc:  # 底层删除失败统一映射为业务异常
+        except Exception as exc:
             raise ConversationException(
                 BusinessCode.CONVERSATION_DELETE_FAILED,
-                msg="删除对话失败",
-            ) from exc
+            ) from exc  # 保留原始异常信息，方便调试
+
+    async def delete_conversation_batch(
+        self,
+        conversation_ids: list[str],
+    ) -> None:
+        if not conversation_ids:
+            return
+        tasks = [self.delete_conversation(conv_id) for conv_id in conversation_ids]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # TODO(日志): 引入日志设施后，遍历 results 记录删除失败的会话
