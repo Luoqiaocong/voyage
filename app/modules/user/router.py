@@ -26,7 +26,7 @@ router = APIRouter(prefix="/user", tags=["user"], route_class=UnifiedRoute)
 # TODO:
 # 1. 用户注销
 # 2. 用户密码更改 ✅ 已实现
-# 3. 用户密码强校验（测试阶段不做，否则接口不好调试）
+# 3. 用户密码强校验（测试阶段不做，否则接口不好调试） ✅ 已实现
 # 4. 用户信息更改考虑（头像固定，用户名可改）✅ 已实现
 # 5. Refresh Token 真正实现（需引入 Redis，稍复杂，后续再做）
 

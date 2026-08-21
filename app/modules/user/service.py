@@ -15,6 +15,7 @@ from .auth import (
     create_access_token,
     create_refresh_token,
     get_hashed_id,
+    validate_password_strength,
 )
 from .repo import UserRepo
 
@@ -56,6 +57,9 @@ class UserService(TransactionMixin):
         if existing_user:
             raise UserException(code=BusinessCode.USER_EXIST)
 
+        # 密码强校验
+        validate_password_strength(pwd)
+
         # 密码哈希处理
         hashed_pwd = PasswordManager.hash(pwd)
 
@@ -90,15 +94,20 @@ class UserService(TransactionMixin):
         new_pwd: str,
     ) -> None:
         """修改用户密码"""
+        # 先做最廉价的纯字符串校验（不碰数据库、不算哈希），不达标直接快速拒绝
+        # 新密码强校验
+        validate_password_strength(new_pwd)
+
+        # 检查新旧密码是否相同
+        if current_pwd == new_pwd:
+            raise UserException(code=BusinessCode.USER_PWD_SAME)
+
+        # 再查库并验证当前密码（相对重的操作放在最后）
         user = await self._get_user(user_id=user_id)
 
         # 验证当前密码
         if not PasswordManager.verify(current_pwd, user.password):
             raise UserException(code=BusinessCode.USER_PWD_AUTH_FAILED)
-
-        # 检查新旧密码是否相同
-        if current_pwd == new_pwd:
-            raise UserException(code=BusinessCode.USER_PWD_SAME)
 
         # 哈希新密码
         new_pwd_hash = PasswordManager.hash(new_pwd)
