@@ -33,17 +33,17 @@ router = APIRouter(prefix="/user", tags=["user"], route_class=UnifiedRoute)
 
 @cbv(router)
 class UserRouter:
-    service: Annotated[UserService, Depends()]
+    service:UserService=Depends()
 
     # ============ 公共资源 ============
     @router.get("/avatars", summary="获取可选头像列表", status_code=status.HTTP_200_OK)
-    async def get_avatars(self) -> dict:
+    async def get_avatars(self):
         """返回固定头像库（无需登录）：base_url + 短名列表，前端拼接展示。"""
         return {"base_url": AVATAR_BASE_URL, "avatars": OPTIONAL_AVATARS}
 
     # ============ 认证相关 ============
     @router.post("/reg", summary="用户注册", status_code=status.HTTP_201_CREATED)
-    async def register(self, userdata: RegisterUserRequest) -> None:
+    async def register(self, userdata: RegisterUserRequest):
         return await self.service.to_register(
             userdata.email,
             userdata.password,
@@ -51,7 +51,7 @@ class UserRouter:
         )
 
     @router.post("/login", summary="用户登录", status_code=status.HTTP_200_OK)
-    async def login(self, userdata: LoginUserRequest) -> dict:
+    async def login(self, userdata: LoginUserRequest):
         return await self.service.to_login(userdata.email, userdata.password)
 
     # ============ 用户信息（需认证） ============
@@ -59,7 +59,7 @@ class UserRouter:
     async def get_info(
         self,
         current_user: Annotated[User, Depends(get_current_user)],
-    ) -> UserInfo:
+    ):
         return UserInfo.model_validate(current_user)
 
     @router.patch("/info", summary="用户信息修改", status_code=status.HTTP_200_OK)
@@ -67,7 +67,7 @@ class UserRouter:
         self,
         update_req: UserProfileUpdate,
         current_user: Annotated[User, Depends(get_current_user)],
-    ) -> JSONResponse:
+    ):
         updated_user_info = UserInfo.model_validate(
             await self.service.to_change_profile(
                 current_user.id,
@@ -84,7 +84,7 @@ class UserRouter:
         self,
         pwd_req: UserChangePasswordRequest,
         current_user: Annotated[User, Depends(get_current_user)],
-    ) -> None:
+    ):
         
         return await self.service.to_change_pwd(
             current_user.id,
