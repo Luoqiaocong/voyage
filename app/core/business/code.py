@@ -2,13 +2,14 @@ from enum import Enum
 
 """
 业务错误码定义规范：
-- 20000: 成功
-- 1xxxx: 通用与鉴权错误
-- 2xxxx: 用户模块
-- 3xxxx: 会话与记忆模块 (Conversation & Memory)
-- 4xxxx: AI Agent & 大模型模块 (LLM & Agent Execution)
-- 5xxxx: 知识库与 RAG 模块 (Knowledge & Vector DB)
-- 6xxxx: 行程规划模块 (Itinerary & Travel Plan)
+- 20000–20400: 成功
+- 10xxx–15xxx: 通用（参数、鉴权、资源、系统）
+- 21xxx: 用户错误
+- 30xxx: 会话与记忆模块 (Conversation & Memory)
+- 40xxx: AI Agent & 大模型模块 (LLM & Agent Execution)
+- 50xxx: 知识库与 RAG 模块 (Knowledge & Vector DB)
+- 60xxx: 行程规划模块 (Itinerary & Travel Plan)
+- 7xxx/8xxx: 暂不开放，等有新业务域再定
 """
 
 
@@ -21,8 +22,9 @@ class BusinessCode(Enum):
     # ========== 通用成功状态 ==========
     SUCCESS = (20000, "success")
     CREATED = (20100, "created")
+    UPDATED = (20200, "updated")
     NO_CONTENT = (20400, "no content")
-    UPDATED = (20001, "updated")
+    
 
     # ========== 通用错误 (1xxxx) ==========
     PARAM_ERROR = (10001, "参数错误")
@@ -47,16 +49,16 @@ class BusinessCode(Enum):
     SERVICE_UNAVAILABLE = (10502, "服务暂时不可用")
     DATABASE_ERROR = (10503, "数据库操作失败")
 
-    # ========== 用户模块 (2xxxx) ==========
-    USER_NOT_FOUND = (20001, "用户不存在")
-    USER_EXIST = (20002, "用户已存在")
-    USER_LOGIN_FAILED = (20003, "用户名或密码错误")
-    USER_ACCOUNT_DISABLED = (20004, "账户已停用")
-    USER_REGISTER_FAILED = (20005, "注册失败，请稍后重试")
-    USER_PWD_AUTH_FAILED = (20007, "密码验证失败")
-    USER_PWD_WEAK = (20010, "密码强度不足")
-    USER_PWD_SAME = (20011, "新密码不能与当前密码相同")
-    USER_AVATAR_INVALID = (20012, "头像暂且不支持")
+    # ========== 用户模块 (21xxx) ==========
+    USER_NOT_FOUND = (21001, "用户不存在")
+    USER_EXIST = (21002, "用户已存在")
+    USER_LOGIN_FAILED = (21003, "用户名或密码错误")
+    USER_ACCOUNT_DISABLED = (21004, "账户已停用")
+    USER_REGISTER_FAILED = (21005, "注册失败，请稍后重试")
+    USER_PWD_AUTH_FAILED = (21007, "密码验证失败")
+    USER_PWD_WEAK = (21010, "密码强度不足")
+    USER_PWD_SAME = (21011, "新密码不能与当前密码相同")
+    USER_AVATAR_INVALID = (21012, "头像暂且不支持")
 
     # ========== 会话与记忆模块 (3xxxx) ==========
     CONVERSATION_NOT_FOUND = (30001, "会话不存在或已过期")
