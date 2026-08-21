@@ -1,7 +1,5 @@
 from typing import Annotated
-
 from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
 from starlette import status
 
@@ -24,7 +22,7 @@ from .service import UserService
 router = APIRouter(prefix="/user", tags=["user"], route_class=UnifiedRoute)
 
 # TODO:
-# 1. 用户注销
+# 1. 用户注销 ✅ 已实现
 # 2. 用户密码更改 ✅ 已实现
 # 3. 用户密码强校验（测试阶段不做，否则接口不好调试） ✅ 已实现
 # 4. 用户信息更改考虑（头像固定，用户名可改）✅ 已实现
@@ -33,7 +31,7 @@ router = APIRouter(prefix="/user", tags=["user"], route_class=UnifiedRoute)
 
 @cbv(router)
 class UserRouter:
-    service:UserService=Depends()
+    service: UserService = Depends()
 
     # ============ 公共资源 ============
     @router.get("/avatars", summary="获取可选头像列表", status_code=status.HTTP_200_OK)
@@ -91,3 +89,10 @@ class UserRouter:
             pwd_req.current_password,
             pwd_req.new_password,
         )
+        
+    @router.delete("/", summary="用户注销", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete_user(
+        self,
+        current_user: Annotated[User, Depends(get_current_user)],
+    ):
+        await self.service.to_delete_user(current_user.id)

@@ -78,3 +78,11 @@ class UserRepo:
         """修改用户密码"""
         user.password = new_pwd_hash
         await self.db.flush()
+        
+        
+    async def delete(self, user: User) -> None:
+        # 显式加载关联会话，确保 db.delete(user) 时 ORM 级联（cascade=delete-orphan）
+        # 一定触发，不依赖调用方"先前已查询该用户会话"的隐式副作用
+        await user.awaitable_attrs.conversations
+        await self.db.delete(user)
+        await self.db.flush()

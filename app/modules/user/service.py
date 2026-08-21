@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.business.code import BusinessCode
 from app.core.business.exception import UserException
+from app.modules.conversation.gateway import ConversationGateway
+from app.modules.conversation.repo import ConversationRepo
 from app.shared.db import get_db
 from app.shared.db.models import User
 from app.shared.utils import TransactionMixin
@@ -87,32 +89,25 @@ class UserService(TransactionMixin):
             "token_type": "bearer",
         }
 
-    async def to_change_pwd(
-        self,
-        user_id: int,
-        current_pwd: str,
-        new_pwd: str,
-    ) -> None:
+    async def to_change_pwd(self, user_id: int, current_pwd: str, new_pwd: str) -> None:
         """修改用户密码"""
-        # 先做最廉价的纯字符串校验（不碰数据库、不算哈希），不达标直接快速拒绝
-        # 新密码强校验
-        validate_password_strength(new_pwd)
-
-        # 检查新旧密码是否相同
-        if current_pwd == new_pwd:
-            raise UserException(code=BusinessCode.USER_PWD_SAME)
-
-        # 再查库并验证当前密码（相对重的操作放在最后）
+        # 1. 先验证用户身份（旧密码是否正确）
         user = await self._get_user(user_id=user_id)
-
-        # 验证当前密码
+        
         if not PasswordManager.verify(current_pwd, user.password):
             raise UserException(code=BusinessCode.USER_PWD_AUTH_FAILED)
-
-        # 哈希新密码
+        
+        # 2. 身份验证通过后，再检查新密码强度
+        validate_password_strength(new_pwd)
+        
+        # 3. 检查新旧密码是否相同
+        if current_pwd == new_pwd:
+            raise UserException(code=BusinessCode.USER_PWD_SAME)
+        
+        # 4. 哈希新密码
         new_pwd_hash = PasswordManager.hash(new_pwd)
-
-        # 更新密码（事务）
+        
+        # 5. 更新密码（事务）
         async with self.transaction_scope():
             await self.repo.modify(new_pwd_hash, user)
 
@@ -126,3 +121,20 @@ class UserService(TransactionMixin):
 
         async with self.transaction_scope():
             return await self.repo.update(user, user_update_data)
+        
+    async def to_delete_user(self, user_id: int) -> None:
+        """用户注销（硬删除）。
+        顺序：先清 checkpoint（外部存储，独立于业务事务），再删业务库用户
+        （repo.delete 内部会加载 conversations，保证 ORM 级联可靠触发）。
+        """
+        user = await self._get_user(user_id=user_id)
+
+        # 1. 先删 checkpoint
+        conv_repo = ConversationRepo(self.db)
+        conv_gateway = ConversationGateway()
+        conversations = await conv_repo.get(user_id=user.id)
+        await conv_gateway.delete_conversation_batch([c.id for c in conversations])
+
+        # 2. 再删业务库用户（级联删会话）
+        async with self.transaction_scope():
+            await self.repo.delete(user)
