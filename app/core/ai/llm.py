@@ -21,7 +21,7 @@ class VoyageModel(StrEnum):
 
 def get_llm(
     model: str | VoyageModel = VoyageModel.QWEN_3_5_FLASH,
-    temperature: float = 1.4,
+    temperature: float = 1.0,
     api_key: str | None = None,
     base_url: str | None = None,
     model_provider: Literal["openai", "deepseek"] | None = None,
