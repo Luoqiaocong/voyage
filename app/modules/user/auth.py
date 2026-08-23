@@ -1,7 +1,6 @@
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
@@ -28,28 +27,41 @@ class PasswordManager:
             return False
 
 
-def validate_password_strength(password: str):
-    """检查密码强度"""
-    if len(password) < 8:
-        raise UserException(code=BusinessCode.USER_PWD_WEAK)
-    if not re.search(r'[a-z]', password):
-        raise UserException(code=BusinessCode.USER_PWD_WEAK)
-    if not re.search(r'[A-Z]', password):
-        raise UserException(code=BusinessCode.USER_PWD_WEAK)
-    if not re.search(r'[0-9]', password):
-        raise UserException(code=BusinessCode.USER_PWD_WEAK)
+def validate_password_strength(password: str) -> None:
+    """检查密码强度：至少8位，包含大小写字母和数字"""
+    rules = [
+        (len(password) >= 8, "密码长度至少8位"),
+        (bool(re.search(r'[a-z]', password)), "密码需要包含小写字母"),
+        (bool(re.search(r'[A-Z]', password)), "密码需要包含大写字母"),
+        (bool(re.search(r'[0-9]', password)), "密码需要包含数字"),
+    ]
+    
+    for passed, msg in rules:
+        if not passed:
+            raise UserException(code=BusinessCode.USER_PWD_WEAK, msg=msg)
 
+# def validate_password_strength(password: str) -> None:
+#     """检查密码强度：至少8位，包含大小写字母和数字"""
+#     conditions = [
+#         len(password) >= 8,
+#         bool(re.search(r'[a-z]', password)),
+#         bool(re.search(r'[A-Z]', password)),
+#         bool(re.search(r'[0-9]', password)),
+#     ]
+    
+#     if not all(conditions):
+#         raise UserException(code=BusinessCode.USER_PWD_WEAK)
 
 def create_access_token(
     data: dict,
-    expires_delta: Optional[int] = None  # 改为 int，单位：分钟
+    expire_minutes:int|None = None  # int，单位：分钟
 ) -> str:
     """
     生成 JWT 访问令牌
 
     Args:
         data: 要编码的数据（如 {"sub": user_id}）
-        expires_delta: 可选的自定义过期时间（单位：分钟）
+        expire_minutes: 可选的自定义过期时间（单位：分钟）
 
     Returns:
         编码后的 JWT 字符串
@@ -57,7 +69,7 @@ def create_access_token(
     to_encode = data.copy()
 
     # 确定过期时间（分钟数）
-    expire_minutes = expires_delta or config.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+    expire_minutes = expire_minutes or config.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
 
     # 计算过期时间点
     expire = datetime.now(timezone.utc) + timedelta(minutes=expire_minutes)

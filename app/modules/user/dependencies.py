@@ -14,7 +14,7 @@ from .repo import UserRepo
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/user/login")
 
 
-async def _verify_token_logic(token: str, repo: UserRepo) -> User:
+async def _authenticate_token(token: str, repo: UserRepo) -> User:
     try:
         payload = jwt.decode(token, config.JWT_SECRET_KEY, algorithms=[config.JWT_ALGORITHM])
     except ExpiredSignatureError:
@@ -35,4 +35,4 @@ async def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)],
     repo: Annotated[UserRepo, Depends()],
 ) -> User:
-    return await _verify_token_logic(token, repo)
+    return await _authenticate_token(token, repo)
