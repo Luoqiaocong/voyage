@@ -6,8 +6,7 @@ from app.core.ai import AgentFactory
 from app.core.business import register_exception
 from app.modules.user.router import router as auth_router
 from app.modules.conversation.router import router as conversation_router
-from app.modules.itineraries.router import router as itineraries_router
-from app.modules.knowledge.router import router as knowledge_router
+from app.modules.itinerary.router import router as itinerary_router
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,8 +29,7 @@ app = FastAPI(title="VOYAGE AI TRAVEL PLANNER",lifespan=lifespan)
 
 app.include_router(auth_router,prefix=API_V1_STR)
 app.include_router(conversation_router,prefix=API_V1_STR)
-app.include_router(itineraries_router,prefix=API_V1_STR)
-app.include_router(knowledge_router,prefix=API_V1_STR)
+app.include_router(itinerary_router,prefix=API_V1_STR)
 
 
 app.add_middleware(
