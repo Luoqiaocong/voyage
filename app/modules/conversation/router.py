@@ -3,10 +3,10 @@ from typing import Annotated, AsyncGenerator
 from fastapi import APIRouter, Depends, Path
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi_utils.cbv import cbv
-from pydantic import Field
 from starlette import status
 
 from app.core.route import UnifiedRoute
+from app.shared.annotations import ConversationId
 from app.modules.user.dependencies import get_current_user
 from app.shared.db.models import User
 from .schemas import (
@@ -17,10 +17,6 @@ from .schemas import (
 from .service import ConversationService
 
 # ===================== 公共类型 & 依赖 =====================
-ConversationId = Annotated[
-    str,
-    Field(pattern=r"^[a-zA-Z0-9]{12}$", description="对话 ID"),
-]
 
 
 async def verify(
