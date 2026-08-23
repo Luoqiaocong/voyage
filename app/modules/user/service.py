@@ -5,8 +5,7 @@ from pydantic import EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.business import BusinessCode, UserException
-from app.modules.conversation.gateway import ConversationGateway
-from app.modules.conversation.repo import ConversationRepo
+from app.modules.conversation.service import ConversationService
 from app.shared.db import get_db
 from app.shared.db.models import User
 from app.shared.utils import TransactionMixin
@@ -27,9 +26,11 @@ class UserService(TransactionMixin):
     def __init__(
         self,
         repo: Annotated[UserRepo, Depends()],
+        conv_service: Annotated[ConversationService, Depends()],
         db: Annotated[AsyncSession, Depends(get_db)],  # 掌握事务主动权
     ):
         self.repo = repo
+        self.conv_service = conv_service
         self.db = db
 
     # ============ 内部辅助方法 ============
@@ -128,11 +129,8 @@ class UserService(TransactionMixin):
         """
         user = await self._get_user(user_id=user_id)
 
-        # 1. 先删 checkpoint
-        conv_repo = ConversationRepo(self.db)
-        conv_gateway = ConversationGateway()
-        conversations = await conv_repo.get(user_id=user.id)
-        await conv_gateway.delete_conversation_batch([c.id for c in conversations])
+        # 1. 先清该用户所有会话的 langgraph 线程（conversation 域公共接口）
+        await self.conv_service.delete_conversations_for_user(user.id)
 
         # 2. 再删业务库用户（级联删会话）
         async with self.transaction_scope():
