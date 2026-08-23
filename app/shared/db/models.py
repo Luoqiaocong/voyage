@@ -7,7 +7,7 @@ from datetime import datetime
 # relationship     : ORM 层的“对象关系”，用于 Python 侧便捷访问关联数据
 #                    （它只影响 ORM 对象访问，不影响数据库表结构本身）
 # ────────────────────────────────────────────────────────────────
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import JSON, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -76,3 +76,43 @@ class Conversation(Base):
 
     user: Mapped[User] = relationship(back_populates="conversations")
     # 与之配套的正向关联：conversation.user → 所属用户
+    itineraries: Mapped[list["Itinerary"]] = relationship(
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+    )
+    # 一个会话可保存多份行程（重新生成后再次保存）
+
+
+class Itinerary(Base):
+    """行程表：一次「保存」的完整行程计划，plan 列存 ItineraryPlan 的 JSON。"""
+    __tablename__ = "itineraries"
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True, autoincrement=True, comment="行程ID"
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+        comment="来源会话ID（12位hex）",
+    )
+    plan: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        comment="行程计划 JSON（ItineraryPlan：destination/days/daily_plans/tips 等）",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.now(),
+        nullable=False,
+        comment="创建时间（北京时间）",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.now(),
+        onupdate=datetime.now(),
+        nullable=False,
+        comment="更新时间（北京时间），保存后再次编辑时自动刷新",
+    )
+
+    conversation: Mapped[Conversation] = relationship(back_populates="itineraries")
