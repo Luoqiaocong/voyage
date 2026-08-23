@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ---------- 层级 1：单个活动项 ----------
@@ -44,7 +44,6 @@ class ItineraryPlan(BaseModel):
     )
     daily_plans: list[ItineraryDay] = Field(description="每天的安排，长度必须等于 days")
     tips: list[str] = Field(default_factory=list, description="出行提醒（3-5条），如「热门景点务必提前7天预约」")
+
+
     
-    
-class ItineraryExtractRequest(BaseModel):
-    conversation_id: str = Field(pattern=r"^[a-zA-Z0-9]{12}$")
