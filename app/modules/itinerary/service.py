@@ -3,12 +3,12 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.ai.structured import extract_itinerary_plan
 from app.core.business import BusinessCode, ItineraryException
 from app.modules.conversation.gateway import ConversationGateway
 from app.shared.db import get_db
 from app.shared.utils import TransactionMixin
 
+from .extractor import extract_itinerary_plan
 from .repo import ItineraryRepo
 
 
