@@ -5,6 +5,7 @@ from .exception import (
     AuthException,
     BaseBusinessException,
     ConversationException,
+    ItineraryException,
     UserException,
 )
 from .util import register_exception, success_response
@@ -15,6 +16,7 @@ __all__ = [
     "BaseBusinessException",
     "BusinessCode",
     "ConversationException",
+    "ItineraryException",
     "UserException",
     "register_exception",
     "success_response",
