@@ -4,7 +4,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from fastapi import FastAPI
 from app.core.ai import AgentFactory
 from app.core.business import register_exception
-from app.api.router import api_router
+from app.api import api_router
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
