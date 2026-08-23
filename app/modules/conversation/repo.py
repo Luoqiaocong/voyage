@@ -4,8 +4,8 @@ from fastapi import Depends
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.shared.db import get_db
 from app.shared.db.models import Conversation
-from app.shared.db.session import get_db
 
 
 class ConversationRepo:

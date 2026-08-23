@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.business import BusinessCode, ConversationException
 from app.shared.db.models import Conversation
-from app.shared.db.session import get_db
+from app.shared.db import get_db
 from app.shared.utils import TransactionMixin
 
 from .util import get_id

@@ -5,7 +5,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Annotated, Any
 from app.shared.db.models import Itinerary
-from app.shared.db.session import get_db
+from app.shared.db import get_db
 
 
 class ItineraryRepo:
