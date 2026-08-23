@@ -15,18 +15,7 @@ from .schemas import (
     UserConversationsResponse,
 )
 from .service import ConversationService
-
-# ===================== 公共类型 & 依赖 =====================
-
-
-async def verify(
-    user: Annotated[User, Depends(get_current_user)],
-    service: Annotated[ConversationService, Depends()],
-    id: Annotated[ConversationId, Path()],
-):
-    """校验当前用户是否拥有该对话的访问权限"""
-    await service.check_authorization(user_id=user.id, conversation_id=id)
-
+from .dependencies import require_conversation_owner
 
 # ===================== 路由定义 =====================
 router = APIRouter(
@@ -68,7 +57,7 @@ class ConversationRouter:
         "/{id}/messages",
         status_code=status.HTTP_200_OK,
         summary="获取历史对话消息",
-        dependencies=[Depends(verify)],
+        dependencies=[Depends(require_conversation_owner)],
     )
     async def get_messages(
         self,
@@ -84,7 +73,7 @@ class ConversationRouter:
         status_code=status.HTTP_200_OK,
         response_class=EventSourceResponse,
         summary="流式对话",
-        dependencies=[Depends(verify)],
+        dependencies=[Depends(require_conversation_owner)],
     )
     async def send_message(
         self,
@@ -103,7 +92,7 @@ class ConversationRouter:
         "/{id}",
         status_code=status.HTTP_204_NO_CONTENT,
         summary="删除单个对话",
-        dependencies=[Depends(verify)],
+        dependencies=[Depends(require_conversation_owner)],
     )
     async def delete_conversation(
         self,

@@ -62,3 +62,8 @@ class ConversationService(TransactionMixin):
         await self.gateway.delete_conversation(conversation_id)
         async with self.transaction_scope():
             await self.repo.remove(conversation_id)
+
+    async def delete_conversations_for_user(self, user_id: int) -> None:
+        """注销辅助：清理该用户所有会话的 langgraph 线程（DB 会话行由 users 级联删除）。"""
+        conversations = await self.repo.get(user_id)
+        await self.gateway.delete_conversation_batch([c.id for c in conversations])

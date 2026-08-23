@@ -25,6 +25,17 @@ class ConversationGateway:
             return []
         return convert_to_openai_messages(state.values["messages"])
 
+    async def get_last_ai_text(self, conversation_id: str) -> str:
+        """取最后一条含文本内容的 AI 回复；没有则返回空串（供行程提取等场景复用）。"""
+        messages = await self.get_messages(conversation_id)
+        for message in reversed(messages):
+            if message.get("role") != "assistant":
+                continue
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                return content
+        return ""
+
     # -------------------- 2. 流式发送消息 --------------------
     async def stream_message(self, message: str, conversation_id: str):
         agent = AgentFactory.get_agent()
