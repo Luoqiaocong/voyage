@@ -3,8 +3,7 @@ from fastapi import APIRouter, Depends
 from fastapi_utils.cbv import cbv
 from starlette import status
 
-from app.core.business.code import BusinessCode
-from app.core.business.util import success_response
+from app.core.business import BusinessCode, success_response
 from app.core.route import UnifiedRoute
 from app.shared.db.models import User
 

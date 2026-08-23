@@ -4,8 +4,7 @@ from fastapi import Depends
 from pydantic import EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.business.code import BusinessCode
-from app.core.business.exception import UserException
+from app.core.business import BusinessCode, UserException
 from app.modules.conversation.gateway import ConversationGateway
 from app.modules.conversation.repo import ConversationRepo
 from app.shared.db import get_db

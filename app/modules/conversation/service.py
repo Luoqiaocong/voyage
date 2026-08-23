@@ -5,8 +5,7 @@ from fastapi import Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.business.code import BusinessCode
-from app.core.business.exception import ConversationException
+from app.core.business import BusinessCode, ConversationException
 from app.shared.db.models import Conversation
 from app.shared.db.session import get_db
 from app.shared.utils import TransactionMixin
