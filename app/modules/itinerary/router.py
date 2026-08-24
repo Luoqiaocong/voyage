@@ -6,7 +6,7 @@ from starlette import status
 
 from app.core.route import UnifiedRoute
 from app.shared.annotations import ConversationId
-from app.modules.conversation.dependencies import require_conversation_owner
+from app.modules.conversation.dependencies import verify_conversation_owner
 from .service import ItineraryService
 
 router = APIRouter(prefix="/itineraries", tags=["itineraries"], route_class=UnifiedRoute)
@@ -20,7 +20,7 @@ class ItineraryRouter:
         "/extract/{id}",
         status_code=status.HTTP_201_CREATED,
         summary="提取并保存结构化行程",
-        dependencies=[Depends(require_conversation_owner)],
+        dependencies=[Depends(verify_conversation_owner)],
     )
     async def extract_and_save_itinerary(
         self,

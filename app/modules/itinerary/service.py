@@ -24,7 +24,7 @@ class ItineraryService(TransactionMixin):
         self.db = db
 
     async def save_itinerary_from_conversation(self, conversation_id: str):
-        # 会话归属与存在的校验已由路由层 conversation 域的 require_conversation_owner 完成，
+        # 会话归属与存在的校验已由路由层 conversation 域的 verify_conversation_owner 完成，
         # service 只负责：读最后一条 AI 回复 → 结构化提取 → 落库。
         recommend_text = await self.conv_gateway.get_last_ai_text(conversation_id)
         plan = await extract_itinerary_plan(recommend_text)

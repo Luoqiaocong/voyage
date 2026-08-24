@@ -15,7 +15,7 @@ from .schemas import (
     UserConversationsResponse,
 )
 from .service import ConversationService
-from .dependencies import require_conversation_owner
+from .dependencies import verify_conversation_owner
 
 # ===================== 路由定义 =====================
 router = APIRouter(
@@ -57,7 +57,7 @@ class ConversationRouter:
         "/{id}/messages",
         status_code=status.HTTP_200_OK,
         summary="获取历史对话消息",
-        dependencies=[Depends(require_conversation_owner)],
+        dependencies=[Depends(verify_conversation_owner)],
     )
     async def get_messages(
         self,
@@ -73,7 +73,7 @@ class ConversationRouter:
         status_code=status.HTTP_200_OK,
         response_class=EventSourceResponse,
         summary="流式对话",
-        dependencies=[Depends(require_conversation_owner)],
+        dependencies=[Depends(verify_conversation_owner)],
     )
     async def send_message(
         self,
@@ -92,7 +92,7 @@ class ConversationRouter:
         "/{id}",
         status_code=status.HTTP_204_NO_CONTENT,
         summary="删除单个对话",
-        dependencies=[Depends(require_conversation_owner)],
+        dependencies=[Depends(verify_conversation_owner)],
     )
     async def delete_conversation(
         self,

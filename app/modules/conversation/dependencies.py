@@ -9,7 +9,7 @@ from app.modules.user.dependencies import get_current_user
 from .service import ConversationService
 
 
-async def require_conversation_owner(
+async def verify_conversation_owner(
     id: Annotated[ConversationId, Path()],
     user: Annotated[User, Depends(get_current_user)],
     service: Annotated[ConversationService, Depends()],
