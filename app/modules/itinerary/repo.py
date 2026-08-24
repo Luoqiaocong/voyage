@@ -13,8 +13,8 @@ class ItineraryRepo:
                  db: Annotated[AsyncSession, Depends(get_db)]) -> None:
         self.db = db
         
-    async def insert(self,conversation_id:str,plan:dict[str,Any]):
-        itinerary = Itinerary(conversation_id=conversation_id,plan=plan)
+    async def insert(self,**kwargs):
+        itinerary = Itinerary(**kwargs)
         self.db.add(itinerary)
         await self.db.flush()
         return itinerary

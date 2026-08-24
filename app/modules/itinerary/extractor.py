@@ -56,10 +56,10 @@ _EXTRACT_SYSTEM_PROMPT = """把用户提供的旅行攻略（Markdown）转换�
 """
 
 
-async def extract_itinerary_plan(markdown: str):
+async def extract_itinerary_plan(recommend_txt: str):
     """攻略 Markdown → ItineraryPlan；失败返回 None（不打断对话）。"""
     return await extract_structured(
-        markdown,
+        recommend_txt,
         ItineraryPlan,
         system_instructions=_EXTRACT_SYSTEM_PROMPT,
     )
