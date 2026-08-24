@@ -11,7 +11,7 @@ class VoyageModel(StrEnum):
     """Voyage 平台支持的模型枚举"""
     DEEPSEEK_V4_FLASH = "deepseek-v4-flash"
     DEEPSEEK_V4_PRO = "deepseek-v4-pro"
-    QWEN_3_5_FLASH = "qwen3.5-flash"
+    QWEN_3_7_FLASH = "qwen3.7-flash"
     QWEN_MAX = "qwen-max"
     DASHCOPE_GLM_5 = "glm-5"
     DASHCOPE_QWEN_PLUS_1220 = "qwen-plus-1220"
@@ -20,7 +20,7 @@ class VoyageModel(StrEnum):
 
 
 def get_llm(
-    model: str | VoyageModel = VoyageModel.QWEN_3_5_FLASH,
+    model: str | VoyageModel = VoyageModel.QWEN_3_7_FLASH,
     temperature: float = 1.0,
     api_key: str | None = None,
     base_url: str | None = None,
