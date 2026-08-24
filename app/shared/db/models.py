@@ -44,7 +44,7 @@ class User(Base):
         )
    
     conversations: Mapped[list["Conversation"]] = relationship(
-           back_populates="user",
+           back_populates="user", # 双向关系的另一侧：在 Conversation 模型中，对应的属性叫 user
            cascade="all, delete-orphan",
        )
 
@@ -75,12 +75,12 @@ class Conversation(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="conversations")
-    # 与之配套的正向关联：conversation.user → 所属用户
+    
     itineraries: Mapped[list["Itinerary"]] = relationship(
-        back_populates="conversation",
-        cascade="all, delete-orphan",
+        back_populates="conversation", # 双向关系的另一侧：在 Itinerary 模型中，对应的属性叫 conversation
+        passive_deletes=True,  # 删除时由数据库处理关联，SQLAlchemy 不额外查询
     )
-    # 一个会话可保存多份行程（重新生成后再次保存）
+    # 一个会话可保存多份行程；删除会话不影响已保存的行程（行程是用户资产）
 
 
 class Itinerary(Base):
@@ -90,11 +90,17 @@ class Itinerary(Base):
     id: Mapped[int] = mapped_column(
         primary_key=True, autoincrement=True, comment="行程ID"
     )
-    conversation_id: Mapped[str] = mapped_column(
-        ForeignKey("conversations.id", ondelete="CASCADE"),
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
-        comment="来源会话ID（12位hex）",
+        comment="所属用户ID（行程独立归属用户，删除用户时级联删除）",
+    )
+    conversation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+        comment="来源会话ID（12位hex）；会话删除后置空，行程保留",
     )
     plan: Mapped[dict] = mapped_column(
         JSON,
@@ -115,4 +121,4 @@ class Itinerary(Base):
         comment="更新时间（北京时间），保存后再次编辑时自动刷新",
     )
 
-    conversation: Mapped[Conversation] = relationship(back_populates="itineraries")
+    conversation: Mapped[Conversation | None] = relationship(back_populates="itineraries")
