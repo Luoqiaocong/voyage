@@ -3,9 +3,15 @@
 业务方（如行程模块）传入自己的 Pydantic schema 与可选专属提示词即可复用；
 core 层不感知具体结构，消除 core → modules 的反向依赖。
 """
-from langchain_core.messages import HumanMessage, SystemMessage
+from typing import TypeVar, cast
 
-from app.core.ai.llm import get_llm
+from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel
+
+from .llm import get_llm
+
+# 结构化输出的模型类型：由调用方传入的 schema 决定（如 ItineraryPlan）
+_T = TypeVar("_T", bound=BaseModel)
 
 # 通用系统提示词：未提供专属 instructions 时兜底的约束
 _BASE_SYSTEM_PROMPT = (
@@ -22,11 +28,11 @@ _BASE_SYSTEM_PROMPT = (
 
 async def extract_structured(
     text: str,
-    schema: type,
+    schema: type[_T],
     *,
     temperature: float = 0.2,
     system_instructions: str | None = None,
-):
+) -> _T | None:
     """通用结构化提取：text → 经 schema 校验的 Pydantic 对象；失败返回 None（不打断调用方）。
 
     - text                : 待提取的原始文本（如对话中的攻略 Markdown）
@@ -42,10 +48,12 @@ async def extract_structured(
         schema, method="json_mode"
     )
     try:
-        return await structured_llm.ainvoke([
+        # ainvoke 的类型签名较宽松（BaseModel | dict），但 with_structured_output
+        # 保证输出会经 schema 校验，运行时就是传入 schema 的实例，显式收窄类型。
+        return cast(_T, await structured_llm.ainvoke([
             SystemMessage(content=system_prompt),
             HumanMessage(content=text),
-        ])
+        ]))
     except Exception as exc:
         # 开发期排查用：打印完整校验信息（含模型原始输出片段）
         print(f"[extract_structured] failed: {exc}")  # noqa: T201

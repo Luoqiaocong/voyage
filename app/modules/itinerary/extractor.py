@@ -61,7 +61,7 @@ _EXTRACT_SYSTEM_PROMPT = """你是一个旅行攻略结构化提取器。请根�
 """
 
 
-async def extract_itinerary_plan(recommend_txt: str):
+async def extract_itinerary_plan(recommend_txt: str) -> ItineraryPlan | None:
     """攻略 Markdown → ItineraryPlan；失败返回 None（不打断对话）。"""
     return await extract_structured(
         recommend_txt,
