@@ -9,9 +9,14 @@ from app.core.ai.llm import get_llm
 
 # 通用系统提示词：未提供专属 instructions 时兜底的约束
 _BASE_SYSTEM_PROMPT = (
-    "你是一个数据提取助手：把用户提供的内容整理为 JSON，"
-    "字段必须严格符合给定结构，禁止新增、改名或删除字段。"
-    "只输出 JSON，不要输出任何其他文字或 Markdown 代码块。"
+    "你是一个数据提取助手。请根据用户输入的内容，输出一个符合给定 Schema 的 JSON 对象。必须遵守：\n"
+    "1. 结构严格一致：字段名与嵌套层级必须与 Schema 完全一致，禁止新增、重命名或删除字段。\n"
+    "2. 类型严格一致：字符串用双引号包裹，数组用 [ ]，对象用 { }，数字用数值（不加引号），布尔用 true/false；\n"
+    "   嵌套对象必须以对象形式输出（{...}），绝不能写成带引号的字符串；嵌套数组同理。\n"
+    "3. 可空字段：Schema 中可选的字段，输入内容没有或无法确定时就省略该字段，不要填 null、空字符串或编造的取值。\n"
+    "4. 取值约束：字段有明确取值限制（如枚举）时，只能从这些取值中选择，禁止自创取值。\n"
+    "5. 必填字段：Schema 标记为必填的字段必须给出合理取值，不能缺失。\n"
+    "6. 只输出 JSON 对象本身：不要 Markdown 代码块、不要 ```json 标记、不要任何解释性文字或前后缀。"
 )
 
 
@@ -34,7 +39,7 @@ async def extract_structured(
 
     system_prompt = system_instructions or _BASE_SYSTEM_PROMPT
     structured_llm = get_llm(temperature=temperature).with_structured_output(
-        schema, method="function_calling"
+        schema, method="json_mode"
     )
     try:
         return await structured_llm.ainvoke([

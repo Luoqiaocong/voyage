@@ -9,28 +9,18 @@ from app.core.ai.agents.weather import get_weather_agent
 
 
 @tool
-async def get_weather(location:str):
-    """
-    获取某地天气
-    args:
-        location: 位置
-    """
-    return f"The weather in {location} is sunny"
-
-@tool
-async def get_location():
-    """
-    获取当前位置
-    args:
-        None
-    """
-    return "中国北京"
-
-@tool
 async def get_today():
-    "获取当前日期与时间，格式为 YYYY-MM-DD。"
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # noqa: DTZ005 - 面向中国用户的本地时间即可
+    """获取今天的确切日期与当前时间，用于把「相对日期」换算成具体日期。
 
+    触发场景：对话中出现 今天/明天/后天/大后天/本周五/下周 等相对时间表达，
+    或需要给行程、车票、天气查询填写具体出发日期时——请先调用本工具确认今天到底是几号，
+    再进行推算，禁止凭模型自身的日期记忆猜测今天日期。
+
+    返回：今天是 YYYY-MM-DD（星期X），当前时间 HH:MM:SS
+    """
+    now = datetime.now()  # noqa: DTZ005 - 面向中国用户的本地时间即可
+    weekday = "一二三四五六日"[now.weekday()]
+    return f"今天是 {now.strftime('%Y-%m-%d')}（星期{weekday}），当前时间 {now.strftime('%H:%M:%S')}"
 
 
 @tool
