@@ -156,8 +156,9 @@ class ItineraryDetailResponse(BaseModel):
     updated_at: Annotated[datetime, Field(description="更新时间")]
 
     model_config = {"from_attributes": True}  # 允许反序列化，即orm转pydantic
-    
-    
+
+
 class ItinerariesResponse(BaseModel):
     """行程列表响应。"""
+
     itineraries: list[ItineraryDetailResponse]
