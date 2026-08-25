@@ -37,6 +37,11 @@ class ItineraryRepo:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
     
+    async def get_all(self,user_id:int):
+        stmt = select(Itinerary).where(Itinerary.user_id == user_id)
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
+    
     
     async def update(self, itinerary:Itinerary,plan:dict[str,Any]):
         itinerary.plan = plan

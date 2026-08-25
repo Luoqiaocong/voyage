@@ -64,9 +64,13 @@ class ItineraryService(TransactionMixin):
             
     async def get_itinerary(self, itinerary_id: int):
         return await self._get_itinerary_base(itinerary_id)
+    
+    
+    async def get_itineraries(self,user_id:int):
+        return await self.repo.get_all(user_id)
         
     async def update_itinerary(self,itinerary_id:int,plan:dict[str,Any]):
-        """整体替换行程计划（PUT）：前端全量保存或 AI 续改结果落库。"""
+        """整体替换行程计划（PUT）：前端整体编辑后全量保存。"""
         itinerary =  await self._get_itinerary_base(itinerary_id)
         async with self.transaction_scope():
             return await self.repo.update(itinerary,plan=plan)
@@ -76,7 +80,6 @@ class ItineraryService(TransactionMixin):
 
         合并（只取实际传入、且非 null 的字段）后整体校验落库，避免产生结构性脏数据。
         """
-        """更新行程独立字段：合并后整体校验落库，派生字段不会受影响。"""
         itinerary = await self._get_itinerary_base(itinerary_id)
         # 只取实际传入的字段；显式传 null 视为「不修改」，避免写入非法结构
         changes = {
@@ -88,8 +91,7 @@ class ItineraryService(TransactionMixin):
         validated = ItineraryPlan.model_validate(merged) # 先按规则检查，不合规就报错
         async with self.transaction_scope():
             return await self.repo.update(itinerary, plan=validated.model_dump())
-        
-        
+
     async def delete_itinerary(self, itinerary_id: int):
         async with self.transaction_scope():
             is_deleted = await self.repo.remove(itinerary_id)
