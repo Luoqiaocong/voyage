@@ -61,7 +61,10 @@ class ConversationService(TransactionMixin):
         # 先删除内存会话再删除数据库会话数据,还是要事务处理，如果某一个环节崩了会有残留
         await self.gateway.delete_conversation(conversation_id)
         async with self.transaction_scope():
-            await self.repo.remove(conversation_id)
+            is_deleted = await self.repo.remove(conversation_id)
+        if not is_deleted:
+            raise ConversationException(BusinessCode.CONVERSATION_DELETED_FAILED)
+            
 
     async def delete_conversations_for_user(self, user_id: int) -> None:
         """注销辅助：清理该用户所有会话的 langgraph 线程（DB 会话行由 users 级联删除）。"""

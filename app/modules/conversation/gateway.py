@@ -79,7 +79,7 @@ class ConversationGateway:
             await checkpointer.adelete_thread(conversation_id)
         except Exception as exc:
             raise ConversationException(
-                BusinessCode.CONVERSATION_DELETE_FAILED,
+                BusinessCode.CONVERSATION_DELETED_FAILED,
             ) from exc  # 保留原始异常信息，方便调试
 
     async def delete_conversation_batch(

@@ -8,3 +8,8 @@ ConversationId = Annotated[
     str,
     Field(pattern=r"^[a-zA-Z0-9]{12}$", description="对话 ID"),
 ]
+
+ItineraryId = Annotated[
+    int,
+    Field(gt=0, description="行程 ID"),
+]

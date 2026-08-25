@@ -64,7 +64,7 @@ class BusinessCode(Enum):
     CONVERSATION_NOT_FOUND = (30001, "会话不存在或已过期")
     CONVERSATION_CREATE_FAILED = (30002, "创建会话失败")
     CONVERSATION_UPDATE_FAILED = (30003, "更新会话状态失败")
-    CONVERSATION_DELETE_FAILED = (30004, "删除会话失败")
+    CONVERSATION_DELETED_FAILED = (30004, "删除会话失败")
     CONVERSATION_PERMISSION_DENIED = (30005, "无权访问此会话")
     MEMORY_READ_FAILED = (30006, "读取对话短期记忆失败")
     MEMORY_CLEAR_FAILED = (30007, "清空会话记忆失败")
@@ -89,6 +89,7 @@ class BusinessCode(Enum):
     ITINERARY_GEN_FAILED = (60002, "行程方案生成失败")
     ITINERARY_UPDATE_FAILED = (60003, "行程修改保存失败")
     ITINERARY_SHARE_EXPIRED = (60004, "行程分享链接已失效")
+    ITINERARY_DELETED_FAILED = (60005, "行程删除失败")
 
     @property
     def code(self) -> int:
