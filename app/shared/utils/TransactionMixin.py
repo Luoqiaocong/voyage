@@ -4,11 +4,8 @@ from typing import Any, Callable, Coroutine,Awaitable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.business import BaseBusinessException
-
 
 class TransactionMixin:
-    _business_exception_type: type[BaseBusinessException] = BaseBusinessException
     db: AsyncSession
     
     
@@ -17,9 +14,6 @@ class TransactionMixin:
         try:
             yield
             await self.db.commit()
-        except self._business_exception_type:
-            await self.db.rollback()
-            raise
         except Exception:
             await self.db.rollback()
             raise

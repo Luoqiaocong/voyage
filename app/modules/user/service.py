@@ -21,7 +21,6 @@ from .repo import UserRepo
 
 
 class UserService(TransactionMixin):
-    _business_exception_type = UserException  # 注册为用户异常
 
     def __init__(
         self,
