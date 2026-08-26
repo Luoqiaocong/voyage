@@ -60,7 +60,7 @@ class ConversationService(TransactionMixin):
         if not ai_text:
             return
 
-        # 已有标题则不重复生成（数据层只做查询，判断放在业务层）
+        # 已有标题则不重复生成
         conversation = await self.repo.check(conversation_id)
         if conversation and conversation.title:
             return

@@ -16,11 +16,11 @@ async def get_today():
     或需要给行程、车票、天气查询填写具体出发日期时——请先调用本工具确认今天到底是几号，
     再进行推算，禁止凭模型自身的日期记忆猜测今天日期。
 
-    返回：今天是 YYYY-MM-DD（星期X），当前时间 HH:MM:SS
+    返回：今天是 YYYY-MM-DD（星期X），当前时间 HH:MM
     """
     now = datetime.now()  # noqa: DTZ005 - 面向中国用户的本地时间即可
     weekday = "一二三四五六日"[now.weekday()]
-    return f"今天是 {now.strftime('%Y-%m-%d')}（星期{weekday}），当前时间 {now.strftime('%H:%M:%S')}"
+    return f"今天是 {now.strftime('%Y-%m-%d')}（星期{weekday}），当前时间 {now.strftime('%H:%M')}"
 
 
 @tool
