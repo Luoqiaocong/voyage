@@ -51,10 +51,16 @@ class ConversationService(TransactionMixin):
     # -------------------- 4. 流式发送消息 --------------------
     async def send_message(self, message: str, conversation_id: str):
         ai_text = ""
-        async for chunk in self.gateway.stream_message(message, conversation_id):
-            if chunk.get("type") == "text":
-                ai_text += chunk.get("content", "")
-            yield chunk
+        try:
+            async for chunk in self.gateway.stream_message(message, conversation_id):
+                if chunk.get("type") == "text":
+                    ai_text += chunk.get("content", "")
+                yield chunk
+        except Exception as exc:
+            # 流中途异常（模型/工具报错）：告知前端后正常收尾，避免连接悬挂
+            print(f"[send_message] stream failed: {exc}")  # noqa: T201
+            yield {"type": "error", "content": "AI 服务暂时不可用，请稍后重试"}
+            return
 
         # 本轮没有正常文本回复时，不生成标题
         if not ai_text:
@@ -68,7 +74,8 @@ class ConversationService(TransactionMixin):
         full_text = f"用户消息：{message}\nAI回复：{ai_text}"
         try:
             title = await generate_conversation_title(full_text)
-        except Exception:
+        except Exception as exc:
+            print(f"[send_message] title failed: {exc}")  # noqa: T201
             return  # 标题生成失败不影响对话主流程
         async with self.transaction_scope():
             await self.repo.update(conversation_id, title)
