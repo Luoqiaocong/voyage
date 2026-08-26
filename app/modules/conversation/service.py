@@ -44,11 +44,6 @@ class ConversationService(TransactionMixin):
     async def get_conversations(self, user_id: int):
         return await self.repo.get_by_user_id(user_id)
 
-    async def need_title(self, conversation_id: str) -> bool:
-        """尚未有标题时返回 True（首个对话后触发一次自动生成）。"""
-        conversation = await self.repo.check(conversation_id)
-        return bool(conversation and not conversation.title)
-
     # -------------------- 3. 查询历史消息 --------------------
     async def get_messages(self, conversation_id: str, **kwargs):
         return await self.gateway.get_messages(conversation_id, **kwargs)
@@ -61,8 +56,13 @@ class ConversationService(TransactionMixin):
                 ai_text += chunk.get("content", "")
             yield chunk
 
-        # 本轮没有正常文本回复或已有标题时，不生成标题
-        if not ai_text or not await self.need_title(conversation_id):
+        # 本轮没有正常文本回复时，不生成标题
+        if not ai_text:
+            return
+
+        # 已有标题则不重复生成（数据层只做查询，判断放在业务层）
+        conversation = await self.repo.check(conversation_id)
+        if conversation and conversation.title:
             return
 
         full_text = f"用户消息：{message}\nAI回复：{ai_text}"
