@@ -60,7 +60,7 @@ def read_root():
 #     - 已覆盖 user / conversation / itinerary 的 schema、依赖与路由
 # [x] 5. 增加函数 docstring（功能 + 参数类型声明）—— 主体已覆盖，遗漏随手补
 # [ ] 6. 自动化测试（至少：鉴权、会话 CRUD 的核心路径），替换早期会挂的测试
-# [ ] 7. get_current_user 在 cbv 中同一个请求被重复解析 token → 优化复用
+# [✅ ] 7. get_current_user 在 cbv 中同一个请求被重复解析 token → 优化复用
 #     - 注：FastAPI 默认按依赖缓存，需实测确认是否仍存在重复解析
 # [ ] 8. created_at 存储格式收敛（去掉 .000000 的日期时间显示，未决方案待定）
 # [ ] 9. 前端（Streamlit）与后端鉴权对接 + 会话恢复到后端持久化
