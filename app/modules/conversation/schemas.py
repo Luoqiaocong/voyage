@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, field_serializer
 
@@ -13,9 +14,9 @@ class ConversationResponse(BaseModel):
     created_at: datetime = Field(description="创建时间（UTC）")
     
     # ✅ 返回时格式化时间（可选）
-    @field_serializer('created_at')
+    @field_serializer("created_at")
     def serialize_datetime(self, dt: datetime) -> str:
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
+        return dt.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
     
     model_config = {"from_attributes": True}
 

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 # ── ORM 语法基础（建议记牢）────────────────────────────────────
 # Mapped[str]      : 类型标注，配合下方 mapped_column 声明列的类型
@@ -11,6 +11,10 @@ from sqlalchemy import JSON, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
+
+def utc_now():
+    """返回当前 UTC 时间（供 default 使用）"""
+    return datetime.now(timezone.utc)
 
 
 class User(Base):
@@ -37,8 +41,8 @@ class User(Base):
     # back_populates: 关联到 Conversation.user，二者互为反向
     # cascade       : 删用户时级联删其会话(all, delete-orphan)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-            default=datetime.now(),
+         DateTime(timezone=True),
+            default=utc_now,
             nullable=False,
             comment="创建时间（北京时间）",
         )
@@ -68,8 +72,8 @@ class Conversation(Base):
     title: Mapped[str | None] = mapped_column(String(255), nullable=True,comment="会话标题")
     # str | None + nullable=True：该列允许 NULL（会话标题可空）
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.now(),
+        DateTime(timezone=True),
+        default=utc_now,
         nullable=False,
         comment="会话创建时间（北京时间）",
     )
@@ -108,15 +112,15 @@ class Itinerary(Base):
         comment="行程计划 JSON（ItineraryPlan：destination/days/daily_plans/tips 等）",
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.now(),
+         DateTime(timezone=True),
+        default=utc_now,
         nullable=False,
         comment="创建时间（北京时间）",
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.now(),
-        onupdate=datetime.now(),
+         DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
         nullable=False,
         comment="更新时间（北京时间），保存后再次编辑时自动刷新",
     )
