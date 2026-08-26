@@ -1,6 +1,6 @@
 import json
 from typing import Annotated, AsyncGenerator
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, Body, Depends, Path
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi_utils.cbv import cbv
 from starlette import status
@@ -11,6 +11,7 @@ from app.modules.user.dependencies import get_current_user
 from app.shared.db.models import User
 from .schemas import (
     ConversationMessageRequest,
+    ConversationTitleRequest,
     ConversationResponse,
     UserConversationsResponse,
 )
@@ -86,7 +87,20 @@ class ConversationRouter:
                 event="message",
             )
         yield ServerSentEvent(raw_data="[DONE]", event="done")
-
+        
+    @router.patch(
+        "/{id}",
+        status_code=status.HTTP_200_OK,
+        summary="更改会话标题",
+        dependencies=[Depends(verify_conversation_owner)],
+    )
+    async def update_conversation_title(
+        self,
+        id: Annotated[ConversationId, Path()],
+        req: ConversationTitleRequest,
+    ):
+        await self.service.update_title(id, req.title)
+        
     # -------------------- 5. 删除 --------------------
     @router.delete(
         "/{id}",

@@ -1,10 +1,9 @@
 from datetime import datetime
 from typing import Annotated
-from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, Field, field_serializer, field_validator
 
-from .util import get_id
+from app.shared.utils import to_local_display
 
 
 class ConversationResponse(BaseModel):
@@ -12,12 +11,12 @@ class ConversationResponse(BaseModel):
     id: str = Field(description="会话ID", pattern=r"^[a-zA-Z0-9]{12}$")
     title: str | None = Field(description="会话标题")
     created_at: datetime = Field(description="创建时间（UTC）")
-    
-    # ✅ 返回时格式化时间（可选）
+
+    # 返回时统一转为上海时区展示
     @field_serializer("created_at")
     def serialize_datetime(self, dt: datetime) -> str:
-        return dt.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
-    
+        return to_local_display(dt)
+
     model_config = {"from_attributes": True}
 
 
@@ -36,6 +35,22 @@ class ConversationMessageRequest(BaseModel):
             ]
         }
     }
+
+
+class ConversationTitleRequest(BaseModel):
+    title: Annotated[
+        str,
+        Field(description="会话标题", min_length=1, max_length=64),
+    ]
+
+    @field_validator("title")
+    @classmethod
+    def strip_title(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("会话标题不能为空")
+        return v
+
 
 class UserConversationsResponse(BaseModel):
     conversations: list[ConversationResponse]

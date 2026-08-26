@@ -2,7 +2,7 @@
 
 依赖方向：modules → core（行程域提供 schema 与专属提示词，调用 core 的通用提取器）。
 """
-from app.core.ai.structured import extract_structured
+from app.core.ai.llm_tools import extract_structured
 
 from .schemas import ItineraryPlan
 

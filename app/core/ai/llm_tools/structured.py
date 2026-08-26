@@ -8,7 +8,7 @@ from typing import TypeVar, cast
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
-from .llm import get_llm
+from ..llm import get_llm
 
 # 结构化输出的模型类型：由调用方传入的 schema 决定（如 ItineraryPlan）
 _T = TypeVar("_T", bound=BaseModel)

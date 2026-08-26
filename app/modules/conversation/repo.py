@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.db import get_db
@@ -30,7 +30,16 @@ class ConversationRepo:
         await self.db.flush()
         return conversation
 
-    async def get(self, user_id: int):
+    async def get_by_user_id(self, user_id: int):
         stmt = select(Conversation).where(Conversation.user_id == user_id)
         result = await self.db.execute(stmt)
         return result.scalars().all()
+
+    async def update(self, conversation_id: str, title: str):
+        stmt = (
+            update(Conversation)
+            .where(Conversation.id == conversation_id)
+            .values(title=title)
+        )
+        await self.db.execute(stmt)
+        await self.db.flush()

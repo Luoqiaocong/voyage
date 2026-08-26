@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_serializer, model_validator
+
+from app.shared.utils import to_local_display
 
 
 # ============================================================
@@ -152,8 +154,13 @@ class ItineraryDetailResponse(BaseModel):
     id: Annotated[int, Field(description="行程 ID")]
     conversation_id: Annotated[str, Field(description="对话 ID")]
     plan: Annotated[ItineraryPlan, Field(description="行程计划")]
-    created_at: Annotated[datetime, Field(description="创建时间")]
-    updated_at: Annotated[datetime, Field(description="更新时间")]
+    created_at: Annotated[datetime, Field(description="创建时间（UTC）")]
+    updated_at: Annotated[datetime, Field(description="更新时间（UTC）")]
+
+    # 返回时统一转为上海时区展示（与会话模块一致）
+    @field_serializer("created_at", "updated_at")
+    def serialize_datetime(self, value: datetime) -> str:
+        return to_local_display(value)
 
     model_config = {"from_attributes": True}  # 允许反序列化，即orm转pydantic
 

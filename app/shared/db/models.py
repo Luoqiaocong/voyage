@@ -44,7 +44,7 @@ class User(Base):
          DateTime(timezone=True),
             default=utc_now,
             nullable=False,
-            comment="创建时间（北京时间）",
+            comment="创建时间（UTC）",
         )
    
     conversations: Mapped[list["Conversation"]] = relationship(
@@ -75,7 +75,7 @@ class Conversation(Base):
         DateTime(timezone=True),
         default=utc_now,
         nullable=False,
-        comment="会话创建时间（北京时间）",
+        comment="会话创建时间（UTC）",
     )
 
     user: Mapped[User] = relationship(back_populates="conversations")
@@ -115,14 +115,14 @@ class Itinerary(Base):
          DateTime(timezone=True),
         default=utc_now,
         nullable=False,
-        comment="创建时间（北京时间）",
+        comment="创建时间（UTC）",
     )
     updated_at: Mapped[datetime] = mapped_column(
          DateTime(timezone=True),
         default=utc_now,
         onupdate=utc_now,
         nullable=False,
-        comment="更新时间（北京时间），保存后再次编辑时自动刷新",
+        comment="更新时间（UTC），保存后再次编辑时自动刷新",
     )
 
     conversation: Mapped[Conversation | None] = relationship(back_populates="itineraries")
