@@ -152,7 +152,7 @@ class ItineraryDetailResponse(BaseModel):
     """行程详情响应。"""
 
     id: Annotated[int, Field(description="行程 ID")]
-    conversation_id: Annotated[str, Field(description="对话 ID")]
+    conversation_id: Annotated[str | None, Field(description="来源会话ID，会话删除后为空")]
     plan: Annotated[ItineraryPlan, Field(description="行程计划")]
     created_at: Annotated[datetime, Field(description="创建时间（UTC）")]
     updated_at: Annotated[datetime, Field(description="更新时间（UTC）")]
