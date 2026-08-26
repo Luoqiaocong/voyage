@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.ai.llm_tools import generate_conversation_title
+from app.core.ai.tasks import generate_conversation_title
 from app.core.business import BusinessCode, ConversationException
 from app.shared.db import get_db
 from app.shared.utils import TransactionMixin
