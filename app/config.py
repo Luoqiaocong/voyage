@@ -11,21 +11,11 @@ class VoyageConfig(BaseSettings):
     DEEPSEEK_API_KEY: str
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     ALIYUN_BASE_URL: str = "https://ws-llq8baw8q88n1gjz.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
-    TAVILY_API_KEY: str
 
     # ---------- 模型配置 ----------
-    MULTIMODAL_EMBEDDING_MODEL: str = "tongyi-embedding-vision-plus"
-    TEXT_EMBEDDING_MODEL: str = "text-embedding-v1"
     ALIYUN_LLM_MODEL: str = "qwen3-max"
     DEEPSEEK_LLM_MODEL_FLASH: str = "deepseek-v4-flash"
     DEEPSEEK_LLM_MODEL_PRO: str = "deepseek-v4-pro"
-    RERANK_MODEL: str = "qwen3-rerank"
-
-    # ---------- RAG 参数 ----------
-    CHUNK_SIZE: int = 1024
-    CHUNK_OVERLAP: int = 200
-    TOP_K: int = 10
-    RERANK_TOP_N: int = 5
 
     # ---------- JWT / 安全（密钥类必须由 .env / 环境变量提供，不设默认值）----------
     JWT_SECRET_KEY: str
