@@ -38,7 +38,7 @@ class ConversationRouter:
         summary="创建对话",
     )
     async def create_conversation(self):
-        conversation = await self.service.create_conversations(self.current_user.id)
+        conversation = await self.service.create_conversation(self.current_user.id)
         return ConversationResponse.model_validate(conversation)
 
     # -------------------- 2. 查询列表 --------------------

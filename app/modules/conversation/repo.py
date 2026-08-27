@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends
 from sqlalchemy import delete, select, update
@@ -35,11 +35,21 @@ class ConversationRepo:
         result = await self.db.execute(stmt)
         return result.scalars().all()
 
-    async def update(self, conversation_id: str, title: str):
+    async def update_conversation(self, conversation_id: str, updated_data: dict[str, Any]):
         stmt = (
             update(Conversation)
             .where(Conversation.id == conversation_id)
-            .values(title=title)
+            .values(**updated_data)
         )
         await self.db.execute(stmt)
         await self.db.flush()
+
+    async def get_empty_conversation(self, user_id: int):
+        stmt = (
+            select(Conversation)
+            .where(Conversation.user_id == user_id)
+            .where(Conversation.message_count == 0)
+            .limit(1)
+        )
+        result = await self.db.execute(stmt)
+        return result.scalars().first()

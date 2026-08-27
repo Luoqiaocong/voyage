@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.ai.tasks import generate_conversation_title
 from app.core.business import BusinessCode, ConversationException
 from app.shared.db import get_db
+from app.shared.db.models import Conversation
 from app.shared.utils import TransactionMixin
 
 from .util import get_id
@@ -32,7 +33,11 @@ class ConversationService(TransactionMixin):
             raise ConversationException(code=BusinessCode.CONVERSATION_PERMISSION_DENIED)
 
     # -------------------- 1. 创建 --------------------
-    async def create_conversations(self, user_id: int):
+    async def create_conversation(self, user_id: int):
+        """创建会话：已有空会话时直接复用，避免重复堆积。"""
+        conversation = await self.repo.get_empty_conversation(user_id)
+        if conversation:
+            return conversation
         conversation_id = get_id()
         async with self.transaction_scope():
             return await self.repo.create(
@@ -68,22 +73,31 @@ class ConversationService(TransactionMixin):
 
         # 已有标题则不重复生成
         conversation = await self.repo.check(conversation_id)
-        if conversation and conversation.title:
-            return
+        if conversation is None:
+            raise ConversationException(code=BusinessCode.CONVERSATION_NOT_FOUND)
 
-        full_text = f"用户消息：{message}\nAI回复：{ai_text}"
-        try:
-            title = await generate_conversation_title(full_text)
-        except Exception as exc:
-            print(f"[send_message] title failed: {exc}")  # noqa: T201
-            return  # 标题生成失败不影响对话主流程
+        updated_data = {}
+
+        if not conversation.title:
+            full_text = f"用户消息：{message}\nAI回复：{ai_text}"
+            try:
+                title = await generate_conversation_title(full_text)
+                updated_data["title"] = title
+            except Exception as exc:
+                print(f"[send_message] title failed: {exc}")  # noqa: T201
+            
+            
+        updated_data["message_count"] = conversation.message_count + 1
+
         async with self.transaction_scope():
-            await self.repo.update(conversation_id, title)
-        yield {"type": "title", "content": title}
+            await self.repo.update_conversation(conversation_id, updated_data)
+
+        if updated_data.get("title"):
+            yield {"type": "title", "content": updated_data["title"]}
 
     async def update_title(self, conversation_id: str, title: str):
         async with self.transaction_scope():
-            await self.repo.update(conversation_id, title)
+            await self.repo.update_conversation(conversation_id, {"title": title})
 
     # -------------------- 5. 删除 --------------------
     async def delete_conversation(self, conversation_id: str):
