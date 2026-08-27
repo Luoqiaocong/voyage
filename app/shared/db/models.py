@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 # relationship     : ORM 层的“对象关系”，用于 Python 侧便捷访问关联数据
 #                    （它只影响 ORM 对象访问，不影响数据库表结构本身）
 # ────────────────────────────────────────────────────────────────
-from sqlalchemy import JSON, DateTime, ForeignKey, String
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -76,6 +76,13 @@ class Conversation(Base):
         default=utc_now,
         nullable=False,
         comment="会话创建时间（UTC）",
+    )
+    
+    message_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        comment="会话消息数",
     )
 
     user: Mapped[User] = relationship(back_populates="conversations")

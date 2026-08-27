@@ -92,6 +92,7 @@ class UserService(TransactionMixin):
         """修改用户密码"""
         # 1. 先验证用户身份（旧密码是否正确）
         user = await self._get_user(user_id=user_id)
+    
         
         if not PasswordManager.verify(current_pwd, user.password):
             raise UserException(code=BusinessCode.USER_PWD_AUTH_FAILED)
