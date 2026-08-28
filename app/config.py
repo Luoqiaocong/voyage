@@ -20,12 +20,12 @@ class VoyageConfig(BaseSettings):
     # ---------- JWT / 安全（密钥类必须由 .env / 环境变量提供，不设默认值）----------
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 3000000
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     HASH_SALT: str
     
     LOG_LEVEL: str = "INFO"
-    LOG_TO_FILE: bool = True  # 是否输出到文件
+    LOG_TO_FILE: bool = False  # 是否输出到文件
     LOG_SAVE_PATH: str = "logs"  # 日志存放文件夹名
 
     model_config = SettingsConfigDict(
