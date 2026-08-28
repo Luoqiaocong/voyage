@@ -54,3 +54,17 @@ class ConversationTitleRequest(BaseModel):
 
 class UserConversationsResponse(BaseModel):
     conversations: list[ConversationResponse]
+
+
+class ConversationIdsRequest(BaseModel):
+    """批量删除会话的请求体。"""
+    ids: list[str] = Field(min_length=1, description="要删除的会话ID列表")
+
+    @field_validator("ids")
+    @classmethod
+    def validate_ids(cls, v: list[str]) -> list[str]:
+        # 检查每个元素是否为 12 位会话 ID
+        for item in v:
+            if len(item) != 12:
+                raise ValueError(f"每个 ID 长度必须为 12 位，但发现 {item} 长度为 {len(item)}")
+        return v

@@ -104,11 +104,24 @@ class ConversationService(TransactionMixin):
         # 先删除内存会话再删除数据库会话数据,还是要事务处理，如果某一个环节崩了会有残留
         await self.gateway.delete_conversation(conversation_id)
         async with self.transaction_scope():
-            is_deleted = await self.repo.remove(conversation_id)
-        if not is_deleted:
+            deleted_count = await self.repo.remove([conversation_id])
+        if deleted_count == 0:
             raise ConversationException(BusinessCode.CONVERSATION_DELETED_FAILED)
 
-    async def delete_conversations_for_user(self, user_id: int) -> None:
+    async def delete_conversations_by_user(self, user_id: int) -> None:
         """注销辅助：清理该用户所有会话的 langgraph 线程（DB 会话行由 users 级联删除）。"""
         conversations = await self.repo.get_by_user_id(user_id)
         await self.gateway.delete_conversation_batch([c.id for c in conversations])
+
+    async def delete_conversations_by_ids(self, user_id: int, conversation_ids: list[str]):
+        """批量删除会话：只删除属于当前用户的会话，其余 id 静默跳过。"""
+        if not conversation_ids:
+            return
+        owned = await self.repo.get_by_user_id(user_id)
+        own_ids = {c.id for c in owned}
+        targets = [cid for cid in conversation_ids if cid in own_ids]
+        if not targets:
+            return  # 没有可删除的会话，静默返回
+        await self.gateway.delete_conversation_batch(targets)
+        async with self.transaction_scope():
+            await self.repo.remove(targets)

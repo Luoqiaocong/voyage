@@ -14,6 +14,7 @@ from .schemas import (
     ConversationTitleRequest,
     ConversationResponse,
     UserConversationsResponse,
+    ConversationIdsRequest
 )
 from .service import ConversationService
 from .dependencies import verify_conversation_owner
@@ -107,9 +108,18 @@ class ConversationRouter:
         status_code=status.HTTP_204_NO_CONTENT,
         summary="删除单个对话",
         dependencies=[Depends(verify_conversation_owner)],
+        deprecated=True
     )
     async def delete_conversation(
         self,
         id: Annotated[ConversationId, Path()],
     ):
         await self.service.delete_conversation(id)
+        
+    @router.post(
+        "/delete",
+        status_code=status.HTTP_204_NO_CONTENT,
+        summary="批量删除对话",
+    )
+    async def delete_conversations(self, delete_req: ConversationIdsRequest):
+        await self.service.delete_conversations_by_ids(self.current_user.id, delete_req.ids)

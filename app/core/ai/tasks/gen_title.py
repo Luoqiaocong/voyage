@@ -26,6 +26,7 @@ async def generate_conversation_title(conversation_text: str) -> str:
 3. 如果是美食推荐，格式为「目的地 + 美食探索」
 4. 不要用「关于」「讨论」等虚词开头
 5. 直接输出标题，不要任何解释
+6. 主要以用户消息的概要为核心
 
 对话内容：
 {conversation_text}

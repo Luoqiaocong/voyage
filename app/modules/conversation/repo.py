@@ -18,11 +18,11 @@ class ConversationRepo:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def remove(self, conversation_id: str):
-        stmt = delete(Conversation).where(Conversation.id == conversation_id)
+    async def remove(self, conversation_ids: list[str]):
+        stmt = delete(Conversation).where(Conversation.id.in_(conversation_ids))
         row = await self.db.execute(stmt)
         await self.db.flush()
-        return row.rowcount > 0  # type: ignore
+        return row.rowcount  # type: ignore
 
     async def create(self, **kwargs) -> Conversation:
         conversation = Conversation(**kwargs)
@@ -31,7 +31,7 @@ class ConversationRepo:
         return conversation
 
     async def get_by_user_id(self, user_id: int):
-        stmt = select(Conversation).where(Conversation.user_id == user_id)
+        stmt = select(Conversation).where(Conversation.user_id == user_id).order_by(Conversation.created_at.desc())
         result = await self.db.execute(stmt)
         return result.scalars().all()
 
