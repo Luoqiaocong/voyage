@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 from fastapi.responses import RedirectResponse
-from langgraph.checkpoint.memory import InMemorySaver
 from fastapi import FastAPI
 from app.core.ai import AgentFactory
 from app.core.business import register_exception
@@ -8,19 +7,22 @@ from app.api import api_router
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
-
+from app.shared.utils import init_log, close_log
 SQLITE_PATH = Path(__file__).resolve().parent.parent / "data" / "exports" / "checkpoints.sqlite"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with AsyncSqliteSaver.from_conn_string(str(SQLITE_PATH)) as checkpointer:
-        # 若 API 需要：await checkpointer.setup()
-        # AgentFactory.initialize()
-        AgentFactory.initialize(checkpointer)
-        # app.state.checkpointer = checkpointer  # 可选：事后读 state 用
-        yield
-    AgentFactory.reset()  # 关闭前清掉，避免指着已关连接
+    init_log()
+    try:
+        async with AsyncSqliteSaver.from_conn_string(str(SQLITE_PATH)) as checkpointer:
+            AgentFactory.initialize(checkpointer)
+            try:
+                yield
+            finally:
+                AgentFactory.reset()   # 异常也兜底，且仍在连接关闭前
+    finally:
+        close_log()
     
 app = FastAPI(title="VOYAGE AI TRAVEL PLANNER",lifespan=lifespan)
 
@@ -48,7 +50,8 @@ def read_root():
 #
 # ─────────── 阶段 1：功能闭环收尾 ─────────────────────────────
 # [~] 1. 会话删除的一致性
-#     - 先删 memory(thread) 再删 DB，一端失败时的补偿机制待补
+#     - 已实现：先删业务行（事务内）再清 checkpoint，失败残留记录于日志
+#     - 待补：孤立 checkpoint 清理函数（扫描无对应会话行的残留数据并删除）
 #
 # ─────────── 阶段 2：扩展与生产化 ─────────────────────────────
 # [ ] 2. AI 能力调优（建议下一个开发方向）
@@ -65,8 +68,7 @@ def read_root():
 #        -- 重置密码采用两步验证：验证码换临时 token，再凭临时 token 重置密码
 #     - 可选：会话短期记忆迁移至 Redis checkpointer（已有暂存方案）
 # [ ] 4. SQLite 统一迁移到 PostgreSQL（asyncpg + sqlalchemy，配合 Alembic）
-#     - 当前无强需求（RAG 已搁置、无向量场景），建议放在最后
+#     - 当前无强需求,建议放在最后
 # [~] 5. 生产化：日志、监控、限流、错误告警
 #     - 模型层重试 / 降级 / 限流已完成，日志系统暂缓
-# [ ] 6. 清理遗留：test、data 等不需要的目录/文件
 # ==============================================================
