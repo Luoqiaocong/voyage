@@ -4,6 +4,7 @@ from loguru import logger
 from app.config import config
 
 def init_log():
+    """初始化日志系统。"""
     logger.remove()
 
     logger.add(
@@ -25,5 +26,12 @@ def init_log():
             encoding="utf-8",
             enqueue=True
         )
+        
+def close_log():
+    """关闭日志系统（释放资源）。"""
+    logger.remove()
+    # 等待所有日志写入完成
+    import time
+    time.sleep(0.1)
 
 log = logger

@@ -7,7 +7,7 @@ from typing import TypeVar, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
-
+from app.shared.utils import log
 from ..llm import get_llm
 
 # 结构化输出的模型类型：由调用方传入的 schema 决定（如 ItineraryPlan）
@@ -56,5 +56,5 @@ async def extract_structured(
         ]))
     except Exception as exc:
         # 开发期排查用：打印完整校验信息（含模型原始输出片段）
-        print(f"[extract_structured] failed: {exc}")  # noqa: T201
+        log.error(f"[extract_structured] failed: {exc}") 
         return None
