@@ -18,7 +18,7 @@ from .schemas import (
 )
 from .service import UserService
 
-router = APIRouter(prefix="/user", tags=["user"], route_class=UnifiedRoute)
+router = APIRouter(prefix="/users", tags=["users"], route_class=UnifiedRoute)
 
 # TODO:
 # 1. 用户注销 ✅ 已实现

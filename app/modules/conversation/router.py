@@ -22,7 +22,7 @@ from .dependencies import verify_conversation_owner
 # ===================== 路由定义 =====================
 router = APIRouter(
     prefix="/conversations",
-    tags=["conversation"],
+    tags=["conversations"],
     route_class=UnifiedRoute,
 )
 
