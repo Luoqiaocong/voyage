@@ -129,7 +129,7 @@ class UserService(TransactionMixin):
         user = await self._get_user(user_id=user_id)
 
         # 1. 先清该用户所有会话的 langgraph 线程（conversation 域公共接口）
-        await self.conv_service.delete_conversations_for_user(user.id)
+        await self.conv_service.delete_conversations_by_user(user.id)
 
         # 2. 再删业务库用户（级联删会话）
         async with self.transaction_scope():
