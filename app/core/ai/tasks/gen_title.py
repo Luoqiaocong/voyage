@@ -1,4 +1,4 @@
-"""会话标题生成：根据首轮对话内容概括主题（尽力而为，失败由调用方兜底）。"""
+"""会话标题生成：根据首轮对话内容概括主题（失败不影响主流程）。"""
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
