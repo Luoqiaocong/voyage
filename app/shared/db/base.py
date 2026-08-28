@@ -6,6 +6,6 @@ Base.metadata 正是 alembic env.py 里 target_metadata = Base.metadata 要读�
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase
 
-
+#AsyncAttrs 可以让你在异步程序中能够按需懒加载数据
 class Base(AsyncAttrs, DeclarativeBase):
     """所有 ORM 模型的基类。"""

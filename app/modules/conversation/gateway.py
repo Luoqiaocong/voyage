@@ -89,5 +89,5 @@ class ConversationGateway:
         if not conversation_ids:
             return
         tasks = [self.delete_conversation(conv_id) for conv_id in conversation_ids]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True) # 所有任务都会执行完，报错的任务返回异常对象，成功的任务返回正常结果。
         # TODO(日志): 引入日志设施后，遍历 results 记录删除失败的会话

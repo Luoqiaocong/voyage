@@ -64,7 +64,7 @@ class ConversationRouter:
         self,
         id: Annotated[ConversationId, Path()],
     ):
-        # TODO: 将来需支持 offset/limit 分批返回
+        # TODO: 
         # 消息按轮次返回：HumanMessage → AI/Tool → 下一条 HumanMessage 前
         return await self.service.get_messages(id)
 
