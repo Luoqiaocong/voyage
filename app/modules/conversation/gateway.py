@@ -85,9 +85,10 @@ class ConversationGateway:
     async def delete_conversation_batch(
         self,
         conversation_ids: list[str],
-    ) -> None:
+    ) -> list[BaseException | None]:
+        """批量删除 langgraph 线程；返回每个线程的删除结果，异常对象表示失败（由调用方降级记录）。"""
         if not conversation_ids:
-            return
+            return []
         tasks = [self.delete_conversation(conv_id) for conv_id in conversation_ids]
-        results = await asyncio.gather(*tasks, return_exceptions=True) # 所有任务都会执行完，报错的任务返回异常对象，成功的任务返回正常结果。
-        # TODO(日志): 引入日志设施后，遍历 results 记录删除失败的会话
+        results = await asyncio.gather(*tasks, return_exceptions=True) # ✅ 与传入顺序一致（无论完成先后）,如果按完成顺序排序则使用as_completed
+        return list(results)

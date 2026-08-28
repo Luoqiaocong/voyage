@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.ai.tasks import generate_conversation_title
 from app.core.business import BusinessCode, ConversationException
 from app.shared.db import get_db
-from app.shared.db.models import Conversation
 from app.shared.utils import TransactionMixin
 
 from .util import get_id
@@ -101,27 +100,41 @@ class ConversationService(TransactionMixin):
 
     # -------------------- 5. 删除 --------------------
     async def delete_conversation(self, conversation_id: str):
-        # 先删除内存会话再删除数据库会话数据,还是要事务处理，如果某一个环节崩了会有残留
-        await self.gateway.delete_conversation(conversation_id)
+        # 1. 先删业务行（事务内）：失败即整体失败，用户可重试，状态干净
         async with self.transaction_scope():
             deleted_count = await self.repo.remove([conversation_id])
         if deleted_count == 0:
             raise ConversationException(BusinessCode.CONVERSATION_DELETED_FAILED)
 
-    async def delete_conversations_by_user(self, user_id: int) -> None:
-        """注销辅助：清理该用户所有会话的 langgraph 线程（DB 会话行由 users 级联删除）。"""
-        conversations = await self.repo.get_by_user_id(user_id)
-        await self.gateway.delete_conversation_batch([c.id for c in conversations])
+        # 2. 行删成功后再删 langgraph 线程：失败只留不可见孤儿数据，降级记录，不阻断
+        try:
+            await self.gateway.delete_conversation(conversation_id)
+        except Exception as exc:
+            print(f"[delete_conversation] thread cleanup failed: {conversation_id}: {exc}")  # noqa: T201
 
-    async def delete_conversations_by_ids(self, user_id: int, conversation_ids: list[str]):
+
+    async def _delete_conversations_batch_base(self, conversation_ids: list[str]):
+        if not conversation_ids:
+            return
+        async with self.transaction_scope():
+            await self.repo.remove(conversation_ids)
+        results = await self.gateway.delete_conversation_batch(conversation_ids)
+        for cid, result in zip(conversation_ids, results):
+            if isinstance(result, Exception):
+                print(f"[delete_conversations_by_user] thread cleanup failed: {cid}: {result}")  # noqa: T201
+
+    async def delete_conversations_by_user(self, user_id: int) -> None:
+        """注销辅助：先删该用户所有会话的业务行，再清 langgraph 线程（用户行由调用方级联删除）。"""
+        conversations = await self.repo.get_by_user_id(user_id)
+        conversation_ids = [c.id for c in conversations]
+        await self._delete_conversations_batch_base(conversation_ids)
+       
+
+    async def delete_conversations_by_id(self, user_id: int, conversation_ids: list[str]):
         """批量删除会话：只删除属于当前用户的会话，其余 id 静默跳过。"""
         if not conversation_ids:
             return
         owned = await self.repo.get_by_user_id(user_id)
-        own_ids = {c.id for c in owned}
-        targets = [cid for cid in conversation_ids if cid in own_ids]
-        if not targets:
-            return  # 没有可删除的会话，静默返回
-        await self.gateway.delete_conversation_batch(targets)
-        async with self.transaction_scope():
-            await self.repo.remove(targets)
+        own_ids = {c.id for c in owned}  # 得到当前用户持有的所有会话
+        targets = [cid for cid in conversation_ids if cid in own_ids] # 取交集，如果不在交集内则跳过
+        await self._delete_conversations_batch_base(targets)
