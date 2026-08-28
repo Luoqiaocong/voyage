@@ -103,19 +103,6 @@ class ConversationRouter:
         await self.service.update_title(id, req.title)
         
     # -------------------- 5. 删除 --------------------
-    @router.delete(
-        "/{id}",
-        status_code=status.HTTP_204_NO_CONTENT,
-        summary="删除单个对话",
-        dependencies=[Depends(verify_conversation_owner)],
-        deprecated=True
-    )
-    async def delete_conversation(
-        self,
-        id: Annotated[ConversationId, Path()],
-    ):
-        await self.service.delete_conversation(id)
-        
     @router.post(
         "/delete",
         status_code=status.HTTP_204_NO_CONTENT,

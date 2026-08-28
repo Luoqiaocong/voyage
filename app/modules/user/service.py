@@ -123,14 +123,16 @@ class UserService(TransactionMixin):
         
     async def to_delete_user(self, user_id: int) -> None:
         """用户注销（硬删除）。
-        顺序：先清 checkpoint（外部存储，独立于业务事务），再删业务库用户
-        （repo.delete 内部会加载 conversations，保证 ORM 级联可靠触发）。
+
+        顺序：先清该用户会话的 langgraph checkpoint（外部存储），
+        再在同一事务内删除会话行与用户行（显式删除，不依赖 ORM 级联，保证原子）。
         """
         user = await self._get_user(user_id=user_id)
 
-        # 1. 先清该用户所有会话的 langgraph 线程（conversation 域公共接口）
-        await self.conv_service.delete_conversations_by_user(user.id)
+        # 1. 先清 checkpoint（外部存储无法参与事务；失败残留由孤儿清理函数兜底）
+        await self.conv_service.delete_checkpoints_for_user(user.id)
 
-        # 2. 再删业务库用户（级联删会话）
+        # 2. 会话行 + 用户行同事务删除（同一请求共享同一数据库会话）
         async with self.transaction_scope():
+            await self.conv_service.delete_conversation_rows(user.id)
             await self.repo.delete(user)

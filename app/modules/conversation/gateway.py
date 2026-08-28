@@ -86,7 +86,7 @@ class ConversationGateway:
         self,
         conversation_ids: list[str],
     ) -> list[BaseException | None]:
-        """批量删除 langgraph 线程；返回每个线程的删除结果，异常对象表示失败（由调用方降级记录）。"""
+        """批量清理 langgraph checkpoint；返回每个会话的清理结果，异常对象表示失败（由调用方降级记录）。"""
         if not conversation_ids:
             return []
         tasks = [self.delete_conversation(conv_id) for conv_id in conversation_ids]
