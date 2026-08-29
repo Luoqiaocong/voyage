@@ -27,6 +27,16 @@ class VoyageConfig(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_TO_FILE: bool = False  # 是否输出到文件
     LOG_SAVE_PATH: str = "logs"  # 日志存放文件夹名
+    
+    RESEND_API_KEY: str
+    MAIL_FROM_NAME:str  = "Voyage" 
+    MAIL_FROM_ADDRESS:str = "noreply@v.hiseven.cn"
+
+    # ---------- 邮件 SMTP（默认 Resend；切换供应商时只需改这几项）----------
+    SMTP_HOST: str = "smtp.resend.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = "resend"
+    
 
     model_config = SettingsConfigDict(
         env_file=ENV_PATH,

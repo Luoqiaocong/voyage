@@ -9,6 +9,7 @@ wheels/
 # Virtual environments
 .venv/
 .env
+.tests/
 data/
 process.md
 frontend/
