@@ -17,15 +17,15 @@ class BaseBusinessException(Exception):
         super().__init__(self.msg)
 
 
-class AuthException(BaseBusinessException):
-    """认证/鉴权模块异常"""
-    def __init__(self, code: BusinessCode = BusinessCode.UNAUTHORIZED, msg: str | None = None, data: Any = None):
-        super().__init__(code=code, msg=msg, data=data)
-
-
 class UserException(BaseBusinessException):
     """用户模块异常"""
     def __init__(self, code: BusinessCode = BusinessCode.USER_NOT_FOUND, msg: str | None = None, data: Any = None):
+        super().__init__(code=code, msg=msg, data=data)
+        
+        
+class AuthException(BaseBusinessException):
+    """认证/鉴权模块异常"""
+    def __init__(self, code: BusinessCode = BusinessCode.AUTH_FAILD, msg: str | None = None, data: Any = None):
         super().__init__(code=code, msg=msg, data=data)
 
 

@@ -34,6 +34,7 @@ class BusinessCode(Enum):
     CODE_VERIFY_FAILED = (10005, "验证码验证失败")
     RATE_LIMIT_EXCEEDED = (10006, "请求过于频繁，请稍后再试")
     MAIL_SEND_FAILED = (10007, "邮件发送失败")
+    AUTH_FAILD = (10008, "认证失败")
 
     UNAUTHORIZED = (10101, "未授权，请先登录")
     TOKEN_EXPIRED = (10102, "登录已过期，请重新登录")

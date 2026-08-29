@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI):
     finally:
         close_log()
     
-app = FastAPI(title="VOYAGE AI TRAVEL PLANNER",lifespan=lifespan)
+app = FastAPI(title="voyage Plan Assistant",lifespan=lifespan)
 
 app.include_router(api_router)
 
