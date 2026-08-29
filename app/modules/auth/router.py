@@ -18,7 +18,7 @@ class AuthRouterAPI:
                  status_code=status.HTTP_200_OK,
                  summary='发送验证码')
     async def send_code(self,email:VerifyEmailRequest):
-        return await self.service.send_code(email.email)
+        return await self.service.send_code(email.email,"注册",3)
 
 
 
