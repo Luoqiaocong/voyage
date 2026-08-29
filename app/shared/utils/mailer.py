@@ -20,7 +20,7 @@ from app.config import config
 SMTP_TIMEOUT_SECONDS = 15.0
 
 
-def _build_verification_html(*, code: str, purpose: str, expire_minutes: int) -> str:
+def _build_verification_html(*, code: str, expire_minutes: int) -> str:
     """构建验证码邮件 HTML（渐变精致风，全内联样式，兼容 QQ / 163 / Gmail 等主流客户端）。"""
     brand = config.MAIL_FROM_NAME
     return f"""<!DOCTYPE html>
@@ -33,8 +33,8 @@ def _build_verification_html(*, code: str, purpose: str, expire_minutes: int) ->
           <tr>
             <td style="font-family:'Microsoft YaHei','PingFang SC',sans-serif;color:#0f172a;text-align:center;">
               <div style="width:64px;height:5px;background:linear-gradient(90deg,#3b82f6,#60a5fa);border-radius:3px;margin:0 auto 28px;"></div>
-              <div style="font-size:22px;font-weight:700;letter-spacing:1px;line-height:1.4;">{purpose}验证</div>
-              <div style="font-size:14px;color:#64748b;margin-top:10px;line-height:1.6;">您好，您正在进行「{purpose}」，请使用以下验证码完成验证</div>
+              <div style="font-size:22px;font-weight:700;letter-spacing:1px;line-height:1.4;">邮箱验证</div>
+              <div style="font-size:14px;color:#64748b;margin-top:10px;line-height:1.6;">您好！请使用以下验证码完成验证</div>
               <div style="margin:32px 0 0;text-align:center;">
                 <span style="display:inline-block;padding:18px 42px;background-color:#3b82f6;background-image:linear-gradient(135deg,#3b82f6,#60a5fa);border-radius:12px;box-shadow:0 6px 18px rgba(59,130,246,0.28);font-family:Consolas,'Courier New',monospace;font-size:32px;font-weight:700;letter-spacing:10px;color:#ffffff;">{code}</span>
               </div>
@@ -64,6 +64,13 @@ async def _send_smtp(*, to: str, subject: str, html: str, text: str | None) -> b
     message["Subject"] = subject
     message.set_content(text or "请使用支持 HTML 的邮件客户端查看本邮件。")
     message.add_alternative(html, subtype="html")
+    
+    """
+    根据 MIME 协议的 multipart/alternative 标准，邮件客户端会按照 "后添加的优先" 原则来处理内容：
+      1.如果客户端支持 HTML → 显示最后添加的 HTML 版本
+      2.如果客户端不支持 HTML → 显示纯文本版本
+    """
+    
 
     password = config.RESEND_API_KEY
     try:
@@ -85,28 +92,25 @@ async def _send_smtp(*, to: str, subject: str, html: str, text: str | None) -> b
 async def send_verification_code(
     to: str,
     code: str,
-    purpose: str = "登录",
-    expire_minutes: int = 5,
+    expire_minutes: int = 3,
 ) -> bool:
     """发送验证码邮件。
 
     Args:
         to: 收件人邮箱
         code: 验证码（建议 6 位数字字符串）
-        purpose: 验证用途（如 登录 / 注册 / 重置密码）
         expire_minutes: 验证码有效期（分钟）
 
     Returns:
         bool: 发送成功返回 True，否则返回 False
     """
-    subject = f"【{config.MAIL_FROM_NAME}】{purpose}验证码"
+    subject = f"【{config.MAIL_FROM_NAME}】邮箱验证码"
     html = _build_verification_html(
         code=code,
-        purpose=purpose,
         expire_minutes=expire_minutes,
     )
     text = (
-        f"您正在进行「{purpose}」操作，验证码为：{code}\n"
+        f"您好！您的验证码为：{code}\n"
         f"该验证码 {expire_minutes} 分钟内有效，请勿向他人泄露。\n\n"
         f"—— {config.MAIL_FROM_NAME} AI · v.hiseven.cn"
     )
