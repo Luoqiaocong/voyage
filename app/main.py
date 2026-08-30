@@ -8,6 +8,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from app.shared.utils import init_log, close_log
+from app.shared.redis import redis_client
 SQLITE_PATH = Path(__file__).resolve().parent.parent / "data" / "exports" / "checkpoints.sqlite"
 
 
@@ -15,6 +16,7 @@ SQLITE_PATH = Path(__file__).resolve().parent.parent / "data" / "exports" / "che
 async def lifespan(app: FastAPI):
     init_log()
     try:
+        await redis_client.init_redis()
         async with AsyncSqliteSaver.from_conn_string(str(SQLITE_PATH)) as checkpointer:
             AgentFactory.initialize(checkpointer)
             try:
@@ -22,6 +24,7 @@ async def lifespan(app: FastAPI):
             finally:
                 AgentFactory.reset()   # 异常也兜底，且仍在连接关闭前
     finally:
+        await redis_client.close()
         close_log()
     
 app = FastAPI(title="voyage Plan Assistant",lifespan=lifespan)
