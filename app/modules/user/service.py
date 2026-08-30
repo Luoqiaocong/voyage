@@ -5,10 +5,12 @@ from pydantic import EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.business import BusinessCode, UserException
+from app.modules.auth.constants import VERIFY_CODE_KEY_PREFIX
 from app.modules.conversation.service import ConversationService
 from app.shared.db import get_db
 from app.shared.db.models import User
-from app.shared.utils import TransactionMixin
+from app.shared.redis import redis_client
+from app.shared.utils import TransactionMixin, log
 
 from .auth import (
     PasswordManager,
@@ -51,12 +53,21 @@ class UserService(TransactionMixin):
         email: EmailStr,
         pwd: str,
         username: str,
-    )->None:
+        code: str,
+    ) -> None:
         """用户注册"""
-        # 检查邮箱是否已存在
+        # 先检查邮箱是否已存在，避免已有账号也消耗一次验证码
         existing_user = await self.repo.get_user_dynamic(email=email)
         if existing_user:
             raise UserException(code=BusinessCode.USER_EXIST)
+
+        # 校验邮箱验证码（一次性：校验通过即删除，防止重放）
+        client = redis_client.get_client()
+        stored_code = await client.get(f"{VERIFY_CODE_KEY_PREFIX}{email}")
+        if stored_code is None or stored_code != code:
+            log.error("邮箱验证码校验失败 email={}", email)
+            raise UserException(code=BusinessCode.CODE_VERIFY_FAILED)
+        await client.delete(f"{VERIFY_CODE_KEY_PREFIX}{email}")
 
         # 密码强校验
         validate_password_strength(pwd)

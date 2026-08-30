@@ -45,6 +45,7 @@ class UserRouter:
             userdata.email,
             userdata.password,
             userdata.username,
+            userdata.code,
         )
 
     @router.post("/login", summary="用户登录", status_code=status.HTTP_200_OK)

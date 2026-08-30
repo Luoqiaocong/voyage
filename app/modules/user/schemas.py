@@ -1,5 +1,5 @@
 from typing import Annotated
-from pydantic import BaseModel, EmailStr, Field, field_serializer
+from pydantic import BaseModel, EmailStr, Field, field_serializer, field_validator
 from .auth import get_hashed_id
 
 
@@ -17,6 +17,11 @@ class UserProfileBase(BaseModel):
 
 class RegisterUserRequest(UserBaseRequest):
     username: Annotated[str, Field(description="用户昵称", min_length=2, max_length=10)]
+    code: Annotated[str, Field(description="邮箱验证码", min_length=6, max_length=6)]
+
+    @field_validator("code", mode="before")
+    def strip_code(cls, value: str) -> str:
+        return value.strip()
     
     model_config = {
                 "json_schema_extra": {
@@ -24,7 +29,8 @@ class RegisterUserRequest(UserBaseRequest):
                         {
                             "email": "admin@example.com",
                             "password": "1234567890",
-                            "username": "admin"
+                            "username": "admin",
+                            "code": "123456"
                         }
                     ]
                 }
