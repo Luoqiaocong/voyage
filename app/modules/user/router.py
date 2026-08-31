@@ -16,7 +16,6 @@ from .schemas import (
     UserResetPasswordRequest,
     UserInfo,
     UserProfileUpdate,
-    UserEmailRequest
 )
 from .service import UserService
 
@@ -91,13 +90,6 @@ class UserRouter:
             pwd_req.current_password,
             pwd_req.new_password,
         )
-        
-    @router.post("/token",
-                     status_code=status.HTTP_200_OK,
-                     summary="获取token")
-    async def generate_token(self,verify_req:UserEmailRequest):
-        return await self.service.generate_reset_token(verify_req.email,verify_req.code)
-    
         
     @router.post("/reset", summary="用户密码重置", status_code=status.HTTP_204_NO_CONTENT)
     async def reset_password(self, reset_req: UserResetPasswordRequest):

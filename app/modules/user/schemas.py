@@ -64,11 +64,6 @@ class UserChangePasswordRequest(BaseModel):
         }
     }
     
-class UserEmailRequest(BaseModel):
-    email: Annotated[EmailStr, Field(description="邮箱地址")]
-    code: Annotated[str, Field(description="邮箱验证码", min_length=6, max_length=6)]  
-    
-
 class UserResetPasswordRequest(BaseModel):
     password: Annotated[str, Field(description="新密码", min_length=8)]
     token: Annotated[str, Field(description="重置密码 临时Token")]

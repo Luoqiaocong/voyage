@@ -11,7 +11,6 @@ from app.modules.auth.tokens import (
     create_refresh_token,
     delete_reset_token,
     get_reset_token_email,
-    issue_reset_token,
 )
 from app.modules.conversation.service import ConversationService
 from app.shared.db import get_db
@@ -188,10 +187,3 @@ class UserService(TransactionMixin):
         async with self.transaction_scope():
             await self.conv_service.delete_conversation_rows(user.id)
             await self.repo.delete(user)
-            
-            
-    async def generate_reset_token(self, email: str, code: str) -> dict:
-        """两步重置第一步：校验验证码后签发一次性重置令牌。"""
-        await self._verify_email_code(email, code, user_exists=True)
-        token = await issue_reset_token(email)
-        return {"token": token}
