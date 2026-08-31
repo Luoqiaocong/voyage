@@ -20,5 +20,5 @@ class AuthRouterAPI:
     async def send_code(self,verify_req:VerifyEmailRequest):
         return await self.service.send_code(verify_req.email)
 
-
+    
 

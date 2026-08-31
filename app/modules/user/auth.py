@@ -1,3 +1,4 @@
+import hashlib
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -87,6 +88,16 @@ def create_refresh_token() -> str:
     """生成长寿命、高强度的全球唯一随机字符串作为 RefreshToken"""
     # 生成 32 字节的十六进制安全随机数（比普通的 UUID 更加防猜测、防碰撞）
     return secrets.token_hex(32)
+
+
+def create_reset_token() -> str:
+    """生成长寿命、高强度的全球唯一随机字符串作为 ResetToken"""
+    return secrets.token_urlsafe(32)
+
+
+def hash_reset_token(token: str) -> str:
+    """对重置令牌做 SHA-256 摘要，避免明文令牌落入 Redis。"""
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 hashids = Hashids(salt=config.HASH_SALT, min_length=12)

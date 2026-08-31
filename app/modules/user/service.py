@@ -5,18 +5,24 @@ from pydantic import EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.business import BusinessCode, UserException
-from app.modules.auth.constants import VERIFY_CODE_KEY_PREFIX
+from app.modules.auth.constants import (
+    VERIFY_CODE_KEY_PREFIX,
+    VERIFY_TOKEN_PREFIX,
+    VERIFY_TOKEN_TTL_SECONDS,
+)
 from app.modules.conversation.service import ConversationService
 from app.shared.db import get_db
 from app.shared.db.models import User
-from app.shared.redis import redis_client
+from app.shared.redis import get_value, redis_client, verify_code
 from app.shared.utils import TransactionMixin, log
 
 from .auth import (
     PasswordManager,
     create_access_token,
     create_refresh_token,
+    create_reset_token,
     get_hashed_id,
+    hash_reset_token,
     validate_password_strength,
 )
 from .repo import UserRepo
@@ -34,6 +40,7 @@ class UserService(TransactionMixin):
         self.conv_service = conv_service
         self.db = db
 
+
     # ============ 内部辅助方法 ============
     async def _get_user(
         self,
@@ -47,6 +54,35 @@ class UserService(TransactionMixin):
             raise UserException(code=BusinessCode.USER_NOT_FOUND)
         return user
 
+
+    async def _verify_email_code(self, email: str, code: str, *, user_exists: bool | None = None) -> None:
+        """校验邮箱验证码（一次性消费）。
+
+        Args:
+            email: 邮箱地址
+            code: 验证码
+            user_exists: True 要求用户已存在（重置/登录）；False 要求用户不存在（注册）；None 不校验
+        """
+        user = await self.repo.get_user_dynamic(email=email)
+
+        if not user_exists and user:
+            raise UserException(code=BusinessCode.USER_EXIST)
+
+        if user_exists and not user:
+            raise UserException(code=BusinessCode.USER_NOT_FOUND)
+
+        if not await verify_code(f"{VERIFY_CODE_KEY_PREFIX}{email}", code):
+            raise UserException(code=BusinessCode.CODE_VERIFY_FAILED)
+
+
+    async def _verify_email_token(self, token: str) -> str:
+        """校验临时令牌，返回其绑定的邮箱（令牌在改密成功时才消费）。"""
+        email = await get_value(f"{VERIFY_TOKEN_PREFIX}{hash_reset_token(token)}")
+        if not email:
+            raise UserException(code=BusinessCode.TOKEN_INVALID)
+        return email
+
+
     # ============ 业务方法 ============
     async def to_register(
         self,
@@ -56,19 +92,9 @@ class UserService(TransactionMixin):
         code: str,
     ) -> None:
         """用户注册"""
-        # 先检查邮箱是否已存在，避免已有账号也消耗一次验证码
-        existing_user = await self.repo.get_user_dynamic(email=email)
-        if existing_user:
-            raise UserException(code=BusinessCode.USER_EXIST)
-
-        # 校验邮箱验证码（一次性：校验通过即删除，防止重放）
-        client = redis_client.get_client()
-        stored_code = await client.get(f"{VERIFY_CODE_KEY_PREFIX}{email}")
-        if stored_code is None or stored_code != code:
-            log.error("邮箱验证码校验失败 email={}", email)
-            raise UserException(code=BusinessCode.CODE_VERIFY_FAILED)
-        await client.delete(f"{VERIFY_CODE_KEY_PREFIX}{email}")
-
+        
+        await self._verify_email_code(email,code)
+       
         # 密码强校验
         validate_password_strength(pwd)
 
@@ -121,6 +147,24 @@ class UserService(TransactionMixin):
         async with self.transaction_scope():
             await self.repo.modify(new_pwd_hash, user)
 
+    async def to_reset_pwd(self, pwd: str, token: str) -> None:
+        """两步重置密码：校验临时令牌后更新密码（令牌一次性消费）。"""
+        # 校验临时 token
+        email = await self._verify_email_token(token)
+        user = await self._get_user(email=email)
+
+        validate_password_strength(pwd)
+
+        # 密码强度通过后才消费令牌（避免无效请求消耗 token）
+        client = redis_client.get_client()
+        await client.delete(f"{VERIFY_TOKEN_PREFIX}{hash_reset_token(token)}")
+
+        new_pwd_hash = PasswordManager.hash(pwd)
+
+        async with self.transaction_scope():
+            await self.repo.modify(new_pwd_hash, user)
+
+
     async def to_change_profile(
         self,
         user_id: int,
@@ -147,3 +191,16 @@ class UserService(TransactionMixin):
         async with self.transaction_scope():
             await self.conv_service.delete_conversation_rows(user.id)
             await self.repo.delete(user)
+            
+            
+    async def generate_reset_token(self, email: str, code: str) -> dict:
+        """两步重置第一步：校验验证码后签发一次性重置令牌。"""
+        await self._verify_email_code(email, code, user_exists=True)
+        token = create_reset_token()
+        client = redis_client.get_client()
+        await client.set(
+            f"{VERIFY_TOKEN_PREFIX}{hash_reset_token(token)}",
+            email,
+            ex=VERIFY_TOKEN_TTL_SECONDS,
+        )
+        return {"token": token}

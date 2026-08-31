@@ -86,3 +86,4 @@ class UserRepo:
         await user.awaitable_attrs.conversations
         await self.db.delete(user)
         await self.db.flush()
+ 
