@@ -5,24 +5,22 @@ from pydantic import EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.business import BusinessCode, UserException
-from app.modules.auth.constants import (
-    VERIFY_CODE_KEY_PREFIX,
-    VERIFY_TOKEN_PREFIX,
-    VERIFY_TOKEN_TTL_SECONDS,
+from app.modules.auth.codes import (
+    consume_code,
+    delete_reset_token,
+    get_reset_token_email,
+    issue_reset_token,
 )
 from app.modules.conversation.service import ConversationService
 from app.shared.db import get_db
 from app.shared.db.models import User
-from app.shared.redis import get_value, redis_client, verify_code
 from app.shared.utils import TransactionMixin, log
 
 from .auth import (
     PasswordManager,
     create_access_token,
     create_refresh_token,
-    create_reset_token,
     get_hashed_id,
-    hash_reset_token,
     validate_password_strength,
 )
 from .repo import UserRepo
@@ -55,7 +53,7 @@ class UserService(TransactionMixin):
         return user
 
 
-    async def _verify_email_code(self, email: str, code: str, *, user_exists: bool | None = None) -> None:
+    async def _verify_email_code(self, email: str, code: str, *, user_exists: bool = False) -> None:
         """校验邮箱验证码（一次性消费）。
 
         Args:
@@ -71,13 +69,13 @@ class UserService(TransactionMixin):
         if user_exists and not user:
             raise UserException(code=BusinessCode.USER_NOT_FOUND)
 
-        if not await verify_code(f"{VERIFY_CODE_KEY_PREFIX}{email}", code):
+        if not await consume_code(email, code):
             raise UserException(code=BusinessCode.CODE_VERIFY_FAILED)
 
 
     async def _verify_email_token(self, token: str) -> str:
         """校验临时令牌，返回其绑定的邮箱（令牌在改密成功时才消费）。"""
-        email = await get_value(f"{VERIFY_TOKEN_PREFIX}{hash_reset_token(token)}")
+        email = await get_reset_token_email(token)
         if not email:
             raise UserException(code=BusinessCode.TOKEN_INVALID)
         return email
@@ -156,8 +154,7 @@ class UserService(TransactionMixin):
         validate_password_strength(pwd)
 
         # 密码强度通过后才消费令牌（避免无效请求消耗 token）
-        client = redis_client.get_client()
-        await client.delete(f"{VERIFY_TOKEN_PREFIX}{hash_reset_token(token)}")
+        await delete_reset_token(token)
 
         new_pwd_hash = PasswordManager.hash(pwd)
 
@@ -196,11 +193,5 @@ class UserService(TransactionMixin):
     async def generate_reset_token(self, email: str, code: str) -> dict:
         """两步重置第一步：校验验证码后签发一次性重置令牌。"""
         await self._verify_email_code(email, code, user_exists=True)
-        token = create_reset_token()
-        client = redis_client.get_client()
-        await client.set(
-            f"{VERIFY_TOKEN_PREFIX}{hash_reset_token(token)}",
-            email,
-            ex=VERIFY_TOKEN_TTL_SECONDS,
-        )
+        token = await issue_reset_token(email)
         return {"token": token}
