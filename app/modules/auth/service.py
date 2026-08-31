@@ -1,4 +1,4 @@
-from .codes import issue_code
+from .tokens import issue_code
 
 
 class AuthService:

@@ -5,8 +5,10 @@ from pydantic import EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.business import BusinessCode, UserException
-from app.modules.auth.codes import (
+from app.modules.auth.tokens import (
     consume_code,
+    create_access_token,
+    create_refresh_token,
     delete_reset_token,
     get_reset_token_email,
     issue_reset_token,
@@ -18,8 +20,6 @@ from app.shared.utils import TransactionMixin, log
 
 from .auth import (
     PasswordManager,
-    create_access_token,
-    create_refresh_token,
     get_hashed_id,
     validate_password_strength,
 )
@@ -59,7 +59,7 @@ class UserService(TransactionMixin):
         Args:
             email: 邮箱地址
             code: 验证码
-            user_exists: True 要求用户已存在（重置/登录）；False 要求用户不存在（注册）；None 不校验
+            user_exists: True 要求用户已存在（重置/登录）；False 要求用户不存在（注册）；
         """
         user = await self.repo.get_user_dynamic(email=email)
 
