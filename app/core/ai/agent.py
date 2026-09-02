@@ -63,7 +63,7 @@ class AgentFactory:
     _checkpointer: BaseCheckpointSaver | None = None
 
     @classmethod
-    def initialize(cls, checkpointer: BaseCheckpointSaver|None=None) -> None:
+    def initialize(cls, checkpointer: BaseCheckpointSaver) -> None:
         if cls._instance is not None:
             return
 
@@ -71,7 +71,7 @@ class AgentFactory:
         cls._instance = create_agent(
             model=get_llm(),
             tools=[ticket_schedule, weather_forecast, travel_recommend,get_today],
-            checkpointer=checkpointer if checkpointer is not None else None,
+            checkpointer=checkpointer,
             middleware=CUSTOM_MIDDLEWARE,
             system_prompt=SUPERVISOR_PROMPT,
         )
