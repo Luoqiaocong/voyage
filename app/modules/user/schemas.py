@@ -1,5 +1,7 @@
 from typing import Annotated
+
 from pydantic import BaseModel, EmailStr, Field, field_serializer, field_validator
+
 from .auth import get_hashed_id
 
 
@@ -88,3 +90,6 @@ class UserProfileUpdate(UserProfileBase):
             ]
         }
     }
+    
+class UserRefreshTokenRequest(BaseModel):
+    refresh_token: Annotated[str, Field(description="Refresh Token", min_length=32, max_length=128)]

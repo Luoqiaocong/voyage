@@ -1,4 +1,5 @@
 from typing import Annotated
+
 from fastapi import APIRouter, Depends
 from fastapi_utils.cbv import cbv
 from starlette import status
@@ -13,9 +14,10 @@ from .schemas import (
     LoginUserRequest,
     RegisterUserRequest,
     UserChangePasswordRequest,
-    UserResetPasswordRequest,
     UserInfo,
     UserProfileUpdate,
+    UserRefreshTokenRequest,
+    UserResetPasswordRequest,
 )
 from .service import UserService
 
@@ -94,6 +96,14 @@ class UserRouter:
     @router.post("/reset", summary="用户密码重置", status_code=status.HTTP_204_NO_CONTENT)
     async def reset_password(self, reset_req: UserResetPasswordRequest):
         return await self.service.to_reset_pwd(reset_req.password,reset_req.token)
+    
+    @router.post("/logout", summary="用户登出", status_code=status.HTTP_204_NO_CONTENT)
+    async def logout(
+        self,
+        token_req: UserRefreshTokenRequest,
+        current_user: Annotated[User, Depends(get_current_user)],
+    ):
+        await self.service.to_logout(token_req.refresh_token,current_user.id)
         
     @router.delete("/", summary="用户注销", status_code=status.HTTP_204_NO_CONTENT)
     async def delete_user(

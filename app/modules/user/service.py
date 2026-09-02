@@ -8,14 +8,17 @@ from app.core.business import BusinessCode, UserException
 from app.modules.auth.tokens import (
     consume_code,
     create_access_token,
-    create_refresh_token,
     delete_reset_token,
+    get_refresh_token_user,
     get_reset_token_email,
+    issue_refresh_token,
+    revoke_refresh_token,
+    revoke_refresh_tokens,
 )
 from app.modules.conversation.service import ConversationService
 from app.shared.db import get_db
 from app.shared.db.models import User
-from app.shared.utils import TransactionMixin, log
+from app.shared.utils import TransactionMixin
 
 from .auth import (
     PasswordManager,
@@ -114,7 +117,7 @@ class UserService(TransactionMixin):
             raise UserException(code=BusinessCode.USER_LOGIN_FAILED)
 
         access_token = create_access_token({"sub": get_hashed_id(user.id)})
-        refresh_token = create_refresh_token()
+        refresh_token = await issue_refresh_token(user.id)
 
         return {
             "access_token": access_token,
@@ -143,6 +146,8 @@ class UserService(TransactionMixin):
         # 5. 更新密码（事务）
         async with self.transaction_scope():
             await self.repo.modify(new_pwd_hash, user)
+            
+        await revoke_refresh_tokens(user_id)  # 注销所有 Refresh Token（强制重新登录）
 
     async def to_reset_pwd(self, pwd: str, token: str) -> None:
         """两步重置密码：校验临时令牌后更新密码（令牌一次性消费）。"""
@@ -159,6 +164,8 @@ class UserService(TransactionMixin):
 
         async with self.transaction_scope():
             await self.repo.modify(new_pwd_hash, user)
+        
+        await revoke_refresh_tokens(user.id)  # 注销所有 Refresh Token（强制重新登录）
 
 
     async def to_change_profile(
@@ -171,6 +178,13 @@ class UserService(TransactionMixin):
 
         async with self.transaction_scope():
             return await self.repo.update(user, user_update_data)
+        
+        
+    async def to_logout(self, token: str,user_id:int) -> None:
+        if await get_refresh_token_user(token) != user_id:
+            raise UserException(code=BusinessCode.TOKEN_INVALID)
+        await revoke_refresh_token(token)
+        
         
     async def to_delete_user(self, user_id: int) -> None:
         """用户注销（硬删除）。
@@ -187,3 +201,5 @@ class UserService(TransactionMixin):
         async with self.transaction_scope():
             await self.conv_service.delete_conversation_rows(user.id)
             await self.repo.delete(user)
+
+        await revoke_refresh_tokens(user.id)  # 注销所有 Refresh Token（强制重新登录）
