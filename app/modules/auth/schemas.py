@@ -14,3 +14,7 @@ class EmailCodeRequest(BaseModel):
 
     email: Annotated[EmailStr, Field(description="邮箱地址")]
     code: Annotated[str, Field(description="邮箱验证码", min_length=6, max_length=6)]
+    
+    
+class AccessTokenRequest(BaseModel):
+    refresh_token: Annotated[str, Field(description="Refresh Token", min_length=32, max_length=128)]
