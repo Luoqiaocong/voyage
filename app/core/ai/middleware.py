@@ -7,6 +7,8 @@ from langchain.agents.middleware import (
     ToolRetryMiddleware,
 )
 
+from app.shared.utils import log
+
 from .llm import VoyageModel, get_llm
 
 
@@ -14,12 +16,15 @@ def on_tool_error(exc: Exception, request: ToolCallRequest) -> str | None:
     """工具调用最终失败时的友好回退；返回 None 表示不接管，继续抛出原异常。"""
     tool_name = request.tool_call.get("name", "unknown_tool")
 
+    # 失败细节只写日志，不回给用户，避免泄露内部路径/异常等敏感信息
     if isinstance(exc, ValueError):
-        return f"`{tool_name}` failed with {type(exc).__name__}: {exc}"
+        log.error(f"[tool] {tool_name} failed: {type(exc).__name__}: {exc}")
+        return f"「{tool_name}」暂时不可用，请稍后再试。"
 
     # 可按需扩展：超时、连接错误等
     if isinstance(exc, (TimeoutError, ConnectionError)):
-        return f"`{tool_name}` temporarily unavailable, please retry later."
+        log.error(f"[tool] {tool_name} unavailable: {type(exc).__name__}: {exc}")
+        return f"「{tool_name}」暂时不可用，请稍后再试。"
 
     return None
 

@@ -6,6 +6,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.shared.utils import log
+
 from .code import BusinessCode
 from .exception import BaseBusinessException
 
@@ -108,7 +110,7 @@ def register_exception(app: FastAPI):
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
-        # logger.exception("unhandled error: %s", request.url)
+        log.exception("Unhandled error: %s", request.url)
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
