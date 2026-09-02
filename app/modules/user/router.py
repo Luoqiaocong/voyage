@@ -23,12 +23,10 @@ from .service import UserService
 
 router = APIRouter(prefix="/users", tags=["users"], route_class=UnifiedRoute)
 
-# TODO:
-# 1. 用户注销 ✅ 已实现
-# 2. 用户密码更改 ✅ 已实现
-# 3. 用户密码强校验（测试阶段不做，否则接口不好调试） ✅ 已实现
-# 4. 用户信息更改考虑（头像固定，用户名可改）✅ 已实现
-# 5. Refresh Token 真正实现（需引入 Redis，稍复杂，后续再做）
+# TODO（演进记录）：
+# 1. 用户注销 / 密码更改 / 密码强校验 / 资料修改 ✅ 已实现
+# 2. Refresh Token 生命周期（签发 / 刷新 / 登出撤销 / 批量撤销）✅ 已实现
+# 3. 已知待补：用户名唯一性、账号禁用、登录 / 发码限流（详见 main.py 演进计划）
 
 
 @cbv(router)
