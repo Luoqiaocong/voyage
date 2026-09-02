@@ -1,7 +1,7 @@
 import re
 
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
+from argon2.exceptions import Argon2Error, InvalidHashError
 from hashids import Hashids
 
 from app.config import config
@@ -20,7 +20,9 @@ class PasswordManager:
     def verify(cls, plain_password: str, hashed_password: str) -> bool:
         try:
             return cls._ph.verify(hashed_password, plain_password)
-        except VerifyMismatchError:
+        except (Argon2Error, InvalidHashError):
+            # InvalidHashError 继承自 ValueError 而非 Argon2Error，需同时捕获，
+            # 兜底"数据库里存了损坏哈希"之类的情况，统一视为密码错误
             return False
 
 

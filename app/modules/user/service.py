@@ -2,6 +2,7 @@ from typing import Annotated
 
 from fastapi import Depends
 from pydantic import EmailStr
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.business import BusinessCode, UserException
@@ -92,18 +93,20 @@ class UserService(TransactionMixin):
         code: str,
     ) -> None:
         """用户注册"""
-        
-        await self._verify_email_code(email,code)
-       
-        # 密码强校验
+        # 先做本地参数校验（密码强度），再消费验证码，避免无效请求白白烧掉验证码
         validate_password_strength(pwd)
+
+        await self._verify_email_code(email, code)
 
         # 密码哈希处理
         hashed_pwd = PasswordManager.hash(pwd)
 
-        # 创建用户（事务）
-        async with self.transaction_scope():
-            return await self.repo.create(email, hashed_pwd, username)
+        # 创建用户（事务）；并发注册同一邮箱时数据库唯一约束报错，转成业务码
+        try:
+            async with self.transaction_scope():
+                return await self.repo.create(email, hashed_pwd, username)
+        except IntegrityError:
+            raise UserException(code=BusinessCode.USER_EXIST) from None
 
     async def to_login(
         self,
@@ -157,14 +160,13 @@ class UserService(TransactionMixin):
 
         validate_password_strength(pwd)
 
-        # 密码强度通过后才消费令牌（避免无效请求消耗 token）
-        await delete_reset_token(token)
-
         new_pwd_hash = PasswordManager.hash(pwd)
 
+        # 先提交密码更新；事务成功后再消费令牌（避免 DB 失败导致有效令牌被白白烧掉）
         async with self.transaction_scope():
             await self.repo.modify(new_pwd_hash, user)
-        
+
+        await delete_reset_token(token)
         await revoke_refresh_tokens(user.id)  # 注销所有 Refresh Token（强制重新登录）
 
 
