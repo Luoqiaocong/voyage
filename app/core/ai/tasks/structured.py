@@ -7,8 +7,10 @@ from typing import TypeVar, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
+
 from app.shared.utils import log
-from ..llm import get_llm
+
+from ..llm import TaskKind, get_task_llm
 
 # 结构化输出的模型类型：由调用方传入的 schema 决定（如 ItineraryPlan）
 _T = TypeVar("_T", bound=BaseModel)
@@ -44,7 +46,7 @@ async def extract_structured(
         return None
 
     system_prompt = system_instructions or _BASE_SYSTEM_PROMPT
-    structured_llm = get_llm(temperature=temperature).with_structured_output(
+    structured_llm = get_task_llm(TaskKind.EXTRACT, temperature=temperature).with_structured_output(
         schema, method="json_mode"
     )
     try:

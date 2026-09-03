@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from langchain.agents import create_agent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
-from .llm import get_llm
+from .llm import TaskKind, get_task_llm
 from .middleware import CUSTOM_MIDDLEWARE
 from .tools import get_today, ticket_schedule, travel_recommend, weather_forecast
 
@@ -69,7 +69,7 @@ class AgentFactory:
 
         cls._checkpointer = checkpointer
         cls._instance = create_agent(
-            model=get_llm(),
+            model=get_task_llm(TaskKind.CHAT),
             tools=[ticket_schedule, weather_forecast, travel_recommend,get_today],
             checkpointer=checkpointer,
             middleware=CUSTOM_MIDDLEWARE,

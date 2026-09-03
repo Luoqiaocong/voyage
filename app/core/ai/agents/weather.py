@@ -1,7 +1,7 @@
 # agents/weather.py
 from langchain.agents import create_agent
 
-from app.core.ai.llm import get_llm
+from app.core.ai.llm import TaskKind, get_task_llm
 from app.core.ai.mcp import get_namespace_tools
 
 WEATHER_AGENT_PROMPT = """你是一个气象与出行环境分析专家（Weather Agent）。
@@ -14,6 +14,10 @@ WEATHER_AGENT_PROMPT = """你是一个气象与出行环境分析专家（Weathe
 
 ### 格式：
 用 Markdown 列表或短段落输出，简洁清晰。
+
+### 失败兜底：
+- 若天气数据获取失败，回复"目的地天气暂时查不到"，只给通用穿衣 / 防雨防晒建议，并注明未获取实时数据。
+- 禁止编造具体气温或降水概率。
 """
 
 
@@ -28,7 +32,7 @@ async def get_weather_agent():
         tools = await get_namespace_tools("weather")
         _weather_agent_cache = create_agent(
             name="weather_agent",
-            model=get_llm(),
+            model=get_task_llm(TaskKind.FACT),
             tools=tools,
             system_prompt=WEATHER_AGENT_PROMPT,
         )

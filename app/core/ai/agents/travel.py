@@ -1,7 +1,7 @@
 # agents/travel.py
 from langchain.agents import create_agent
 
-from app.core.ai.llm import get_llm
+from app.core.ai.llm import TaskKind, get_task_llm
 from app.core.ai.mcp import get_namespace_tools
 
 TRAVEL_AGENT_PROMPT = """你是一个目的地综合规划专家（Travel Agent）。
@@ -23,6 +23,10 @@ TRAVEL_AGENT_PROMPT = """你是一个目的地综合规划专家（Travel Agent�
 ### 🍜 周边美食
 - ...
 ```
+
+### 失败兜底：
+- 天气 / 车次 / 地图等数据缺失时，对应板块标注"⚠️ 该项数据未获取"，并据此调整推荐（无天气则不硬推户外）。
+- 预算未明确时给出常见价位区间供选择，不要擅自定死预算上限。
 """
 
 
@@ -37,7 +41,7 @@ async def get_travel_agent():
         tools = await get_namespace_tools("travel")
         _travel_agent_cache = create_agent(
             name="travel_agent",
-            model=get_llm(),
+            model=get_task_llm(TaskKind.PLAN),
             tools=tools,
             system_prompt=TRAVEL_AGENT_PROMPT,
         )

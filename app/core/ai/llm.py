@@ -11,7 +11,6 @@ class VoyageModel(StrEnum):
     """Voyage 平台支持的模型枚举"""
     DEEPSEEK_V4_FLASH = "deepseek-v4-flash"
     DEEPSEEK_V4_PRO = "deepseek-v4-pro"
-    QWEN_3_7_FLASH = "qwen3.7-flash"
     QWEN_MAX = "qwen-max"
     DASHCOPE_GLM_5 = "glm-5"
     DASHCOPE_QWEN_PLUS_1220 = "qwen-plus-1220"
@@ -19,8 +18,33 @@ class VoyageModel(StrEnum):
     DASHCOPE_QWEN_3_6_FLASH_2026_04_16="qwen3.6-flash-2026-04-16"
 
 
+class TaskKind(StrEnum):
+    """LLM 任务类型：决定默认模型与温度（调用处仍可覆盖）。"""
+
+    CHAT = "chat"        # 主 Agent：日常对话 / 行程规划
+    FACT = "fact"        # 事实查询：票务 / 天气
+    EXTRACT = "extract"  # 结构化提取
+    TITLE = "title"      # 标题生成
+    PLAN = "plan"        # 综合推荐生成
+
+
+# 各任务默认「模型 + 温度」；主模型 DeepSeek-v4-pro，提取/规划用 qwen-max
+TASK_DEFAULTS: dict[TaskKind, dict] = {
+    TaskKind.CHAT:    {"model": VoyageModel.DEEPSEEK_V4_PRO,   "temperature": 0.7},
+    TaskKind.FACT:    {"model": VoyageModel.DEEPSEEK_V4_FLASH, "temperature": 0.2},
+    TaskKind.EXTRACT: {"model": VoyageModel.QWEN_MAX,          "temperature": 0.1},
+    TaskKind.TITLE:   {"model": VoyageModel.DEEPSEEK_V4_FLASH, "temperature": 0.3},
+    TaskKind.PLAN:    {"model": VoyageModel.QWEN_MAX,          "temperature": 0.6},
+}
+
+
+def get_task_llm(task: TaskKind, **overrides) -> BaseChatModel:
+    """按任务类型获取 LLM：默认模型与温度见 TASK_DEFAULTS，可用关键字覆盖。"""
+    return get_llm(**{**TASK_DEFAULTS[task], **overrides})
+
+
 def get_llm(
-    model: str | VoyageModel = VoyageModel.QWEN_3_7_FLASH,
+    model: str | VoyageModel = VoyageModel.DEEPSEEK_V4_PRO,
     temperature: float = 1.0,
     api_key: str | None = None,
     base_url: str | None = None,
@@ -35,12 +59,15 @@ def get_llm(
     model_name = str(model)
 
     # 2. 动态推断 API Key 与 Base URL
-    if "deepseek" in model_name:
-        base_url = base_url or config.DEEPSEEK_BASE_URL
-        api_key = api_key or config.DEEPSEEK_API_KEY
-    else:
-        base_url = base_url or config.DASHSCOPE_BASE_URL
-        api_key = api_key or config.DASHSCOPE_API_KEY
+    # if "deepseek" in model_name:
+    #     base_url = base_url or config.DEEPSEEK_BASE_URL
+    #     api_key = api_key or config.DEEPSEEK_API_KEY
+    # else:
+    #     base_url = base_url or config.DASHSCOPE_BASE_URL
+    #     api_key = api_key or config.DASHSCOPE_API_KEY
+    
+    base_url = config.DASHSCOPE_BASE_URL
+    api_key = config.DASHSCOPE_API_KEY
 
     # 3. 只有当外部没有指定 provider 时，才提供默认值 "openai"
     provider = model_provider or "openai"

@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 from langchain.messages import HumanMessage
 
-from app.core.ai.llm import get_llm
+from app.core.ai.llm import TaskKind, get_task_llm
 
 
 async def generate_conversation_title(conversation_text: str) -> str:
@@ -33,7 +33,7 @@ async def generate_conversation_title(conversation_text: str) -> str:
 
 """
 
-    response = await get_llm(temperature=0.3).ainvoke([HumanMessage(content=prompt)])
+    response = await get_task_llm(TaskKind.TITLE).ainvoke([HumanMessage(content=prompt)])
     title = response.content.strip() if isinstance(response.content, str) else ""
 
     # 兜底：AI 返回空或过长时给默认标题（展示用本地时间）
