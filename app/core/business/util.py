@@ -69,18 +69,26 @@ def register_exception(app: FastAPI):
             403: BusinessCode.FORBIDDEN,
             404: BusinessCode.NOT_FOUND,
             413: BusinessCode.FILE_TOO_LARGE,
+            429: BusinessCode.RATE_LIMIT_EXCEEDED,  # 限流触发：HTTP 429 → 业务码
             500: BusinessCode.INTERNAL_ERROR,
         }
 
         response_code = error_code_map.get(exc.status_code, BusinessCode.INTERNAL_ERROR)
 
+        # 限流等场景可能携带 Retry-After 头：
+        # 1) 透传给响应头，供标准客户端读取；
+        # 2) 同时放进响应体，让只看 data 的前端也能拿到"等待秒数"做倒计时，
+        #    避免用户不知道多久能重试而反复尝试。
+        retry_after = exc.headers.get("Retry-After") if exc.headers else None
+
         return JSONResponse(
             status_code=exc.status_code,
+            headers=({"Retry-After": retry_after} if retry_after else None),
             content={
                 "code": response_code.code,
                 "message": exc.detail,
-                "data": None
-            }
+                "data": {"retry_after": int(retry_after)} if retry_after else None,
+            },
         )
 
     @app.exception_handler(RequestValidationError)
