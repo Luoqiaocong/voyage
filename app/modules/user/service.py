@@ -1,9 +1,10 @@
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 from pydantic import EmailStr
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette import status
 
 from app.core.business import BusinessCode, UserException
 from app.modules.auth.tokens import (
@@ -19,6 +20,13 @@ from app.modules.auth.tokens import (
 from app.modules.conversation.service import ConversationService
 from app.shared.db import get_db
 from app.shared.db.models import User
+from app.shared.ratelimit import (
+    LOGIN_FAIL_LIMIT,
+    LOGIN_FAIL_WINDOW,
+    check_rate_limit,
+    login_fail_key,
+)
+from app.shared.redis import reset_counter
 from app.shared.utils import TransactionMixin
 
 from .auth import (
@@ -116,8 +124,18 @@ class UserService(TransactionMixin):
         """用户登录"""
         user = await self.repo.get_user_dynamic(email=email)
 
+        # 登录失败计数：同一邮箱 15 分钟内失败超过 5 次则限流（防暴力破解）
         if user is None or not PasswordManager.verify(pwd, user.password):
+            if await check_rate_limit(login_fail_key(email), LOGIN_FAIL_LIMIT, LOGIN_FAIL_WINDOW):
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="登录失败次数过多，请稍后再试",
+                    headers={"Retry-After": str(LOGIN_FAIL_WINDOW)},
+                )
             raise UserException(code=BusinessCode.USER_LOGIN_FAILED)
+
+        # 登录成功：清空失败计数，避免历史失败把正常登录拦在门外
+        await reset_counter(login_fail_key(email))
 
         access_token = create_access_token({"sub": get_hashed_id(user.id)})
         refresh_token = await issue_refresh_token(user.id)

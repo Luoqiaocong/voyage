@@ -7,6 +7,15 @@ from starlette import status
 from app.core.business import BusinessCode, success_response
 from app.core.route import UnifiedRoute
 from app.shared.db.models import User
+from app.shared.ratelimit import (
+    LOGIN_IP_LIMIT,
+    LOGIN_IP_WINDOW,
+    REG_IP_LIMIT,
+    REG_IP_WINDOW,
+    RESET_IP_LIMIT,
+    RESET_IP_WINDOW,
+    rate_limit,
+)
 
 from .constants import AVATAR_BASE_URL, OPTIONAL_AVATARS
 from .dependencies import get_current_user
@@ -26,7 +35,7 @@ router = APIRouter(prefix="/users", tags=["users"], route_class=UnifiedRoute)
 # TODO（演进记录）：
 # 1. 用户注销 / 密码更改 / 密码强校验 / 资料修改 ✅ 已实现
 # 2. Refresh Token 生命周期（签发 / 刷新 / 登出撤销 / 批量撤销）✅ 已实现
-# 3. 已知待补：用户名唯一性、账号禁用、登录 / 发码限流（详见 main.py 演进计划）
+# 3. 登录 / 发码限流 ✅ 已实现（IP + 邮箱维度，见 app/shared/ratelimit.py）
 
 
 @cbv(router)
@@ -40,7 +49,7 @@ class UserRouter:
         return {"base_url": AVATAR_BASE_URL, "avatars": OPTIONAL_AVATARS}
 
     # ============ 认证相关 ============
-    @router.post("/reg", summary="用户注册", status_code=status.HTTP_201_CREATED)
+    @router.post("/reg", summary="用户注册", status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit("register", REG_IP_LIMIT, REG_IP_WINDOW))])
     async def register(self, userdata: RegisterUserRequest):
         return await self.service.to_register(
             userdata.email,
@@ -49,7 +58,7 @@ class UserRouter:
             userdata.code,
         )
 
-    @router.post("/login", summary="用户登录", status_code=status.HTTP_200_OK)
+    @router.post("/login", summary="用户登录", status_code=status.HTTP_200_OK, dependencies=[Depends(rate_limit("login", LOGIN_IP_LIMIT, LOGIN_IP_WINDOW))])
     async def login(self, userdata: LoginUserRequest):
         return await self.service.to_login(userdata.email, userdata.password)
 
@@ -91,7 +100,7 @@ class UserRouter:
             pwd_req.new_password,
         )
         
-    @router.post("/reset", summary="用户密码重置", status_code=status.HTTP_204_NO_CONTENT)
+    @router.post("/reset", summary="用户密码重置", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit("reset_pwd", RESET_IP_LIMIT, RESET_IP_WINDOW))])
     async def reset_password(self, reset_req: UserResetPasswordRequest):
         return await self.service.to_reset_pwd(reset_req.password,reset_req.token)
     
