@@ -37,6 +37,7 @@ class VoyageConfig(BaseSettings):
     SMTP_PORT: int = 587
     SMTP_USER: str = "resend"
     
+    REDIS_URL:str
     REDIS_HOST:str
     REDIS_PORT:int=6379
     REDIS_DB:int=7

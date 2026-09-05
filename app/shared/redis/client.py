@@ -27,12 +27,13 @@ class RedisManager:
         注意：aioredis 是懒连接，这里只创建客户端，
         首次执行命令时才真正建立连接，因此 Redis 未启动也不会阻塞启动。
         """
-        self._redis = aioredis.Redis(
-            host=config.REDIS_HOST,
-            port=config.REDIS_PORT,
-            db=config.REDIS_DB,
-            decode_responses=True,
-        )
+        # self._redis = aioredis.Redis(
+        #     host=config.REDIS_HOST,
+        #     port=config.REDIS_PORT,
+        #     db=config.REDIS_DB,
+        #     decode_responses=True,
+        # )
+        self._redis = aioredis.from_url(config.REDIS_URL, decode_responses=True)
 
     def get_client(self) -> aioredis.Redis:
         """获取原生 Redis 客户端；未初始化时抛错提示。"""
