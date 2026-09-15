@@ -61,8 +61,14 @@ class ConversationGateway:
                 }
                 continue
 
-            # 2. 处理 AI 生成的文本或思考流 (AIMessageChunk)
+            # 2. 处理 AI 生成的文本、工具调用与思考流 (AIMessageChunk)
             if isinstance(chunk, AIMessageChunk):
+                # 模型决定调用工具：先推 tool_call，前端可立即展示“正在调用”
+                for tool_call in chunk.tool_call_chunks or []:
+                    name = tool_call.get("name")
+                    if name:
+                        yield {"type": "tool_call", "name": name}
+
                 # 兼容 DeepSeek / Qwen 的深度思考过程
                 reasoning = chunk.additional_kwargs.get("reasoning_content")
                 if reasoning:
