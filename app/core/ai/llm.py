@@ -6,11 +6,13 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from app.config import config
 
+from .token import token_counter
+
 
 class VoyageModel(StrEnum):
     """Voyage 平台支持的模型枚举"""
-    DEEPSEEK_V4_FLASH = "deepseek-v4-flash"
     DEEPSEEK_V4_PRO = "deepseek-v4-pro"
+    QWEN_PLUS_LATEST = "qwen-plus-latest"
     QWEN_MAX = "qwen-max"
     DASHCOPE_GLM_5 = "glm-5"
     DASHCOPE_QWEN_PLUS_1220 = "qwen-plus-1220"
@@ -30,10 +32,10 @@ class TaskKind(StrEnum):
 
 # 各任务默认「模型 + 温度」；主模型 DeepSeek-v4-pro，提取/规划用 qwen-max
 TASK_DEFAULTS: dict[TaskKind, dict] = {
-    TaskKind.CHAT:    {"model": VoyageModel.DEEPSEEK_V4_PRO,   "temperature": 0.7},
-    TaskKind.FACT:    {"model": VoyageModel.DEEPSEEK_V4_FLASH, "temperature": 0.2},
+    TaskKind.CHAT:    {"model": VoyageModel.DASHCOPE_GLM_5,   "temperature": 0.7},
+    TaskKind.FACT:    {"model": VoyageModel.QWEN_PLUS_LATEST, "temperature": 0.2},
     TaskKind.EXTRACT: {"model": VoyageModel.QWEN_MAX,          "temperature": 0.1},
-    TaskKind.TITLE:   {"model": VoyageModel.DEEPSEEK_V4_FLASH, "temperature": 0.3},
+    TaskKind.TITLE:   {"model": VoyageModel.QWEN_PLUS_LATEST, "temperature": 0.3},
     TaskKind.PLAN:    {"model": VoyageModel.QWEN_MAX,          "temperature": 0.6},
 }
 
@@ -78,6 +80,7 @@ def get_llm(
         api_key=api_key,
         base_url=base_url,
         temperature=temperature,
+        callbacks=[token_counter],  # 添加 TokenCounter 回调,用于统计用量
         extra_body={
         "enable_thinking": False,           # Qwen3 / 很多国内兼容网关
         # "chat_template_kwargs": {"enable_thinking": False},  # vLLM / SGLang 常见

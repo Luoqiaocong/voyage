@@ -7,10 +7,11 @@ from datetime import datetime, timezone
 # relationship     : ORM 层的“对象关系”，用于 Python 侧便捷访问关联数据
 #                    （它只影响 ORM 对象访问，不影响数据库表结构本身）
 # ────────────────────────────────────────────────────────────────
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
+
 
 def utc_now():
     """返回当前 UTC 时间（供 default 使用）"""
@@ -133,3 +134,19 @@ class Itinerary(Base):
     )
 
     conversation: Mapped[Conversation | None] = relationship(back_populates="itineraries")
+
+
+class TokenUsage(Base):
+    __tablename__ = "token_usage"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    model: Mapped[str] = mapped_column(String(50))
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    record_date: Mapped[str] = mapped_column(
+        String(10), nullable=False, comment="日期 yyyy-MM-dd"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
+    __table_args__ = (UniqueConstraint("model", "record_date", name="uq_model_date"),)
