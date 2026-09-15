@@ -13,3 +13,8 @@ wheels/
 data/
 process.md
 frontend/
+
+# Web frontend（源码入库，仅忽略依赖与构建产物）
+web/node_modules/
+web/dist/
+web/.env
