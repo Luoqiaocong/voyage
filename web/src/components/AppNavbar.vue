@@ -1,0 +1,248 @@
+<script setup lang="ts">
+import { onMounted, onUnmounted, ref } from 'vue'
+import { useUserStore } from '@/stores/user'
+import ThemeToggle from '@/components/ThemeToggle.vue'
+import TravelIcon from '@/components/TravelIcon.vue'
+
+const user = useUserStore()
+const open = ref(false)
+const scrolled = ref(false)
+
+const links = [
+  { label: '首页', to: '/', icon: 'compass' },
+  { label: '助手', to: '/chat', auth: true, icon: 'chat' },
+  { label: '行程', to: '/itineraries', auth: true, icon: 'map' },
+  { label: '我的', to: '/profile', auth: true, icon: 'user' }
+]
+
+function close() {
+  open.value = false
+}
+
+function onScroll() {
+  scrolled.value = window.scrollY > 24
+}
+
+onMounted(() => {
+  window.addEventListener('scroll', onScroll, { passive: true })
+  onScroll()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('scroll', onScroll)
+})
+</script>
+
+<template>
+  <header class="nav" :class="{ 'nav--scrolled': scrolled, 'nav--open': open }">
+    <div class="nav__inner">
+      <RouterLink to="/" class="brand" @click="close">
+        <span class="brand__mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none">
+            <circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="2.4" />
+            <path
+              d="M16 4.5 L18.8 13.2 L27.5 16 L18.8 18.8 L16 27.5 L13.2 18.8 L4.5 16 L13.2 13.2 Z"
+              fill="currentColor"
+            />
+            <circle cx="16" cy="16" r="2.2" fill="#fff" />
+          </svg>
+        </span>
+        <span class="brand__text">Voyage <em>AI</em></span>
+      </RouterLink>
+
+      <nav class="nav__links" aria-label="主导航">
+        <RouterLink
+          v-for="l in links"
+          v-show="!l.auth || user.isLoggedIn"
+          :key="l.to"
+          :to="l.to"
+          @click="close"
+        >
+          <TravelIcon :name="l.icon" :size="15" />
+          {{ l.label }}
+        </RouterLink>
+      </nav>
+
+      <div class="nav__actions">
+        <ThemeToggle />
+        <template v-if="user.isLoggedIn">
+          <RouterLink to="/chat" class="btn btn-primary btn--sm" @click="close">
+            进入助手
+          </RouterLink>
+        </template>
+        <template v-else>
+          <RouterLink to="/login" class="btn btn-ghost btn--sm" @click="close">登录</RouterLink>
+          <RouterLink to="/login" class="btn btn-primary btn--sm" @click="close">开始规划</RouterLink>
+        </template>
+      </div>
+
+      <button
+        class="nav__toggle"
+        :aria-expanded="open"
+        aria-label="切换导航菜单"
+        @click="open = !open"
+      >
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+    </div>
+
+    <div v-if="open" class="nav__mobile">
+      <RouterLink
+        v-for="l in links"
+        v-show="!l.auth || user.isLoggedIn"
+        :key="l.to"
+        :to="l.to"
+        class="nav__mobile-link"
+        @click="close"
+      >
+        <TravelIcon :name="l.icon" :size="16" />
+        {{ l.label }}
+      </RouterLink>
+      <div class="nav__mobile-actions">
+        <template v-if="user.isLoggedIn">
+          <RouterLink to="/profile" class="btn btn-ghost btn--sm" @click="close">个人资料</RouterLink>
+          <RouterLink to="/chat" class="btn btn-primary btn--sm" @click="close">进入助手</RouterLink>
+        </template>
+        <template v-else>
+          <RouterLink to="/login" class="btn btn-ghost btn--sm" @click="close">登录</RouterLink>
+          <RouterLink to="/login" class="btn btn-primary btn--sm" @click="close">开始规划</RouterLink>
+        </template>
+      </div>
+    </div>
+  </header>
+</template>
+
+<style scoped>
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  background: var(--nav-bg);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid transparent;
+  transition: box-shadow 0.3s, border-color 0.3s, background-color var(--t);
+}
+.nav--scrolled {
+  box-shadow: 0 6px 24px rgba(15, 23, 42, 0.06);
+  border-bottom-color: var(--hairline);
+}
+:root[data-theme='dark'] .nav--scrolled { box-shadow: 0 6px 24px rgba(2, 8, 23, 0.5); }
+
+.nav__inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 24px;
+  height: var(--nav-h);
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.brand { display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+.brand__mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--grad);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 6px 16px var(--glow);
+}
+.brand__mark svg { width: 21px; height: 21px; }
+
+.brand__text {
+  font-family: var(--font-display);
+  font-size: 1.06rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.brand__text em { font-style: normal; color: var(--prim); }
+
+.nav__links { display: flex; gap: 28px; font-size: 0.88rem; }
+
+.nav__links a {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text2);
+  padding: 4px 0;
+  transition: color 0.18s ease;
+}
+.nav__links a :deep(svg) { opacity: 0.7; transition: opacity 0.18s; }
+.nav__links a:hover :deep(svg), .nav__links a.router-link-active :deep(svg) { opacity: 1; }
+.nav__links a::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--grad);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+.nav__links a:hover { color: var(--text); }
+.nav__links a.router-link-active { color: var(--text); font-weight: 600; }
+.nav__links a.router-link-active::after { opacity: 1; }
+
+.nav__actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+.nav__toggle {
+  display: none;
+  margin-left: auto;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--text);
+}
+.nav__toggle span {
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  transition: transform 0.22s ease, opacity 0.22s ease;
+}
+.nav--open .nav__toggle span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.nav--open .nav__toggle span:nth-child(2) { opacity: 0; }
+.nav--open .nav__toggle span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+.nav__mobile {
+  display: none;
+  border-top: 1px solid var(--hairline);
+  padding: 10px 24px 18px;
+  background: var(--bg);
+}
+
+.nav__mobile-link {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 2px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  border-bottom: 1px dashed var(--hairline);
+}
+.nav__mobile-link :deep(svg) { color: var(--text3); }
+
+.nav__mobile-actions { display: flex; gap: 10px; margin-top: 14px; }
+
+@media (max-width: 860px) {
+  .nav__links { display: none; }
+  .nav__actions { display: none; }
+  .nav__toggle { display: flex; }
+  .nav__mobile { display: block; }
+}
+</style>
