@@ -31,6 +31,21 @@ class VoyageConfig(BaseSettings):
     DEEPSEEK_LLM_MODEL_FLASH: str = "deepseek-v4-flash"
     DEEPSEEK_LLM_MODEL_PRO: str = "deepseek-v4-pro"
 
+    # ---------- 管理端：模型单价（每百万 token，美元）----------
+    # 用于看板成本估算。默认值取 OpenCode Go 的 DeepSeek V4.1 Flash 非高峰价；
+    # 高峰时段（UTC 周一至周五 01:00-04:00 与 06:00-10:00）单价翻倍，
+    # 故估算值偏保守（偏低）。未配置单价的模型按 0 计并在结果中标注。
+    MODEL_PRICING: dict[str, dict[str, float]] = {
+        "deepseek-v4.1-flash": {"input": 0.15, "output": 0.60},
+    }
+
+    # ---------- 管理端：用量落库与看板 ----------
+    USAGE_FLUSH_INTERVAL_SECONDS: int = 60   # 后台把 Redis 增量落库的周期（秒）
+    USAGE_DAYS_TREND_DEFAULT: int = 7        # 趋势图默认天数
+    USAGE_DAYS_TREND_MAX: int = 90           # 趋势图允许的最大天数（防滥用）
+    ADMIN_PAGE_SIZE_DEFAULT: int = 20        # 管理端分页默认每页条数
+    ADMIN_PAGE_SIZE_MAX: int = 100           # 管理端分页每页上限
+
     # ---------- JWT / 安全（密钥类必须由 .env / 环境变量提供，不设默认值）----------
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"

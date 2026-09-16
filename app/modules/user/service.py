@@ -34,6 +34,7 @@ from .auth import (
     get_hashed_id,
     validate_password_strength,
 )
+from .constants import SELF_EDITABLE_FIELDS
 from .repo import UserRepo
 
 
@@ -134,6 +135,14 @@ class UserService(TransactionMixin):
                 )
             raise UserException(code=BusinessCode.USER_LOGIN_FAILED)
 
+        # 密码正确后、签发令牌前，检查账号是否被管理端停用。
+        # 放在这里而不是上面那个分支：被停用是「已知账号的状态」而非「凭据错误」，
+        # 既不该计入失败次数，也不该与密码错误混为一谈。
+        # 注意：密码错误时仍统一返回 USER_LOGIN_FAILED，避免通过错误码差异
+        # 探测某个邮箱是否存在。
+        if not user.is_active:
+            raise UserException(code=BusinessCode.USER_ACCOUNT_DISABLED)
+
         # 登录成功：清空失败计数，避免历史失败把正常登录拦在门外
         await reset_counter(login_fail_key(email))
 
@@ -193,11 +202,26 @@ class UserService(TransactionMixin):
         user_id: int,
         user_update_data: dict[str, str],
     ) -> User:
-        """修改用户资料"""
+        """修改用户资料（仅限自助可改字段）。
+
+        安全要点：这里必须显式过滤字段，不能把请求体直接透传给 ORM。
+        入参来自 model_dump(exclude_unset=True)，一旦 schema 新增
+        role / is_active 之类的字段，就会立刻变成「任何登录用户都能给自己提权」
+        的漏洞。白名单（SELF_EDITABLE_FIELDS）让这条路径永远只能改昵称与头像，
+        角色与启用状态只能走管理端接口或 CLI。
+        """
         user = await self._get_user(user_id=user_id)
 
+        allowed = {
+            key: value
+            for key, value in user_update_data.items()
+            if key in SELF_EDITABLE_FIELDS
+        }
+        if not allowed:
+            return user
+
         async with self.transaction_scope():
-            return await self.repo.update(user, user_update_data)
+            return await self.repo.update(user, allowed)
         
         
     async def to_logout(self, token: str,user_id:int) -> None:

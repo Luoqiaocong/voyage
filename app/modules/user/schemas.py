@@ -73,6 +73,11 @@ class UserResetPasswordRequest(BaseModel):
 
 
 class UserInfo(UserIdentity, UserProfileBase):
+    # 只读回显：前端据此决定是否展示管理端入口。
+    # 注意这里只「读」——写入路径被 SELF_EDITABLE_FIELDS 白名单挡住，
+    # 用户无法通过 PATCH /users/info 修改这两个字段。
+    role: Annotated[str, Field(description="角色：user / admin")] = "user"
+    is_active: Annotated[bool, Field(description="账号是否启用")] = True
 
     @field_serializer('id')
     def serialize_id(self, id: int):

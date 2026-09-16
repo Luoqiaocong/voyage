@@ -7,7 +7,16 @@ from datetime import datetime, timezone
 # relationship     : ORM 层的“对象关系”，用于 Python 侧便捷访问关联数据
 #                    （它只影响 ORM 对象访问，不影响数据库表结构本身）
 # ────────────────────────────────────────────────────────────────
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -31,7 +40,22 @@ class User(Base):
         )
     
     password: Mapped[str] = mapped_column(String(255), nullable=False)
-    
+
+    role: Mapped[str] = mapped_column(
+        String(16),
+        default="user",
+        nullable=False,
+        index=True,
+        comment="角色：user=普通用户，admin=管理员（管理端接口的鉴权依据）",
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        comment="是否启用：被禁用的用户无法登录，但数据保留",
+    )
+
     avatar: Mapped[str] = mapped_column(
         String(255),
         default="photographer.png",
@@ -137,16 +161,62 @@ class Itinerary(Base):
 
 
 class TokenUsage(Base):
+    """LLM 用量按「模型 + 日期」聚合成一行。
+
+    由 app/shared/usage.py 的后台任务从 Redis 增量合并写入；
+    同一 (model, record_date) 重复落库时为累加而非覆盖（见唯一约束）。
+    """
+
     __tablename__ = "token_usage"
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    model: Mapped[str] = mapped_column(String(50))
-    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
-    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
-    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, comment="主键")
+    model: Mapped[str] = mapped_column(String(50), index=True, comment="模型 ID")
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, comment="输入 token 数")
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, comment="输出 token 数")
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0, comment="总 token 数")
+    calls: Mapped[int] = mapped_column(Integer, default=0, comment="LLM 调用次数")
     record_date: Mapped[str] = mapped_column(
-        String(10), nullable=False, comment="日期 yyyy-MM-dd"
+        String(10), nullable=False, index=True, comment="统计日期 yyyy-MM-dd（本地时区）"
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utc_now
+        DateTime(timezone=True), default=utc_now, comment="创建时间（UTC）"
     )
     __table_args__ = (UniqueConstraint("model", "record_date", name="uq_model_date"),)
+
+
+class AdminAuditLog(Base):
+    """管理端操作审计日志：谁、何时、对谁做了什么、改前改后是什么。
+
+    只记录管理端的写操作。目标对象用 (target_type, target_id) 弱关联而非外键——
+    被操作对象可能后续被删除，但审计记录必须保留。
+    """
+
+    __tablename__ = "admin_audit_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, comment="主键")
+    operator_id: Mapped[int] = mapped_column(
+        Integer, index=True, nullable=False, comment="操作者用户ID"
+    )
+    operator_email: Mapped[str] = mapped_column(
+        String(50), nullable=False, comment="操作者邮箱（冗余存一份，便于追溯）"
+    )
+    action: Mapped[str] = mapped_column(
+        String(64), index=True, nullable=False,
+        comment="动作标识，如 user.role.update / user.status.update",
+    )
+    target_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, comment="目标类型，如 user"
+    )
+    target_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, comment="目标标识（用户ID等，字符串存储以兼容多种主键）"
+    )
+    detail: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="变更明细（JSON 字符串：改前/改后）"
+    )
+    ip: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="来源 IP"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True, nullable=False,
+        comment="操作时间（UTC）",
+    )

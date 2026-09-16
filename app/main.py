@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from app.shared.utils import init_log, close_log
 from app.shared.redis import redis_client
+from app.shared.flush_task import usage_flush_task
 SQLITE_PATH = Path(__file__).resolve().parent.parent / "data" / "exports" / "checkpoints.sqlite"
 
 
@@ -20,11 +21,13 @@ async def lifespan(app: FastAPI):
         await redis_client.init_redis()
         async with AsyncSqliteSaver.from_conn_string(str(SQLITE_PATH)) as checkpointer:
             AgentFactory.initialize(checkpointer)
+            usage_flush_task.start()   # 周期性把 Token 增量落库
             try:
                 yield
             finally:
                 AgentFactory.reset()   # 异常也兜底，且仍在连接关闭前
     finally:
+        await usage_flush_task.stop()  # 退出前最后一次落库
         await close_http_client()   # 释放共享 LLM 连接池
         await redis_client.close()
         close_log()
