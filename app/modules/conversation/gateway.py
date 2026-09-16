@@ -58,6 +58,67 @@ class ConversationGateway:
             return []
         return convert_to_openai_messages(state.values["messages"])
 
+    async def get_messages_page(
+        self, conversation_id: str, *, limit: int | None = None
+    ) -> dict:
+        """分页返回历史消息，并收敛字段。
+
+        两个问题一起解决：
+
+        1. **体积**：原先一次性返回全部消息，长对话会返回巨大的响应体。
+           这里按「轮次」截断——一轮 = 一条 user 消息及其后的所有 assistant/tool
+           消息。按轮截断而不是按条截断，避免出现「有回答没提问」的断裂。
+
+        2. **泄露与噪音**：convert_to_openai_messages 会把工具调用的入参
+           （tool_calls[].function.arguments）原样带出。这些内容是模型内部调度
+           细节，对前端渲染无用，且可能包含用户隐私的中间摘要。这里剥掉入参，
+           只保留工具名，让前端仍能画出「调用了什么工具」的时间线。
+
+        Returns:
+            {"messages": [...], "total_rounds": int, "returned_rounds": int,
+             "truncated": bool}
+        """
+        raw = await self.get_messages(conversation_id)
+        if not raw:
+            return {"messages": [], "total_rounds": 0, "returned_rounds": 0, "truncated": False}
+
+        # 按 user 消息切分轮次
+        rounds: list[list[dict]] = []
+        for message in raw:
+            if message.get("role") == "user" or not rounds:
+                rounds.append([message])
+            else:
+                rounds[-1].append(message)
+
+        total_rounds = len(rounds)
+        # limit 为空或非正数时返回全部轮次
+        selected = rounds[-limit:] if (limit and limit > 0) else rounds
+
+        messages = [self._sanitize(m) for group in selected for m in group]
+        return {
+            "messages": messages,
+            "total_rounds": total_rounds,
+            "returned_rounds": len(selected),
+            "truncated": len(selected) < total_rounds,
+        }
+
+    @staticmethod
+    def _sanitize(message: dict) -> dict:
+        """收敛单条消息的返回字段。
+
+        assistant 的 tool_calls 只保留工具名，去掉 arguments（见方法说明）。
+        content 若是多模态数组则原样返回，交由前端处理。
+        """
+        cleaned = {k: v for k, v in message.items() if k != "tool_calls"}
+        tool_calls = message.get("tool_calls")
+        if tool_calls:
+            cleaned["tool_calls"] = [
+                {"name": (call.get("function") or {}).get("name", "unknown")}
+                for call in tool_calls
+                if isinstance(call, dict)
+            ]
+        return cleaned
+
     async def get_last_ai_text(self, conversation_id: str) -> str:
         """取最后一条含文本内容的 AI 回复；没有则返回空串（供行程提取等场景复用）。"""
         messages = await self.get_messages(conversation_id)
@@ -81,14 +142,28 @@ class ConversationGateway:
         agent = AgentFactory.get_agent()
         config = _thread_config(conversation_id)
 
-        with use_session(conversation_id):
-            stream = agent.astream(
-                {"messages": [HumanMessage(content=message)]},
-                stream_mode="messages",
-                config=config,
-            )
-            async for event in self._translate(stream):
-                yield event
+        from app.shared.observability import record_chat
+        import time
+
+        started = time.perf_counter()
+        ok = True
+        try:
+            with use_session(conversation_id):
+                stream = agent.astream(
+                    {"messages": [HumanMessage(content=message)]},
+                    stream_mode="messages",
+                    config=config,
+                )
+                async for event in self._translate(stream):
+                    yield event
+        except Exception:
+            # 失败也要记一次，否则错误率统计不到（异常继续向上抛给 service 处理）
+            ok = False
+            raise
+        finally:
+            # 流式生成器的 finally 在客户端断开时同样会执行，
+            # 因此这条延迟记录覆盖「正常结束」与「中途断开」两种情况。
+            await record_chat(ok=ok, ms=(time.perf_counter() - started) * 1000)
 
     @staticmethod
     async def _translate(stream):

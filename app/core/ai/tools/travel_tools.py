@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from langchain.messages import HumanMessage
-from langchain.tools import ToolRuntime, tool
+from langchain.tools import tool
 
 from app.core.ai.agents.ticket import get_ticket_agent
 from app.core.ai.agents.travel import get_travel_agent
@@ -29,7 +29,6 @@ async def ticket_schedule(
     destination: str,
     date: str,
     requirements: str,
-    runtime: ToolRuntime,
 ) -> str:
     """查询火车票/车次：当用户明确要查出发地与目的地之间的车票、票价、车次、时刻、坐席余票时调用。
 
@@ -55,7 +54,6 @@ async def ticket_schedule(
 async def weather_forecast(
     date_range: str,
     destination: str,
-    runtime: ToolRuntime,
 ) -> str:
     """查询某地某段时间的天气，并给出穿衣与户外建议：当用户明确要查目的地天气、气温、是否适合出行时调用。
 

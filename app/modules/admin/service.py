@@ -146,6 +146,26 @@ class AdminService(TransactionMixin):
         except Exception:
             log.exception("[admin] 用量落库失败，改用已落库数据")
 
+    # ==================== 可观测性（第 4 期）====================
+    async def metrics(self, day: str | None = None) -> dict[str, Any]:
+        """读取某日的工具/提取/对话指标（含缓存命中率、延迟分位）。
+
+        这些数字来自运行时埋点，是「优化到底有没有效」的判据：
+        例如调整提示词后，extraction.pass_rate 是否上升；
+        接入缓存后，cache.hit_rate 与工具延迟分位是否下降。
+        """
+        from app.shared.observability import get_metrics
+
+        return await get_metrics(day)
+
+    async def metrics_trend(self, days: int) -> dict[str, Any]:
+        """近 N 天的指标趋势，供管理端画图。"""
+        from app.config import config as _config
+        from app.shared.observability import get_metrics_trend
+
+        days = max(1, min(days, _config.USAGE_DAYS_TREND_MAX))
+        return {"days": days, "trend": await get_metrics_trend(days)}
+
     # ==================== 用户管理 ====================
     async def list_users(
         self,

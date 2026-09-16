@@ -79,6 +79,31 @@ class AdminRouter:
     async def dashboard_health(self):
         return await self.service.dashboard_health()
 
+    # ==================== 可观测性 ====================
+    @router.get(
+        "/metrics",
+        summary="工具/提取/对话指标（命中率、通过率、延迟分位）",
+        status_code=status.HTTP_200_OK,
+    )
+    async def metrics(
+        self,
+        day: Annotated[
+            str | None, Query(description="指定日期 yyyy-MM-dd；不传则取今日")
+        ] = None,
+    ):
+        return await self.service.metrics(day)
+
+    @router.get(
+        "/metrics/trend",
+        summary="指标趋势（近 N 天）",
+        status_code=status.HTTP_200_OK,
+    )
+    async def metrics_trend(
+        self,
+        days: Annotated[int, Query(ge=1, le=90, description="统计天数")] = config.USAGE_DAYS_TREND_DEFAULT,
+    ):
+        return await self.service.metrics_trend(days)
+
     # ==================== 用户管理 ====================
     @router.get("/users", summary="用户列表（分页/搜索/筛选）", status_code=status.HTTP_200_OK)
     async def list_users(
