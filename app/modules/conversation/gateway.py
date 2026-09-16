@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessageChunk, convert_to_openai_messages
 from langchain_core.runnables import RunnableConfig
 
 from app.core.ai import AgentFactory
+from app.core.ai.opencode import use_session
 from app.core.business import BusinessCode, ConversationException
 
 
@@ -38,14 +39,26 @@ class ConversationGateway:
 
     # -------------------- 2. 流式发送消息 --------------------
     async def stream_message(self, message: str, conversation_id: str):
+        """流式发送消息。
+
+        OpenCode Go 要求每个请求携带 x-opencode-session 头（缺失直接 400），
+        头值在 httpx 发出请求时从上下文读取，故整个流式过程必须包在会话上下文内。
+        """
         agent = AgentFactory.get_agent()
         config = _thread_config(conversation_id)
 
-        stream = agent.astream(
-            {"messages": [HumanMessage(content=message)]},
-            stream_mode="messages",
-            config=config,
-        )
+        with use_session(conversation_id):
+            stream = agent.astream(
+                {"messages": [HumanMessage(content=message)]},
+                stream_mode="messages",
+                config=config,
+            )
+            async for event in self._translate(stream):
+                yield event
+
+    @staticmethod
+    async def _translate(stream):
+        """把 langgraph 的原始事件流翻译成前端可消费的 SSE 事件。"""
         async for event in stream:
             if not (isinstance(event, tuple) and event):
                 continue

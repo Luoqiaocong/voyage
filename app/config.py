@@ -13,6 +13,20 @@ class VoyageConfig(BaseSettings):
     ALIYUN_BASE_URL: str = "https://ws-llq8baw8q88n1gjz.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
 
     # ---------- 模型配置 ----------
+    # 全任务统一使用该模型（OpenCode Go 通道）：速度快、成本低、月度额度高
+    OPENCODE_LLM_MODEL: str = "deepseek-v4.1-flash"
+
+    # ---------- OpenCode Go（当前唯一可用的 LLM 通道，OpenAI 兼容）----------
+    # 注意：该网关强制要求每个请求携带 x-opencode-session 头，
+    # 缺失会直接返回 400 MissingSessionID；CLIENT_USER_AGENT 用于自报客户端身份，
+    # 避免被网关按通用 SDK 流量限流。
+    OPENCODE_GO_URL: str
+    OPENCODE_API_KEY: str
+    OPENCODE_DEFAULT_SESSION: str = "voyage-anonymous"
+    CLIENT_USER_AGENT: str = "voyage-travel-assistant/1.0"
+    APP_TIMEZONE: str = "Asia/Shanghai"
+
+    # ---------- 历史通道（DashScope 免费额度已耗尽，保留仅供回退/对比）----------
     ALIYUN_LLM_MODEL: str = "qwen3-max"
     DEEPSEEK_LLM_MODEL_FLASH: str = "deepseek-v4-flash"
     DEEPSEEK_LLM_MODEL_PRO: str = "deepseek-v4-pro"

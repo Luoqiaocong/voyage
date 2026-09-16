@@ -1,5 +1,4 @@
 from langchain.agents.middleware import (
-    ModelFallbackMiddleware,
     ModelRetryMiddleware,
     ToolCallLimitMiddleware,
     ToolCallRequest,
@@ -8,8 +7,6 @@ from langchain.agents.middleware import (
 )
 
 from app.shared.utils import log
-
-from .llm import VoyageModel, get_llm
 
 
 def on_tool_error(exc: Exception, request: ToolCallRequest) -> str | None:
@@ -48,21 +45,20 @@ CUSTOM_MIDDLEWARE = [
     #     apply_to_output=False,
     # ),
     # ---------- 上下文压缩 ----------
+    # 启用时需按当前通道取模型：from .llm import TaskKind, get_task_llm
     # SummarizationMiddleware(
-    #     model=get_llm(model=VoyageModel.DASHCOPE_QWEN_PLUS_1220),
+    #     model=get_task_llm(TaskKind.EXTRACT),
     #     trigger=("tokens", 4000),
     #     keep=("messages", 20),
     # ),
-    # ---------- 模型韧性：先同模型重试，再降级 ----------
+    # ---------- 模型韧性：同模型指数退避重试 ----------
+    # 说明：原先的 ModelFallbackMiddleware 已移除——本平台全任务统一使用
+    # deepseek-v4.1-flash（OpenCode Go），没有可降级的第二模型；且原降级链指向
+    # DashScope 已耗尽额度的模型，实际只会把故障放大。失败交由重试中间件处理。
     ModelRetryMiddleware(
         max_retries=3,
         backoff_factor=2.0,
         initial_delay=1.0,
-    ),
-    ModelFallbackMiddleware(
-        get_llm(model=VoyageModel.DASHCOPE_QWEN_3_7_PLUS_2026_05_26),
-        get_llm(model=VoyageModel.DASHCOPE_QWEN_3_6_FLASH_2026_04_16),
-        get_llm(model=VoyageModel.DASHCOPE_GLM_5),
     ),
     # ---------- 工具调用限流 ----------
     ToolCallLimitMiddleware(
