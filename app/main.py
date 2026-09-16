@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.shared.utils import init_log, close_log
 from app.shared.redis import redis_client
 from app.shared.flush_task import usage_flush_task
+from app.shared.memory_task import memory_extract_task
 SQLITE_PATH = Path(__file__).resolve().parent.parent / "data" / "exports" / "checkpoints.sqlite"
 
 
@@ -27,7 +28,9 @@ async def lifespan(app: FastAPI):
             finally:
                 AgentFactory.reset()   # 异常也兜底，且仍在连接关闭前
     finally:
-        await usage_flush_task.stop()  # 退出前最后一次落库
+        # 退出前收尾：先等记忆提炼（它用的是独立 DB 会话），再落库、关连接
+        await memory_extract_task.stop()
+        await usage_flush_task.stop()
         await close_http_client()   # 释放共享 LLM 连接池
         await redis_client.close()
         close_log()

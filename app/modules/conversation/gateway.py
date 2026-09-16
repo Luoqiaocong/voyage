@@ -1,12 +1,19 @@
 import asyncio
+from typing import Annotated
 
+from fastapi import Depends
 from langchain.messages import HumanMessage, ToolMessage
 from langchain_core.messages import AIMessageChunk, convert_to_openai_messages
 from langchain_core.runnables import RunnableConfig
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ai import AgentFactory
 from app.core.ai.opencode import use_session
 from app.core.business import BusinessCode, ConversationException
+from app.shared.db import get_db
+from app.shared.db.models import Conversation
+from app.shared.utils import log
 
 
 def _thread_config(conversation_id: str) -> RunnableConfig:
@@ -15,6 +22,31 @@ def _thread_config(conversation_id: str) -> RunnableConfig:
 
 class ConversationGateway:
     """对话网关：封装与 langgraph Agent 的交互（流式对话、历史读取、线程删除）。"""
+
+    def __init__(self, db: Annotated[AsyncSession, Depends(get_db)]) -> None:
+        # 需要 session 来加载当前会话所属用户的长期记忆（注入 system prompt）
+        self.db = db
+
+    async def _apply_memory(self, conversation_id: str) -> None:
+        """把该会话所属用户的长期记忆装载到 AgentFactory。
+
+        失败不阻断对话：记忆属于增强项，缺失时应降级为「没有记忆」而不是报错。
+        """
+        from app.modules.memory.repo import MemoryRepo
+        from app.modules.memory.service import MemoryService
+
+        try:
+            user_id = (
+                await self.db.execute(
+                    select(Conversation.user_id).where(Conversation.id == conversation_id)
+                )
+            ).scalar_one_or_none()
+            if user_id is None:
+                return
+            service = MemoryService(repo=MemoryRepo(db=self.db), db=self.db)
+            AgentFactory.apply_memory(await service.build_memory_context(user_id))
+        except Exception:
+            log.exception("[memory] 加载记忆上下文失败，本次对话按无记忆处理")
 
     # -------------------- 1. 查询历史消息 --------------------
     async def get_messages(self, conversation_id: str):
@@ -44,6 +76,8 @@ class ConversationGateway:
         OpenCode Go 要求每个请求携带 x-opencode-session 头（缺失直接 400），
         头值在 httpx 发出请求时从上下文读取，故整个流式过程必须包在会话上下文内。
         """
+        # 注入长期记忆后再取 agent：apply_memory 可能重建 agent 实例
+        await self._apply_memory(conversation_id)
         agent = AgentFactory.get_agent()
         config = _thread_config(conversation_id)
 

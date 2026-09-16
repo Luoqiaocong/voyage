@@ -89,6 +89,17 @@ class ConversationService(TransactionMixin):
         async with self.transaction_scope():
             await self.repo.update_conversation(conversation_id, updated_data)
 
+        # 提交后台记忆提炼（不等待结果）：
+        # 提炼要再调一次 LLM，若同步等待会让用户多等一次模型往返才能收到结束帧。
+        # 传入本轮「用户消息 + AI 回复」，两者都是画像的来源。
+        from app.shared.memory_task import memory_extract_task
+
+        memory_extract_task.submit(
+            user_id=conversation.user_id,
+            text=f"用户：{message}\n助手：{ai_text}",
+            conversation_id=conversation_id,
+        )
+
         if updated_data.get("title"):
             yield {"type": "title", "content": updated_data["title"]}
 

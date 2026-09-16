@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 from langchain.agents import create_agent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
+from app.shared.utils import log
+
 from .llm import TaskKind, get_task_llm
 from .middleware import CUSTOM_MIDDLEWARE
 from .tools import get_today, ticket_schedule, travel_recommend, weather_forecast
@@ -61,6 +63,7 @@ SUPERVISOR_PROMPT = """你是 Voyage 的旅行顾问，一位既专业又亲切�
 class AgentFactory:
     _instance: CompiledStateGraph | None = None
     _checkpointer: BaseCheckpointSaver | None = None
+    _memory_context: str = ""
 
     @classmethod
     def initialize(cls, checkpointer: BaseCheckpointSaver) -> None:
@@ -73,8 +76,41 @@ class AgentFactory:
             tools=[ticket_schedule, weather_forecast, travel_recommend,get_today],
             checkpointer=checkpointer,
             middleware=CUSTOM_MIDDLEWARE,
-            system_prompt=SUPERVISOR_PROMPT,
+            system_prompt=cls._compose_prompt(),
         )
+
+    @classmethod
+    def _compose_prompt(cls) -> str:
+        """把长期记忆拼到监督提示词之后。
+
+        为什么用「拼接」而不是让模型调用工具去查记忆：
+        旅行场景的记忆量很小（通常 5-15 条），全量注入开销可忽略；
+        工具方式需要模型自己想起去查，实测容易被忽略。代价是条数必须收敛，
+        故 MemoryService 侧设了上限并按置信度截断。
+        """
+        if not cls._memory_context:
+            return SUPERVISOR_PROMPT
+        return f"{SUPERVISOR_PROMPT}\n\n{cls._memory_context}"
+
+    @classmethod
+    def apply_memory(cls, memory_context: str) -> None:
+        """按当前用户设置长期记忆上下文；仅在文本真正变化时重建 agent。
+
+        同一用户的连续多轮对话不会重复构建，避免每轮都付出 create_agent 开销。
+        """
+        new_context = memory_context or ""
+        if new_context == cls._memory_context:
+            return
+        cls._memory_context = new_context
+        if cls._checkpointer is not None:
+            cls._instance = create_agent(
+                model=get_task_llm(TaskKind.CHAT),
+                tools=[ticket_schedule, weather_forecast, travel_recommend, get_today],
+                checkpointer=cls._checkpointer,
+                middleware=CUSTOM_MIDDLEWARE,
+                system_prompt=cls._compose_prompt(),
+            )
+            log.info(f"[memory] agent 已按新记忆重建（长度 {len(new_context)}）")
 
     @classmethod
     def get_agent(cls) -> CompiledStateGraph:
@@ -93,3 +129,4 @@ class AgentFactory:
         
         cls._instance = None
         cls._checkpointer = None
+        cls._memory_context = ""
