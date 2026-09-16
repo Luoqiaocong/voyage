@@ -11,6 +11,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -286,3 +287,82 @@ class ItineraryShare(Base):
     )
 
     itinerary: Mapped["Itinerary"] = relationship(back_populates="shares")
+
+
+class UserMemory(Base):
+    """用户长期记忆：从对话中提炼的稳定事实，供后续会话注入。
+
+    为什么用 (fact_key, fact_value) 键值对而不是整块 JSON：
+        偏好类事实（"美食"、"摄影"）本就允许多个并存，而标量属性
+        （预算档位、常住城市）同一 key 只应有一个值。键值对让这两类语义
+        自然统一——冲突消解退化为「同 key 覆盖 + 留痕」，无需为每条事实
+        单独设计合并规则。
+
+    为什么保留 previous_value：
+        用户偏好会变（"这次想穷游"推翻了上次的"预算充足"）。直接覆盖会丢失
+        演进过程，且万一提炼有误无法回滚。保留旧值既便于用户在管理页看到
+        变化，也让误判可追溯。
+
+    为什么存 confidence 与 evidence：
+        记忆是从自然语言里推断出来的，可靠性有高有低。"用户明确说"
+        与"模型猜测"应当区别对待——注入 prompt 时按 confidence 排序取前若干条，
+        低置信度的记忆不会挤占上下文。evidence 保留原文片段，便于人工核对。
+    """
+
+    __tablename__ = "user_memories"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, comment="主键")
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+        comment="所属用户ID（用户注销时级联删除记忆）",
+    )
+    fact_key: Mapped[str] = mapped_column(
+        String(64),
+        index=True,
+        nullable=False,
+        comment="事实键：标量属性如 budget_level/home_city；多值偏好用 preference 等",
+    )
+    fact_value: Mapped[str] = mapped_column(
+        String(255), nullable=False, comment="事实取值（字符串统一表示，便于比较与展示）"
+    )
+    previous_value: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, comment="被本次覆盖的旧值（仅标量键会用到），便于追溯偏好变化"
+    )
+    confidence: Mapped[float] = mapped_column(
+        Float, default=0.6, nullable=False,
+        comment="置信度 0-1：用户明确表述取高值，模型推断取低值",
+    )
+    evidence: Mapped[str | None] = mapped_column(
+        String(500), nullable=True, comment="来源原文片段，便于人工核对提炼是否准确"
+    )
+    source_conversation_id: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, comment="来源会话ID；会话删除后置空但记忆保留"
+    )
+    hit_count: Mapped[int] = mapped_column(
+        Integer, default=1, nullable=False, comment="被重复提取到的次数，越高说明越稳定"
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False, index=True,
+        comment="是否生效：用户可停用某条记忆而无需删除",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False, comment="首次提取时间（UTC）"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False,
+        comment="最近一次提取/修改时间（UTC）",
+    )
+
+    __table_args__ = (
+        # 唯一性建立在 (用户, 键, 值) 三元组上，而非仅 (用户, 键)。
+        # 这样两类语义自动统一，无需在代码里特判：
+        #   - 标量属性（budget_level）：换值时 fact_value 变了但 fact_key 相同，
+        #     应用层按「同 key 覆盖」处理，只保留最新值；
+        #   - 多值偏好（preference="美食" 与 preference="摄影"）：
+        #     值不同即视为两条独立事实，各自保留。
+        # 同时该约束天然去重：同一事实被反复提取到只会命中已有行，
+        # 由应用层把 hit_count 加一。
+        UniqueConstraint("user_id", "fact_key", "fact_value", name="uq_user_memory_fact"),
+    )

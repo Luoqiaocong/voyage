@@ -10,12 +10,14 @@ from app.modules.itinerary.share_router import (
     owner_router as itinerary_share_owner_router,
     public_router as share_public_router,
 )
+from app.modules.memory.router import router as memory_router
 from app.modules.user.router import router as user_router
 
 API_V1_STR = "/api/v1"
 
 api_router = APIRouter()
 api_router.include_router(user_router, prefix=API_V1_STR)
+api_router.include_router(memory_router, prefix=API_V1_STR)
 api_router.include_router(conversation_router, prefix=API_V1_STR)
 api_router.include_router(itinerary_router, prefix=API_V1_STR)
 # 分享者侧与导出路由都挂在 /itineraries 下，但路径段（shares / export）不与

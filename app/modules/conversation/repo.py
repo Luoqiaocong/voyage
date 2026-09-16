@@ -18,6 +18,18 @@ class ConversationRepo:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_owner_id(self, conversation_id: str) -> int | None:
+        """只取会话所属用户 ID。
+
+        对话链路需要它来加载该用户的长期记忆，而整行 Conversation 并无用处，
+        故只查单列；比 check() 少取若干字段，也更明确调用意图。
+        """
+        return (
+            await self.db.execute(
+                select(Conversation.user_id).where(Conversation.id == conversation_id)
+            )
+        ).scalar_one_or_none()
+
     async def remove(self, conversation_ids: list[str]):
         stmt = delete(Conversation).where(Conversation.id.in_(conversation_ids))
         row = await self.db.execute(stmt)
