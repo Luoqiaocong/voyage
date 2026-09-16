@@ -42,6 +42,13 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const user = useUserStore()
 
+  // 过期的令牌先清掉再判断。否则会进入一种坏状态：守卫认为「已登录」
+  // （localStorage 里有令牌），而任何请求都拿到 401——访问 /login 会被
+  // guestOnly 弹到 /chat，/chat 又取不到数据，用户看到的就是一片空白。
+  if (user.isLoggedIn && !user.hasUsableToken) {
+    user.clearAuth()
+  }
+
   if (to.meta.requiresAuth && !user.isLoggedIn) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }

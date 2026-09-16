@@ -151,6 +151,7 @@ async function handleLogin() {
     const res = await login(loginForm.email.trim(), loginForm.password)
     user.setAuth(res)
     await user.fetchUserInfo(true)
+
     try {
       if (remember.value) localStorage.setItem(REMEMBER_KEY, loginForm.email.trim())
       else localStorage.removeItem(REMEMBER_KEY)
@@ -158,13 +159,34 @@ async function handleLogin() {
       /* 忽略 */
     }
     ui.toast(AUTH_COPY.loginSuccess, 'success')
-    const redirect = (route.query.redirect as string) || '/chat'
-    router.replace(redirect)
+    router.replace(safeRedirect())
   } catch (e: any) {
+    // 关键：走到这里说明本次登录流程没有完整成功（例如令牌写入后
+    // fetchUserInfo 抛错）。若不清理，localStorage 里会留下一个「已登录但不可用」
+    // 的状态——此时 /login 的 guestOnly 守卫会把用户弹走，而目标页又因令牌无效
+    // 无法加载数据，用户看到的就是一个空白界面。
+    user.clearAuth()
     errors.form = e?.message ?? '登录失败，稍后重试'
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 取安全的登录后跳转目标。
+ *
+ * 只接受站内绝对路径（以 / 开头且不是 //host 形式）。
+ * 直接把 query 参数交给 router.replace 有两个问题：
+ * - 形如 "http://evil.com" 的外部地址会被当作路径处理并抛错，中断渲染；
+ * - 形如 "//evil.com" 的值可能被当成协议相对 URL 造成开放重定向。
+ */
+function safeRedirect(): string {
+  const raw = route.query.redirect
+  const value = Array.isArray(raw) ? raw[0] : raw
+  if (typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')) {
+    return value
+  }
+  return '/chat'
 }
 
 function validateLogin(): boolean {

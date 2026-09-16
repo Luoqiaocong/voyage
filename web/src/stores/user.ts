@@ -19,6 +19,37 @@ export const useUserStore = defineStore('user', () => {
     localStorage.setItem(REFRESH_TOKEN_KEY, res.refresh_token)
   }
 
+  /**
+   * 本地判断 access token 是否已过期（不请求后端）。
+   *
+   * 为什么需要：路由守卫此前只看「localStorage 里有没有令牌」。若残留一个
+   * 已过期的令牌（access token 默认仅 30 分钟），访问 /login 会被 guestOnly
+   * 静默弹到 /chat，而 /chat 又因令牌失效取不到数据——用户看到的就是一个
+   * 空白界面，主观上就是「登录页打不开」。
+   *
+   * 解析失败（非 JWT 结构）视为不可用，同样触发清理。
+   */
+  function isTokenExpired(token: string): boolean {
+    const parts = token.split('.')
+    if (parts.length < 2) return true
+    try {
+      // JWT payload 是 base64url，需补齐 padding 并替换 URL 安全字符
+      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+      const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=')
+      const payload = JSON.parse(atob(padded)) as { exp?: number }
+      if (typeof payload.exp !== 'number') return false
+      // 留 30 秒余量，避免边界上刚好过期导致请求被拒
+      return payload.exp * 1000 <= Date.now() + 30_000
+    } catch {
+      return true
+    }
+  }
+
+  /** 当前是否持有一个看起来仍有效的 access token */
+  const hasUsableToken = computed(
+    () => accessToken.value !== '' && !isTokenExpired(accessToken.value)
+  )
+
   function clearAuth() {
     accessToken.value = ''
     refreshToken.value = ''
@@ -55,6 +86,7 @@ export const useUserStore = defineStore('user', () => {
     refreshToken,
     userInfo,
     isLoggedIn,
+    hasUsableToken,
     setAuth,
     clearAuth,
     fetchUserInfo,
