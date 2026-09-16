@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi.responses import RedirectResponse
 from fastapi import FastAPI
 from app.core.ai import AgentFactory
+from app.core.ai.llm import close_http_client
 from app.core.business import register_exception
 from app.api import api_router
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -24,6 +25,7 @@ async def lifespan(app: FastAPI):
             finally:
                 AgentFactory.reset()   # 异常也兜底，且仍在连接关闭前
     finally:
+        await close_http_client()   # 释放共享 LLM 连接池
         await redis_client.close()
         close_log()
     
