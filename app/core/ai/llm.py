@@ -1,3 +1,11 @@
+"""LLM 工厂：统一走 OpenCode Go（OpenAI 兼容端点）。
+
+设计要点：
+- 全平台所有任务共用同一个模型（config.OPENCODE_LLM_MODEL），按任务只区分温度；
+- 请求头（x-opencode-session / User-Agent）由 session.py 在请求发出时注入，
+  这里只负责把共享的 httpx 客户端交给 ChatOpenAI；
+- 不再传 extra_body：`enable_thinking` 是 DashScope 专有参数，OpenCode Go 会拒绝。
+"""
 from enum import StrEnum
 from typing import Literal
 
@@ -6,22 +14,27 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from app.config import config
 
+from .session import build_http_client, build_sync_http_client
 from .token import token_counter
+
+# 全局共享的 httpx 客户端：复用连接池，并动态注入 OpenCode Go 必需的会话头。
+# 同步客户端仅为满足 ChatOpenAI 的初始化校验（项目内不存在同步调用路径）。
+_http_client = build_http_client()
+_sync_http_client = build_sync_http_client()
 
 
 class VoyageModel(StrEnum):
-    """Voyage 平台支持的模型枚举"""
-    DEEPSEEK_V4_PRO = "deepseek-v4-pro"
-    QWEN_PLUS_LATEST = "qwen-plus-latest"
-    QWEN_MAX = "qwen-max"
-    DASHCOPE_GLM_5 = "glm-5"
-    DASHCOPE_QWEN_PLUS_1220 = "qwen-plus-1220"
-    DASHCOPE_QWEN_3_7_PLUS_2026_05_26 = "qwen3.7-plus-2026-05-26"
-    DASHCOPE_QWEN_3_6_FLASH_2026_04_16="qwen3.6-flash-2026-04-16"
+    """Voyage 平台支持的模型（OpenCode Go 通道）。"""
+
+    # 全任务统一模型：速度快、成本低、月度额度高
+    DEEPSEEK_V4_1_FLASH = "deepseek-v4.1-flash"
+    # 同系列备选（仅用于对比/压测，默认路由不使用）
+    DEEPSEEK_V4_FLASH = "deepseek-v4-flash"
+    DEEPSEEK_FLASH = "deepseek-flash"
 
 
 class TaskKind(StrEnum):
-    """LLM 任务类型：决定默认模型与温度（调用处仍可覆盖）。"""
+    """LLM 任务类型：决定温度（调用处仍可覆盖）。"""
 
     CHAT = "chat"        # 主 Agent：日常对话 / 行程规划
     FACT = "fact"        # 事实查询：票务 / 天气
@@ -30,62 +43,80 @@ class TaskKind(StrEnum):
     PLAN = "plan"        # 综合推荐生成
 
 
-# 各任务默认「模型 + 温度」；主模型 DeepSeek-v4-pro，提取/规划用 qwen-max
-TASK_DEFAULTS: dict[TaskKind, dict] = {
-    TaskKind.CHAT:    {"model": VoyageModel.DASHCOPE_GLM_5,   "temperature": 0.7},
-    TaskKind.FACT:    {"model": VoyageModel.QWEN_PLUS_LATEST, "temperature": 0.2},
-    TaskKind.EXTRACT: {"model": VoyageModel.QWEN_MAX,          "temperature": 0.1},
-    TaskKind.TITLE:   {"model": VoyageModel.QWEN_PLUS_LATEST, "temperature": 0.3},
-    TaskKind.PLAN:    {"model": VoyageModel.QWEN_MAX,          "temperature": 0.6},
+# 各任务默认温度。模型统一，故只需按任务调温度：
+# 抽取类要稳定（低温），创作类要发散（高温）。
+TASK_TEMPERATURES: dict[TaskKind, float] = {
+    TaskKind.CHAT: 0.7,
+    TaskKind.FACT: 0.2,
+    TaskKind.EXTRACT: 0.1,
+    TaskKind.TITLE: 0.3,
+    TaskKind.PLAN: 0.6,
 }
+
+# 需要关闭「思考模式」的任务。
+# 原因：该通道的 deepseek-v4.1-flash 默认开启思考，而思考模式下强制指定
+# tool_choice 会被上游拒绝（400 Thinking mode does not support this tool_choice）。
+# 结构化提取依赖强制工具调用，故必须在此关闭思考；其余任务保留思考，
+# 以便前端展示推理过程、并提升复杂规划的质量。
+TASK_REASONING_OFF: frozenset[TaskKind] = frozenset({TaskKind.EXTRACT})
 
 
 def get_task_llm(task: TaskKind, **overrides) -> BaseChatModel:
-    """按任务类型获取 LLM：默认模型与温度见 TASK_DEFAULTS，可用关键字覆盖。"""
-    return get_llm(**{**TASK_DEFAULTS[task], **overrides})
+    """按任务类型获取 LLM：默认温度见 TASK_TEMPERATURES，可用关键字覆盖。"""
+    params: dict = {"temperature": TASK_TEMPERATURES[task]}
+    if task in TASK_REASONING_OFF:
+        params["reasoning_effort"] = "none"
+    params.update(overrides)
+    return get_llm(**params)
 
 
 def get_llm(
-    model: str | VoyageModel = VoyageModel.DEEPSEEK_V4_PRO,
+    model: str | VoyageModel = VoyageModel.DEEPSEEK_V4_1_FLASH,
     temperature: float = 1.0,
     api_key: str | None = None,
     base_url: str | None = None,
-    model_provider: Literal["openai", "deepseek"] | None = None,
+    model_provider: Literal["openai"] | None = None,
+    reasoning_effort: str | None = None,
 ) -> BaseChatModel:
+    """统一的 LLM 实例获取工厂函数。
+
+    Args:
+        model: 模型 ID，默认取全平台统一模型
+        temperature: 采样温度
+        api_key / base_url: 显式覆盖通道配置（默认走 OpenCode Go）
+        model_provider: 仅支持 OpenAI 兼容协议（OpenCode Go 的 /chat/completions）
+        reasoning_effort: 传 "none" 关闭思考模式（结构化提取等强制工具调用场景需要）
     """
-    统一的 LLM 实例获取工厂函数
-    
-    能够根据传入的 model 动态推断适配的 API Key、Base URL 与 Provider。
-    """
-    # 1. 因为是 StrEnum，直接转为标准 str 类型即可（兼顾兼容外部传入的字符串）
     model_name = str(model)
 
-    # 2. 动态推断 API Key 与 Base URL
-    # if "deepseek" in model_name:
-    #     base_url = base_url or config.DEEPSEEK_BASE_URL
-    #     api_key = api_key or config.DEEPSEEK_API_KEY
-    # else:
-    #     base_url = base_url or config.DASHSCOPE_BASE_URL
-    #     api_key = api_key or config.DASHSCOPE_API_KEY
-    
-    base_url = config.DASHSCOPE_BASE_URL
-    api_key = config.DASHSCOPE_API_KEY
+    # OpenCode Go 的 OpenAI 兼容端点
+    resolved_base_url = base_url or config.OPENCODE_GO_URL
+    resolved_api_key = api_key or config.OPENCODE_API_KEY
 
-    # 3. 只有当外部没有指定 provider 时，才提供默认值 "openai"
-    provider = model_provider or "openai"
+    # 关闭思考模式：上游为 DeepSeek 系模型，认这条 OpenAI 兼容参数；
+    # 用 extra_body 下发以确保透传（enable_thinking 在该通道无效，实测 400）。
+    extra_body = {"reasoning_effort": "none"} if reasoning_effort == "none" else None
 
     return init_chat_model(
         model=model_name,
-        model_provider=provider,
-        api_key=api_key,
-        base_url=base_url,
+        model_provider=model_provider or "openai",
+        api_key=resolved_api_key,
+        base_url=resolved_base_url,
         temperature=temperature,
-        callbacks=[token_counter],  # 添加 TokenCounter 回调,用于统计用量
-        extra_body={
-        "enable_thinking": False,           # Qwen3 / 很多国内兼容网关
-        # "chat_template_kwargs": {"enable_thinking": False},  # vLLM / SGLang 常见
-        # "thinking": {"type": "disabled"},  # 部分网关
-        # "reasoning": {"enabled": False},   # 部分 DeepSeek 兼容
-        # "reasoning_effort": "none",        # 支持 effort 的推理模型
-    },
+        reasoning_effort=reasoning_effort,
+        extra_body=extra_body,
+        callbacks=[token_counter],          # Token 用量统计回调
+        # 本平台全部走异步调用（ainvoke / astream）；同步参数位指向同步客户端，
+        # 仅用于满足 ChatOpenAI 初始化校验，不会被实际用于发送请求。
+        http_async_client=_http_client,
+        http_client=_sync_http_client,
+        http_socket_options=(),             # 禁用自带传输层，交由上面的自定义客户端控制
     )
+
+
+async def close_http_client() -> None:
+    """释放共享 httpx 客户端（FastAPI 关闭钩子中调用）。"""
+    if not _http_client.is_closed:
+        await _http_client.aclose()
+    if not _sync_http_client.is_closed:
+        _sync_http_client.close()
