@@ -267,9 +267,20 @@ async def extract_structured(
     if not text or not text.strip():
         return None
 
+    from app.shared.observability import record_extraction
+    import time
+
+    started = time.perf_counter()
+
     # ---------- 主路径：工具调用 ----------
     try:
-        return await _extract_via_tool_call(text, schema, temperature, system_instructions)
+        result = await _extract_via_tool_call(
+            text, schema, temperature, system_instructions
+        )
+        await record_extraction(
+            via_tool_call=True, ok=True, ms=(time.perf_counter() - started) * 1000
+        )
+        return result
     except ValidationError as exc:
         log.error(f"[extract_structured] 工具调用结果校验失败: {_brief(exc)}")
     except Exception as exc:  # noqa: BLE001
@@ -279,6 +290,14 @@ async def extract_structured(
         )
 
     # ---------- 回退路径：提示词 + 本地校验（含一次纠错重试） ----------
-    return await _extract_with_retry(
+    fallback = await _extract_with_retry(
         text, schema, temperature, system_instructions, max_attempts
     )
+    # 埋点区分「走了回退路径」与「最终是否成功」：
+    # 前者反映通道能力（工具调用是否可用），后者反映提取质量，两者含义不同。
+    await record_extraction(
+        via_tool_call=False,
+        ok=fallback is not None,
+        ms=(time.perf_counter() - started) * 1000,
+    )
+    return fallback

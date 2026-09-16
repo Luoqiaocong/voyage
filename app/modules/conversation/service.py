@@ -50,6 +50,14 @@ class ConversationService(TransactionMixin):
     async def get_messages(self, conversation_id: str, **kwargs):
         return await self.gateway.get_messages(conversation_id, **kwargs)
 
+    async def get_messages_page(self, conversation_id: str, limit: int | None = None):
+        """分页获取历史消息（按轮次截断 + 字段收敛）。
+
+        独立于 get_messages：后者供内部调用方（如 get_last_ai_text）使用，
+        需要完整原始消息，不应受分页与字段裁剪影响。
+        """
+        return await self.gateway.get_messages_page(conversation_id, limit=limit)
+
     # -------------------- 4. 流式发送消息 --------------------
     async def send_message(self, message: str, conversation_id: str):
         ai_text = ""

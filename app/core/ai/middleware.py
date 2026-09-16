@@ -1,4 +1,6 @@
 from langchain.agents.middleware import (
+    ClearToolUsesEdit,
+    ContextEditingMiddleware,
     ModelRetryMiddleware,
     ToolCallLimitMiddleware,
     ToolCallRequest,
@@ -44,13 +46,29 @@ CUSTOM_MIDDLEWARE = [
     #     apply_to_input=True,
     #     apply_to_output=False,
     # ),
-    # ---------- 上下文压缩 ----------
-    # 启用时需按当前通道取模型：from .llm import TaskKind, get_task_llm
-    # SummarizationMiddleware(
-    #     model=get_task_llm(TaskKind.EXTRACT),
-    #     trigger=("tokens", 4000),
-    #     keep=("messages", 20),
-    # ),
+    # ---------- 上下文压缩：清理过期工具结果 ----------
+    # 为什么不选 SummarizationMiddleware：
+    #   它每次触发都要额外调用一次 LLM 生成摘要——既是成本也是延迟，
+    #   且摘要失败会阻塞对话。本项目的 token 用量按量计费，这笔开销不划算。
+    #
+    # 选 ContextEditingMiddleware + ClearToolUsesEdit：
+    #   纯上下文编辑，不产生任何模型调用，因此不会失败、不会拖慢对话。
+    #   对本场景尤其合适——天气/车次/推荐的返回都很长，但过几轮就失去价值，
+    #   清掉它们能在不损失关键信息（用户说了什么、模型答了什么）的前提下
+    #   把上下文压回可控范围。
+    #
+    # trigger=8000：supervisor 提示词本身已有约 1100 字符，加上长期记忆与
+    #   若干轮工具结果，8000 token 是「开始偏重但远未溢出」的合理起点。
+    # keep=3：保留最近 3 条工具结果——模型通常在最近几轮内才需要回看它们。
+    ContextEditingMiddleware(
+        edits=[
+            ClearToolUsesEdit(
+                trigger=8000,
+                keep=3,
+                clear_tool_inputs=True,   # 入参同样占用额度，一并清掉
+            )
+        ],
+    ),
     # ---------- 模型韧性：同模型指数退避重试 ----------
     # 说明：原先的 ModelFallbackMiddleware 已移除——本平台全任务统一使用
     # deepseek-v4.1-flash（OpenCode Go），没有可降级的第二模型；且原降级链指向

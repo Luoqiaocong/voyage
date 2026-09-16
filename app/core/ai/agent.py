@@ -9,7 +9,21 @@ from app.shared.utils import log
 
 from .llm import TaskKind, get_task_llm
 from .middleware import CUSTOM_MIDDLEWARE
-from .tools import get_today, ticket_schedule, travel_recommend, weather_forecast
+from .tools import (
+    get_today,
+    ticket_schedule_cached,
+    travel_recommend_cached,
+    weather_forecast_cached,
+)
+
+# supervisor 的工具集：带缓存与埋点的版本（见 tools/__init__.py 说明）。
+# 抽成模块级常量，避免 initialize 与 apply_memory 两处各写一遍导致漏改。
+AGENT_TOOLS = [
+    ticket_schedule_cached,
+    weather_forecast_cached,
+    travel_recommend_cached,
+    get_today,
+]
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
@@ -73,7 +87,7 @@ class AgentFactory:
         cls._checkpointer = checkpointer
         cls._instance = create_agent(
             model=get_task_llm(TaskKind.CHAT),
-            tools=[ticket_schedule, weather_forecast, travel_recommend,get_today],
+            tools=AGENT_TOOLS,
             checkpointer=checkpointer,
             middleware=CUSTOM_MIDDLEWARE,
             system_prompt=cls._compose_prompt(),
@@ -105,7 +119,7 @@ class AgentFactory:
         if cls._checkpointer is not None:
             cls._instance = create_agent(
                 model=get_task_llm(TaskKind.CHAT),
-                tools=[ticket_schedule, weather_forecast, travel_recommend, get_today],
+                tools=AGENT_TOOLS,
                 checkpointer=cls._checkpointer,
                 middleware=CUSTOM_MIDDLEWARE,
                 system_prompt=cls._compose_prompt(),

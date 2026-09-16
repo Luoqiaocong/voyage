@@ -1,6 +1,6 @@
 import json
 from typing import Annotated, AsyncGenerator
-from fastapi import APIRouter, Body, Depends, Path
+from fastapi import APIRouter, Body, Depends, Path, Query
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi_utils.cbv import cbv
 from starlette import status
@@ -58,16 +58,29 @@ class ConversationRouter:
     @router.get(
         "/{id}/messages",
         status_code=status.HTTP_200_OK,
-        summary="获取历史对话消息",
+        summary="获取历史对话消息（按轮次分页，字段已收敛）",
         dependencies=[Depends(verify_conversation_owner)],
     )
     async def get_messages(
         self,
         id: Annotated[ConversationId, Path()],
+        limit: Annotated[
+            int | None,
+            Query(
+                ge=1,
+                le=200,
+                description="返回最近多少轮对话（一轮=一条用户消息及其后的回复）；不传返回全部",
+            ),
+        ] = None,
     ):
-        # TODO: 
-        # 消息按轮次返回：HumanMessage → AI/Tool → 下一条 HumanMessage 前
-        return await self.service.get_messages(id)
+        """按轮次返回历史消息。
+
+        实现说明见 ConversationGateway.get_messages_page：
+        - 按「轮次」截断而非按条截断，避免出现有回答没提问的断裂；
+        - assistant 消息的 tool_calls 只保留工具名，剥掉模型的工具入参
+          （前端渲染不需要，且属于内部调度细节）。
+        """
+        return await self.service.get_messages_page(id, limit=limit)
 
     # -------------------- 4. 流式发送消息 --------------------
     @router.post(
