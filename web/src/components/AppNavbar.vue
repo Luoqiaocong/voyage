@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useUserStore } from '@/stores/user'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
@@ -15,6 +15,10 @@ const links = [
   { label: '我的', to: '/profile', auth: true, icon: 'user' }
 ]
 
+/** 管理台入口仅对管理员展示。
+ *  这只是「界面不展示」，真正的拦截在后端（/admin 统一挂了 get_current_admin）。 */
+const showAdmin = computed(() => user.userInfo?.role === 'admin')
+
 function close() {
   open.value = false
 }
@@ -26,6 +30,12 @@ function onScroll() {
 onMounted(() => {
   window.addEventListener('scroll', onScroll, { passive: true })
   onScroll()
+
+  // userInfo 只存在内存中，整页刷新后会丢失；而「管理台」入口的显隐依赖它。
+  // 这里主动补一次（store 内部有缓存，已加载过就不会重复请求）。
+  if (user.isLoggedIn && !user.userInfo) {
+    user.fetchUserInfo()
+  }
 })
 
 onUnmounted(() => {
@@ -60,6 +70,10 @@ onUnmounted(() => {
         >
           <TravelIcon :name="l.icon" :size="15" />
           {{ l.label }}
+        </RouterLink>
+        <RouterLink v-if="showAdmin" to="/admin" @click="close">
+          <TravelIcon name="compass" :size="15" />
+          管理台
         </RouterLink>
       </nav>
 
@@ -102,6 +116,7 @@ onUnmounted(() => {
       </RouterLink>
       <div class="nav__mobile-actions">
         <template v-if="user.isLoggedIn">
+          <RouterLink v-if="showAdmin" to="/admin" class="btn btn-ghost btn--sm" @click="close">管理台</RouterLink>
           <RouterLink to="/profile" class="btn btn-ghost btn--sm" @click="close">个人资料</RouterLink>
           <RouterLink to="/chat" class="btn btn-primary btn--sm" @click="close">进入助手</RouterLink>
         </template>

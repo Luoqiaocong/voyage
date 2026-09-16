@@ -37,6 +37,84 @@ export function clearAuthStorage(): void {
   localStorage.removeItem(REFRESH_TOKEN_KEY)
 }
 
+/**
+ * 带认证的原始请求（不经过 http 实例的响应拦截器）。
+ *
+ * 为什么不走 http 实例：它的拦截器会把信封剥成 `data`，
+ * 而文件导出需要拿到原始 Blob 与 Content-Disposition 里的文件名。
+ * 这里用原生 fetch：对 Blob 的处理更直接，并复刻了 http 实例
+ * 「401 后用 refresh token 换新令牌再重试一次」的行为。
+ */
+async function fetchRaw(path: string): Promise<Response> {
+  const doFetch = (token: string) =>
+    fetch(`${API_BASE_URL}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+
+  let res = await doFetch(getAccessToken())
+  if (res.status === 401) {
+    const ok = await refreshAccessToken()
+    if (ok) res = await doFetch(getAccessToken())
+  }
+  if (!res.ok) {
+    // 尽量把后端业务错误透出来，而不是抛一个笼统的失败
+    let message = `请求失败（HTTP ${res.status}）`
+    try {
+      const body = (await res.json()) as ApiEnvelope
+      if (body?.message) message = body.message
+    } catch {
+      /* 非 JSON 响应，保留默认提示 */
+    }
+    throw new ApiError(-1, message, res.status)
+  }
+  return res
+}
+
+/** 从 Content-Disposition 解析文件名，取不到则用兜底名 */
+function filenameFrom(res: Response, fallback: string): string {
+  const disposition = res.headers.get('Content-Disposition') ?? ''
+  return /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? fallback
+}
+
+/** 触发浏览器下载一个 Blob */
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+/** 下载需要认证的文件（CSV 导出、.ics 日历等） */
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const res = await fetchRaw(path)
+  saveBlob(await res.blob(), filenameFrom(res, fallbackName))
+}
+
+/**
+ * 打开文本类导出：
+ * - 打印 HTML 在新标签页打开，用户可直接 Ctrl+P 存为 PDF；
+ * - Markdown 浏览器无法优雅预览，走下载。
+ */
+export async function openTextExport(path: string): Promise<void> {
+  const res = await fetchRaw(path)
+  const contentType = res.headers.get('Content-Type') ?? ''
+
+  if (contentType.includes('text/html')) {
+    const html = await res.text()
+    const win = window.open('', '_blank')
+    if (win) {
+      win.document.write(html)
+      win.document.close()
+    }
+    return
+  }
+  saveBlob(await res.blob(), filenameFrom(res, 'export.md'))
+}
+
 /** 用 refresh token 换新 access token（独立于拦截器，避免递归） */
 let refreshing: Promise<boolean> | null = null
 export function refreshAccessToken(): Promise<boolean> {

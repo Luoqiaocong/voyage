@@ -11,6 +11,26 @@ const router = createRouter({
     { path: '/itineraries', name: 'itineraries', component: () => import('@/views/ItinerariesView.vue'), meta: { requiresAuth: true } },
     { path: '/itineraries/:id(\\d+)', name: 'itinerary-detail', component: () => import('@/views/ItineraryDetailView.vue'), meta: { requiresAuth: true } },
     { path: '/profile', name: 'profile', component: () => import('@/views/ProfileView.vue'), meta: { requiresAuth: true } },
+
+    // 公开分享页：无需登录——这正是分享的意义。
+    // 安全性由令牌 + 可选密码保证，而不是登录态。
+    { path: '/share/:token', name: 'share', component: () => import('@/views/ShareView.vue') },
+
+    // 管理台：requiresAdmin 只是界面层拦截，真正的边界在后端
+    // （/admin 路由统一挂了 get_current_admin）。
+    {
+      path: '/admin',
+      component: () => import('@/views/admin/AdminLayout.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true },
+      children: [
+        { path: '', name: 'admin-dashboard', component: () => import('@/views/admin/AdminDashboard.vue') },
+        { path: 'metrics', name: 'admin-metrics', component: () => import('@/views/admin/AdminMetrics.vue') },
+        { path: 'users', name: 'admin-users', component: () => import('@/views/admin/AdminUsers.vue') },
+        { path: 'conversations', name: 'admin-conversations', component: () => import('@/views/admin/AdminConversations.vue') },
+        { path: 'audit', name: 'admin-audit', component: () => import('@/views/admin/AdminAudit.vue') }
+      ]
+    },
+
     { path: '/:pathMatch(.*)*', redirect: '/' }
   ],
   scrollBehavior(to) {
@@ -19,13 +39,25 @@ const router = createRouter({
   }
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const user = useUserStore()
+
   if (to.meta.requiresAuth && !user.isLoggedIn) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
   if (to.meta.guestOnly && user.isLoggedIn) {
     return { name: 'chat' }
+  }
+
+  if (to.meta.requiresAdmin) {
+    // role 来自 /users/info：整页刷新时 store 里还是空的（userInfo 只存在内存），
+    // 必须先拉一次，否则会把自己误判成非管理员并弹回首页。
+    if (!user.userInfo) {
+      await user.fetchUserInfo()
+    }
+    if (user.userInfo?.role !== 'admin') {
+      return { name: 'home' }
+    }
   }
 })
 

@@ -11,6 +11,9 @@ export interface UserInfo {
   email: string
   username: string | null
   avatar: string | null
+  /** 角色：前端据此决定是否展示管理台入口 */
+  role: 'user' | 'admin'
+  is_active: boolean
 }
 
 export interface AvatarLibrary {

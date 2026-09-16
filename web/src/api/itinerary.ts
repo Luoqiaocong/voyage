@@ -1,4 +1,4 @@
-import http from './http'
+import http, { downloadFile, openTextExport } from './http'
 
 export interface ItineraryActivity {
   time_slot: 'morning' | 'afternoon' | 'evening'
@@ -68,4 +68,23 @@ export async function patchItinerary(id: number, patch: ItineraryPatch): Promise
 
 export async function deleteItinerary(id: number): Promise<void> {
   await http.delete(`/itineraries/${id}`)
+}
+
+// ==================== 导出 ====================
+// 三种导出都走独立的原始请求（见 http.ts 的 downloadFile/openTextExport）：
+// 它们返回的是文件流/HTML 而非 JSON 信封，不能经过 http 实例的响应拦截器。
+
+/** 导出为日历文件（.ics，可导入手机日历） */
+export async function exportItineraryCalendar(id: number): Promise<void> {
+  await downloadFile(`/itineraries/${id}/export/calendar.ics`, `itinerary-${id}.ics`)
+}
+
+/** 导出为 Markdown（浏览器无法优雅预览，直接下载） */
+export async function exportItineraryMarkdown(id: number): Promise<void> {
+  await openTextExport(`/itineraries/${id}/export/markdown`)
+}
+
+/** 打开打印友好页面（在新标签打开后可用 Ctrl+P 另存为 PDF） */
+export async function openItineraryPrintView(id: number): Promise<void> {
+  await openTextExport(`/itineraries/${id}/export/print`)
 }

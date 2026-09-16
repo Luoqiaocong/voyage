@@ -24,6 +24,41 @@ export async function getMessages(conversationId: string): Promise<unknown[]> {
   return http.get(`/conversations/${conversationId}/messages`)
 }
 
+/** 历史消息里 assistant 的 tool_calls：后端已收敛为只留工具名 */
+export interface MessageToolCall {
+  name: string
+}
+
+/** 历史消息（后端已收敛字段：tool_calls 只保留名字，剥掉了模型入参） */
+export interface HistoryMessage {
+  role: string
+  content: string | unknown[]
+  tool_calls?: MessageToolCall[]
+}
+
+export interface MessagesPage {
+  messages: HistoryMessage[]
+  /** 会话总轮次（一轮 = 一条用户消息及其后的回复） */
+  total_rounds: number
+  returned_rounds: number
+  truncated: boolean
+}
+
+/**
+ * 分页获取历史消息。
+ *
+ * 后端按「轮次」截断而非按条截断，避免出现有回答没提问的断裂；
+ * limit 为空则返回全部轮次。
+ */
+export async function getMessagesPage(
+  conversationId: string,
+  limit?: number
+): Promise<MessagesPage> {
+  return (await http.get(`/conversations/${conversationId}/messages`, {
+    params: limit ? { limit } : {}
+  })) as unknown as MessagesPage
+}
+
 export async function renameConversation(conversationId: string, title: string): Promise<void> {
   await http.patch(`/conversations/${conversationId}`, { title })
 }
@@ -40,14 +75,29 @@ export type ChatChunk =
   | { type: 'title'; content: string }
   | { type: 'done' }
 
-/** 内置工具的技术名 → 中文展示信息 */
+/**
+ * 内置工具的技术名 → 中文展示信息。
+ *
+ * 键必须与后端 supervisor 实际注册的工具名一致，否则会退化成
+ * 把 snake_case 拆成英文短语、并丢掉图标。当前后端工具集见
+ * app/core/ai/tools/__init__.py：weather_forecast_cached / ticket_schedule_cached /
+ * travel_recommend_cached / get_today（后端的 *_cached 只是加了缓存包装，
+ * 对 agent 暴露的名字带 _cached 后缀）。旧名一并保留，兼容历史消息。
+ */
 const TOOL_META: Record<string, { label: string; icon: string }> = {
+  weather_forecast_cached: { label: '查询天气', icon: 'weather' },
+  weather_forecast: { label: '查询天气', icon: 'weather' },
   get_weather: { label: '查询天气', icon: 'weather' },
   query_weather: { label: '查询天气', icon: 'weather' },
+  ticket_schedule_cached: { label: '查询车次票价', icon: 'train' },
+  ticket_schedule: { label: '查询车次票价', icon: 'train' },
   get_train_tickets: { label: '查询车次票价', icon: 'train' },
   query_train_tickets: { label: '查询车次票价', icon: 'train' },
   search_train: { label: '查询车次票价', icon: 'train' },
+  travel_recommend_cached: { label: '生成行程推荐', icon: 'itinerary' },
+  travel_recommend: { label: '生成行程推荐', icon: 'itinerary' },
   recommend_itinerary: { label: '生成行程推荐', icon: 'itinerary' },
+  get_today: { label: '获取当前日期', icon: 'date' },
   get_current_date: { label: '获取当前日期', icon: 'date' },
   get_date: { label: '获取当前日期', icon: 'date' }
 }

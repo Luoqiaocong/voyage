@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppNavbar from '@/components/AppNavbar.vue'
+import MemoryPanel from '@/components/MemoryPanel.vue'
 import { AVATAR_BASE_URL } from '@/constants'
 import { changePassword, deleteAccount, getAvatars, logout, updateProfile } from '@/api/user'
 import { useUiStore } from '@/stores/ui'
@@ -182,6 +183,11 @@ async function handleDeleteAccount() {
             <button class="btn btn-danger btn--block logout-btn" @click="handleDeleteAccount">注销账号</button>
           </section>
         </div>
+
+        <!-- 长期记忆：通栏放在两栏之下，它是独立主题、不属于「资料」或「安全」 -->
+        <div class="pf-memory">
+          <MemoryPanel />
+        </div>
       </div>
     </main>
   </div>
@@ -195,6 +201,9 @@ async function handleDeleteAccount() {
 }
 
 .pf-card { padding: 26px 28px; display: flex; flex-direction: column; gap: 16px; }
+
+/* 记忆面板：与上方两栏保持同样的纵向间距 */
+.pf-memory { margin-top: 20px; }
 
 .pf-title { font-size: 1.15rem; }
 

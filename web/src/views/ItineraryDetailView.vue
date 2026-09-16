@@ -2,9 +2,13 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppNavbar from '@/components/AppNavbar.vue'
+import SharePanel from '@/components/SharePanel.vue'
 import {
   deleteItinerary,
+  exportItineraryCalendar,
+  exportItineraryMarkdown,
   getItinerary,
+  openItineraryPrintView,
   patchItinerary,
   type ItineraryActivity,
   type ItineraryDetail
@@ -19,6 +23,11 @@ const id = Number(route.params.id)
 const detail = ref<ItineraryDetail | null>(null)
 const loading = ref(true)
 const saving = ref(false)
+
+/** 分享面板默认收起：它不是高频操作，展开会挤掉行程正文 */
+const showShare = ref(false)
+/** 导出进行中标记：同一个时刻只允许一个导出任务 */
+const exporting = ref<'ics' | 'md' | 'print' | null>(null)
 
 const editing = ref(false)
 const edit = reactive({
@@ -132,6 +141,28 @@ async function remove() {
   }
 }
 
+/**
+ * 导出行程。
+ *
+ * 三种格式的落点不同：
+ * - .ics 直接下载，可导入手机日历（每天活动变成日程）
+ * - Markdown 直接下载（浏览器无法优雅预览 md）
+ * - 打印页在新标签打开，用户用 Ctrl+P 即可存为 PDF
+ */
+async function doExport(kind: 'ics' | 'md' | 'print') {
+  exporting.value = kind
+  try {
+    if (kind === 'ics') await exportItineraryCalendar(id)
+    else if (kind === 'md') await exportItineraryMarkdown(id)
+    else await openItineraryPrintView(id)
+    if (kind !== 'print') ui.toast('导出已开始下载', 'success')
+  } catch (e: any) {
+    ui.toast(e?.message ?? '导出失败', 'error')
+  } finally {
+    exporting.value = null
+  }
+}
+
 const budgetDraft = computed({
   get: () => (edit.budget == null ? '' : String(edit.budget)),
   set: (v: string) => {
@@ -172,6 +203,18 @@ function cancelEdit() {
             </div>
             <div class="it-actions">
               <template v-if="!editing">
+                <button class="btn btn-ghost btn--sm" @click="doExport('ics')" :disabled="exporting !== null">
+                  {{ exporting === 'ics' ? '导出中…' : '📅 日历' }}
+                </button>
+                <button class="btn btn-ghost btn--sm" @click="doExport('md')" :disabled="exporting !== null">
+                  {{ exporting === 'md' ? '导出中…' : '📝 Markdown' }}
+                </button>
+                <button class="btn btn-ghost btn--sm" @click="doExport('print')" :disabled="exporting !== null">
+                  🖨️ 打印/PDF
+                </button>
+                <button class="btn btn-ghost btn--sm" @click="showShare = !showShare">
+                  {{ showShare ? '收起分享' : '🔗 分享' }}
+                </button>
                 <button class="btn btn-ghost btn--sm" @click="openEditor">✏️ 编辑行程</button>
                 <button class="btn btn-danger btn--sm" @click="remove">删除</button>
               </template>
@@ -183,6 +226,9 @@ function cancelEdit() {
               </template>
             </div>
           </div>
+
+          <!-- 分享面板：默认收起，展开时置于概览之上 -->
+          <SharePanel v-if="showShare" :itinerary-id="id" />
 
           <section class="card it-overview">
             <div class="it-overview__item">
