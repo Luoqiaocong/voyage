@@ -159,6 +159,12 @@ class Itinerary(Base):
 
     conversation: Mapped[Conversation | None] = relationship(back_populates="itineraries")
 
+    # 一份行程可创建多个分享链接（不同权限 / 发给不同的人），故为一对多。
+    # cascade 让行程删除时分享链接一并清除，避免留下指向空行程的僵尸链接。
+    shares: Mapped[list["ItineraryShare"]] = relationship(
+        back_populates="itinerary", cascade="all, delete-orphan"
+    )
+
 
 class TokenUsage(Base):
     """LLM 用量按「模型 + 日期」聚合成一行。
@@ -220,3 +226,63 @@ class AdminAuditLog(Base):
         DateTime(timezone=True), default=utc_now, index=True, nullable=False,
         comment="操作时间（UTC）",
     )
+
+
+class ItineraryShare(Base):
+    """行程分享链接。
+
+    设计要点
+    --------
+    - token 用 secrets.token_urlsafe(32) 生成，高熵不可猜；不直接暴露行程 ID。
+    - 密码只存哈希（复用用户模块的 argon2 实现），绝不落明文；
+      另设 password_plain 便于"再次查看"时回显，与 REFRESH_TOKEN 的既有做法一致。
+      ⚠ 该字段是已知的明文存储弱点，若本项目进入真实生产环境应移除并改为只允许重置密码。
+    - allow_copy / allow_edit 两个布尔位而非单一枚举：
+      "可复制但不可改" 与 "可改" 是正交的，用位组合更自然。
+    - 所有人用 owner_id 冗余记录，便于"我分享出去的全部链接"一次性查询与撤销。
+    """
+
+    __tablename__ = "itinerary_shares"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, comment="主键")
+    itinerary_id: Mapped[int] = mapped_column(
+        ForeignKey("itineraries.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+        comment="被分享的行程ID（行程删除时级联删除分享）",
+    )
+    owner_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+        comment="分享创建者ID（冗余记录，便于按用户批量查询与撤销）",
+    )
+    token: Mapped[str] = mapped_column(
+        String(64), unique=True, index=True, nullable=False, comment="分享令牌（URL 安全随机串）"
+    )
+    allow_copy: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False, comment="是否允许访问者复制行程到自己的账号"
+    )
+    allow_edit: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, comment="是否允许访问者直接编辑行程"
+    )
+    password_hash: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, comment="访问密码哈希（argon2）；为空表示无需密码"
+    )
+    password_plain: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="访问密码明文（便于分享者再次查看）"
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True, comment="过期时间（UTC）；为空表示永不过期"
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="撤销时间（UTC）；非空表示已失效"
+    )
+    view_count: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False, comment="访问次数"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False, comment="创建时间（UTC）"
+    )
+
+    itinerary: Mapped["Itinerary"] = relationship(back_populates="shares")

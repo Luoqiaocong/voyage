@@ -92,6 +92,13 @@ class BusinessCode(Enum):
     ITINERARY_UPDATE_FAILED = (60003, "行程修改保存失败")
     ITINERARY_SHARE_EXPIRED = (60004, "行程分享链接已失效")
     ITINERARY_DELETED_FAILED = (60005, "行程删除失败")
+    # 分享相关：区分「链接不存在」「需要密码」「密码错误」「无权操作」，
+    # 便于前端给出准确提示；注意不要用「令牌无效」区分存在与否以外的信息，
+    # 以免被用来枚举有效令牌（不存在与已撤销对外统一为同一个码）。
+    ITINERARY_SHARE_NOT_FOUND = (60006, "分享链接不存在或已失效")
+    ITINERARY_SHARE_PASSWORD_REQUIRED = (60007, "该分享需要访问密码")
+    ITINERARY_SHARE_PASSWORD_WRONG = (60008, "访问密码错误")
+    ITINERARY_SHARE_NOT_ALLOWED = (60009, "该分享未开放此操作")
 
     @property
     def code(self) -> int:

@@ -46,6 +46,11 @@ class VoyageConfig(BaseSettings):
     ADMIN_PAGE_SIZE_DEFAULT: int = 20        # 管理端分页默认每页条数
     ADMIN_PAGE_SIZE_MAX: int = 100           # 管理端分页每页上限
 
+    # ---------- 行程分享 ----------
+    # 生成完整分享链接时使用的对外基址（前端域名）。
+    # 分享接口返回的 url 由它 + /share/{token} 拼成，便于前端直接复制。
+    SHARE_BASE_URL: str = "http://localhost:5173"
+
     # ---------- JWT / 安全（密钥类必须由 .env / 环境变量提供，不设默认值）----------
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
