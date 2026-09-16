@@ -1,7 +1,40 @@
 """Redis 通用便捷操作（供业务层使用）。"""
 from __future__ import annotations
 
+from redis import asyncio as aioredis
+
 from .client import redis_client
+
+# 原子「计数 +1 并确保过期时间已设置」。
+#
+# 为什么用 Lua 而不是 EXPIRE ... NX：
+#   NX 选项是 Redis 7.0 才引入的，本机/部分托管实例仍是 5.x/6.x，
+#   直接调用会报 "wrong number of arguments for 'expire' command"，
+#   导致所有走限流的接口 500。Lua 在服务端原子执行，同时兼容 Redis 5/6/7。
+#
+# 语义：
+#   1) INCR 计数；
+#   2) 仅当计数为 1（即本窗口首次请求）时设置 TTL，
+#      避免后续请求不断续期导致窗口永不复位；
+#   3) 返回当前计数。
+_INCR_WITH_TTL = """
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+"""
+
+# 脚本在客户端侧缓存其 SHA，避免每次请求都重新传输脚本体
+_incr_script: aioredis.client.Script | None = None
+
+
+def _get_incr_script() -> aioredis.client.Script:
+    """惰性注册 Lua 脚本（依赖已初始化的 Redis 客户端）。"""
+    global _incr_script
+    if _incr_script is None:
+        _incr_script = redis_client.get_client().register_script(_INCR_WITH_TTL)
+    return _incr_script
 
 
 async def verify_code(stored_key: str, value: str) -> bool:
@@ -28,21 +61,17 @@ async def incr_counter(key: str, window_seconds: int) -> int:
     """原子计数 +1 并返回当前值；首次计数时设置过期时间（限流窗口）。
 
     固定窗口限流的核心原语：
-    - INCR 由 Redis 单线程保证原子性，并发下计数不丢；
-    - EXPIRE 带 NX 只在键不存在时设置过期，避免后续请求不断续期；
-    - 过期即窗口自动复位，无需后台清理任务。
+    - 计数与设过期在服务端 Lua 中原子完成，并发下不会出现"有计数无过期"；
+    - 仅首次计数设置 TTL，过期即窗口自动复位，无需后台清理任务；
+    - 不依赖 Redis 7 的 EXPIRE ... NX，兼容 Redis 5/6/7。
 
     Args:
         key: 计数键，如 "rate:send_code:email:xxx@xx.com"
         window_seconds: 窗口时长（秒），过期后计数归零
     """
-    client = redis_client.get_client()
-    
-    async with client.pipeline() as pipe:
-        pipe.incr(key) # incr 计数+1
-        pipe.expire(key, window_seconds, nx=True)  # nx 只在键不存在时设置过期，避免后续请求不断续期
-        result = await pipe.execute()
-        return int(result[0])
+    script = _get_incr_script()
+    result = await script(keys=[key], args=[window_seconds])
+    return int(result)
 
 
 async def reset_counter(key: str) -> None:
