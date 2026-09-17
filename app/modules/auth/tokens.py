@@ -14,7 +14,7 @@ from jose import ExpiredSignatureError, JWTError, jwt
 
 from app.config import config
 from app.core.business.code import BusinessCode
-from app.core.business.exception import AuthException, UserException
+from app.core.business.exception import UserException
 from app.shared.redis import get_value, redis_client, verify_code
 from app.shared.utils import send_verification_code
 
@@ -91,25 +91,63 @@ def _code_key(email: str) -> str:
     return f"{VERIFY_CODE_KEY_PREFIX}{email}"
 
 
+def _mail_fail_key(email: str) -> str:
+    """记录该邮箱最近一次验证码邮件的投递失败标记。
+
+    用途：把「邮件没发出去」与「验证码填错了」区分开。
+    没有这个标记时，两种情况都只能笼统地报「验证码错误」，
+    用户会反复重填一个本来就正确的码。
+    """
+    return f"{VERIFY_CODE_KEY_PREFIX}mail_fail:{email}"
+
+
 def _token_key(token: str) -> str:
     return f"{VERIFY_TOKEN_PREFIX}{hash_reset_token(token)}"
 
 
-async def issue_code(email: str) -> None:
-    """签发邮箱验证码：生成 → 发信 → 落库（发信失败抛 MAIL_SEND_FAILED）。"""
+async def issue_code(email: str) -> str:
+    """生成验证码并写入 Redis，返回验证码。
+
+    只做「生成 + 落库」两件事，不负责发信——发信由 deliver_code 承担。
+    拆开的原因：落库是毫秒级的，而 SMTP 投递实测约 4 秒。
+    先落库可以让验证码立即可用，发信则视情况快速等待或转入后台，
+    两者不再互相拖累。
+    """
     code = "".join(secrets.choice(string.digits) for _ in range(VERIFY_CODE_LENGTH))
-    has_send = await send_verification_code(email, code)
-    if not has_send:
-        raise AuthException(code=BusinessCode.MAIL_SEND_FAILED)
     client = redis_client.get_client()
     await client.set(_code_key(email), code, ex=VERIFY_CODE_TTL_SECONDS)
-    
-    
+    return code
+
+
+async def deliver_code(email: str, code: str) -> bool:
+    """投递验证码邮件，并记录投递结果。返回是否成功。
+
+    结果写入 Redis 标记，用于在验证阶段区分「邮件没发出去」与「验证码填错了」。
+    本函数不抛错：调用方可能已把响应返回给客户端，抛错也无处可去。
+    """
+    sent = await send_verification_code(email, code)
+    client = redis_client.get_client()
+    fail_key = _mail_fail_key(email)
+    if sent:
+        await client.delete(fail_key)
+    else:
+        await client.set(fail_key, "1", ex=VERIFY_CODE_TTL_SECONDS)
+    return sent
 
 
 async def consume_code(email: str, code: str) -> bool:
     """比对验证码并一次性消费；比对一致且已消费返回 True。"""
-    return await verify_code(_code_key(email), code)
+    ok = await verify_code(_code_key(email), code)
+    if ok:
+        client = redis_client.get_client()
+        # 验证码已被消费，投递失败标记不再有意义
+        await client.delete(_mail_fail_key(email))
+    return ok
+
+
+async def mail_delivery_failed(email: str) -> bool:
+    """该邮箱最近一次验证码邮件是否投递失败。"""
+    return await get_value(_mail_fail_key(email)) is not None
 
 
 async def issue_reset_token(email: str) -> str:

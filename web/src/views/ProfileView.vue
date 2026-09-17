@@ -425,26 +425,50 @@ async function handleDeleteAccount() {
               修改密码后，所有设备都会退出登录，需要用新密码重新登录。
             </p>
 
-            <button class="btn btn-ink btn--block" :disabled="!canSubmitPwd" @click="savePassword">
-              {{ savingPwd ? '提交中…' : '修改密码' }}
-            </button>
-
-            <hr class="pf-hr" />
-
-            <h3 class="pf-subtitle">会话与账号</h3>
-            <button class="btn btn-ghost btn--block" @click="handleLogout">
-              <TravelIcon name="key" :size="15" />
-              退出登录
-            </button>
-            <p class="pf-tip pf-tip--center">退出后本地会清除登录凭证</p>
-
-            <button class="btn btn-danger btn--block pf-danger" @click="handleDeleteAccount">
-              <TravelIcon name="alert" :size="15" />
-              注销账号
-            </button>
-            <p class="pf-tip pf-tip--center">注销将永久删除全部会话与行程，无法恢复</p>
+            <div class="pf-actions">
+              <button class="btn btn-ink btn--block" :disabled="!canSubmitPwd" @click="savePassword">
+                {{ savingPwd ? '提交中…' : '修改密码' }}
+              </button>
+            </div>
           </section>
         </div>
+
+        <!-- ==================== 2.5 通栏：会话与账号 ====================
+             从「账号安全」里拆出来单独成块：
+             退出与注销是账号级操作，和改密不是同一件事，
+             挤在一张卡片里会让危险按钮紧挨着日常操作，既不好看也容易误点。 -->
+        <section class="card session-card">
+          <header class="session-card__head">
+            <h2 class="pf-title">会话与账号</h2>
+            <span class="session-card__hint">这些操作会影响你的登录状态</span>
+          </header>
+
+          <div class="session-grid">
+            <!-- 退出登录：次要操作，描边样式 -->
+            <div class="session-item">
+              <div class="session-item__body">
+                <h3>退出登录</h3>
+                <p>退出后本地会清除登录凭证，下次需要重新输入密码。</p>
+              </div>
+              <button class="btn btn-ghost" @click="handleLogout">
+                <TravelIcon name="key" :size="15" />
+                退出登录
+              </button>
+            </div>
+
+            <!-- 注销账号：危险操作，红色并明确后果 -->
+            <div class="session-item session-item--danger">
+              <div class="session-item__body">
+                <h3>注销账号</h3>
+                <p>注销将永久删除全部会话与行程，无法恢复。</p>
+              </div>
+              <button class="btn btn-danger" @click="handleDeleteAccount">
+                <TravelIcon name="alert" :size="15" />
+                注销账号
+              </button>
+            </div>
+          </div>
+        </section>
 
         <!-- ==================== 3. 通栏：我的记忆 ==================== -->
         <div class="pf-memory">
@@ -635,9 +659,20 @@ a.hero-stat:hover {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 22px;
-  align-items: start;
+  /* 不设 align-items: start —— 那会让每张卡片只按自身内容高度渲染，
+     两栏高度必然不等，视觉上就是「左右不均衡」。
+     默认的 stretch 让两张卡片撑满同一行高，高度自动对齐。 */
 }
-.pf-card { padding: 26px 28px; display: flex; flex-direction: column; gap: 16px; }
+.pf-card {
+  padding: 26px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 卡片内的操作区固定在底部：配合 .pf-card 的 column 布局，
+   左右两栏的主按钮会落在同一水平线上，视线更整齐。 */
+.pf-actions { margin-top: auto; }
 
 .pf-card__head {
   display: flex;
@@ -646,7 +681,6 @@ a.hero-stat:hover {
   gap: 12px;
 }
 .pf-title { font-size: 1.12rem; font-weight: 700; }
-.pf-subtitle { font-size: 0.98rem; font-weight: 700; }
 .pf-dirty {
   font-size: 0.7rem;
   font-weight: 650;
@@ -658,9 +692,7 @@ a.hero-stat:hover {
 
 .pf-counter { font-size: 0.72rem; color: var(--text3); text-align: right; font-family: var(--mono); }
 .pf-tip { font-size: 0.74rem; color: var(--text3); line-height: 1.6; }
-.pf-tip--center { text-align: center; }
 .pf-error { font-size: 0.75rem; color: var(--danger); }
-.pf-danger { margin-top: 12px; }
 
 /* ---- 头像触发条 ---- */
 .avatar-trigger {
@@ -753,9 +785,50 @@ a.hero-stat:hover {
 }
 .pf-notice :deep(svg) { flex-shrink: 0; margin-top: 1px; }
 
-.pf-hr { border: none; border-top: 1px dashed var(--line); margin: 8px 0 4px; }
-
 .pf-memory { margin-top: 22px; }
+
+/* ==================== 2.5 通栏：会话与账号 ==================== */
+.session-card { padding: 24px 28px; margin-top: 22px; }
+.session-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.session-card__hint { font-size: 0.76rem; color: var(--text3); }
+
+/* 两项并排：退出为常规项，注销为危险项并带淡红底以示区分 */
+.session-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 18px;
+  border-radius: var(--r-s);
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  transition: border-color 0.22s, box-shadow 0.22s;
+}
+.session-item:hover { border-color: var(--blue-200); box-shadow: var(--shadow-sm); }
+.session-item--danger {
+  border-color: rgba(224, 82, 82, 0.22);
+  background: rgba(224, 82, 82, 0.04);
+}
+.session-item--danger:hover {
+  border-color: rgba(224, 82, 82, 0.4);
+  box-shadow: 0 8px 20px rgba(224, 82, 82, 0.1);
+}
+
+.session-item__body { min-width: 0; }
+.session-item__body h3 { font-size: 0.92rem; font-weight: 700; margin-bottom: 4px; }
+.session-item__body p { font-size: 0.78rem; color: var(--text3); line-height: 1.55; }
+.session-item .btn { flex-shrink: 0; white-space: nowrap; }
 
 /* ==================== 头像弹窗 ==================== */
 .picker {
@@ -851,6 +924,10 @@ a.hero-stat:hover {
   .pf-grid { grid-template-columns: 1fr; gap: 18px; }
   .pf-card { padding: 22px 20px; }
   .hero-card { padding: 24px 20px; }
+  /* 单列后不必再撑高，避免卡片底部出现大片空白 */
+  .pf-actions { margin-top: 4px; }
+  .session-grid { grid-template-columns: 1fr; }
+  .session-card { padding: 20px; }
 }
 
 @media (max-width: 560px) {
@@ -859,5 +936,8 @@ a.hero-stat:hover {
   .hero-stats { justify-content: center; }
   .hero-cta { width: 100%; }
   .picker__grid { grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); }
+  /* 窄屏把说明与按钮改为上下排列，避免按钮被文字挤到换行 */
+  .session-item { flex-direction: column; align-items: stretch; gap: 14px; }
+  .session-item .btn { width: 100%; justify-content: center; }
 }
 </style>

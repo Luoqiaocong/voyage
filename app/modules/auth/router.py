@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi_utils.cbv import cbv
 from starlette import status
 
@@ -23,8 +23,10 @@ class AuthRouterAPI:
     service: AuthService = Depends()
 
     @router.post("/code", status_code=status.HTTP_200_OK, summary="颁发Code", dependencies=[Depends(rate_limit("send_code", CODE_IP_LIMIT, CODE_IP_WINDOW))])
-    async def send_code(self, verify_req: VerifyEmailRequest):
-        return await self.service.send_code(verify_req.email)
+    async def send_code(self, verify_req: VerifyEmailRequest, background: BackgroundTasks):
+        # background 交给 service：邮件投递若超过快速等待窗口，
+        # 就转到这里继续，请求不必陪着 SMTP 一起等
+        return await self.service.send_code(verify_req.email, background)
 
     @router.post("/reset-token", status_code=status.HTTP_200_OK, summary="颁发ResetToken", dependencies=[Depends(rate_limit("reset_token", RESET_IP_LIMIT, RESET_IP_WINDOW))])
     async def reset_token(self, req: EmailCodeRequest):
