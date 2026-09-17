@@ -219,15 +219,19 @@ export interface ConversationStats {
   total_conversations: number
   total_messages: number
   avg_messages_per_conversation: number
-  conversations_with_title: number
   top_active_users: { user_id: number; email: string; conversations: number }[]
 }
 
+/**
+ * 会话元数据项。
+ *
+ * 刻意**不含 title**：会话标题由 LLM 从用户消息生成，属于用户内容。
+ * 管理端只做规模统计，不需要、也不应该看到它。
+ */
 export interface AdminConversationItem {
   id: string
   user_id: number
   user_email: string
-  title: string | null
   message_count: number
   created_at: string
 }
@@ -243,18 +247,28 @@ export async function getConversationStats(): Promise<ConversationStats> {
   return (await http.get('/admin/conversations/stats')) as unknown as ConversationStats
 }
 
+/**
+ * 拉取会话元数据列表。
+ *
+ * 没有 keyword 参数：后端已移除「按标题模糊搜索」——
+ * 那等于允许对全站用户的对话标题做关键词检索，属隐私越界。
+ *
+ * sort 只有两个与规模统计相关的维度（后端用 pattern 限制取值）：
+ *   created_desc  最新创建在前
+ *   messages_desc 消息数从多到少
+ */
 export async function listConversations(params: {
   page?: number
   page_size?: number
-  keyword?: string
   user_id?: number
+  sort?: 'created_desc' | 'messages_desc'
 } = {}): Promise<AdminConversationPage> {
   const query: Record<string, unknown> = {
     page: params.page ?? 1,
     page_size: params.page_size ?? 20
   }
-  if (params.keyword) query.keyword = params.keyword
   if (params.user_id) query.user_id = params.user_id
+  if (params.sort) query.sort = params.sort
   return (await http.get('/admin/conversations', { params: query })) as unknown as AdminConversationPage
 }
 

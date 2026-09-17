@@ -142,16 +142,35 @@ class AdminRouter:
     async def conversation_stats(self):
         return await self.service.conversation_stats()
 
-    @router.get("/conversations", summary="会话列表（分页检索）", status_code=status.HTTP_200_OK)
+    @router.get(
+        "/conversations",
+        summary="会话元数据列表（不含任何用户内容）",
+        status_code=status.HTTP_200_OK,
+    )
     async def list_conversations(
         self,
         page: Annotated[int, Query(ge=1)] = 1,
         page_size: Annotated[int, Query(ge=1, le=100)] = config.ADMIN_PAGE_SIZE_DEFAULT,
-        keyword: Annotated[str | None, Query(description="按标题模糊搜索")] = None,
         user_id: Annotated[int | None, Query(description="按用户筛选")] = None,
+        sort: Annotated[
+            str,
+            Query(
+                pattern="^(created_desc|messages_desc)$",
+                description="created_desc=最新创建在前；messages_desc=消息数从多到少",
+            ),
+        ] = "created_desc",
     ):
+        """只返回会话的**元数据**：id、所属用户、消息数、创建时间。
+
+        隐私约束（重要）：
+        - 不返回会话标题。标题由 LLM 从用户消息生成，属于用户内容，
+          对管理员可见即构成内容层面的隐私泄露。
+        - 不提供 keyword 检索。原先按标题模糊搜索，等于允许对全站用户的
+          对话标题做关键词检索，是系统性的窥探能力，已移除。
+        运营所需的规模与活跃度信息由 /conversations/stats 的聚合数据满足。
+        """
         return await self.service.list_conversations(
-            page=page, page_size=page_size, keyword=keyword, user_id=user_id
+            page=page, page_size=page_size, user_id=user_id, sort=sort
         )
 
     # ==================== 审计日志 ====================

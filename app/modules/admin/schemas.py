@@ -116,10 +116,9 @@ class AuditLogPage(BaseModel):
 
 
 class ConversationStats(BaseModel):
-    """会话洞察。"""
+    """会话洞察（仅聚合数据，不含任何用户内容）。"""
 
     total_conversations: Annotated[int, Field(description="会话总数")]
     total_messages: Annotated[int, Field(description="消息总数（会话消息数之和）")]
     avg_messages_per_conversation: Annotated[float, Field(description="平均每会话消息数")]
-    conversations_with_title: Annotated[int, Field(description="已生成标题的会话数")]
     top_active_users: Annotated[list[dict], Field(description="会话数最多的用户")]

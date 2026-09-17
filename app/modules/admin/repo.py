@@ -81,16 +81,16 @@ class AdminRepo:
 
     # -------------------- 会话洞察 --------------------
     async def conversation_stats(self) -> dict:
+        """会话统计：只做聚合，不触碰任何用户内容。
+
+        刻意不统计「已生成标题的会话数」——那个指标只服务于「查看会话标题」
+        这个功能，标题已按隐私要求不再暴露，指标也就没有存在意义。
+        """
         total_conversations = (
             await self.db.execute(select(func.count(Conversation.id)))
         ).scalar_one()
         total_messages = (
             await self.db.execute(select(func.coalesce(func.sum(Conversation.message_count), 0)))
-        ).scalar_one()
-        with_title = (
-            await self.db.execute(
-                select(func.count(Conversation.id)).where(Conversation.title.is_not(None))
-            )
         ).scalar_one()
 
         top_rows = (
@@ -117,7 +117,6 @@ class AdminRepo:
             "total_conversations": total_conv,
             "total_messages": total_msg,
             "avg_messages_per_conversation": round(total_msg / total_conv, 2) if total_conv else 0.0,
-            "conversations_with_title": int(with_title),
             "top_active_users": [
                 {"user_id": r[0], "email": emails.get(r[0], "未知"), "conversations": int(r[1])}
                 for r in top_rows
@@ -129,14 +128,25 @@ class AdminRepo:
         *,
         page: int,
         page_size: int,
-        keyword: str | None = None,
         user_id: int | None = None,
+        sort: str = "created_desc",
     ) -> tuple[list[dict], int]:
-        """分页查询会话（附带用户邮箱），供管理端内容检索。"""
+        """分页查询会话元数据（不返回任何用户内容）。
+
+        隐私约束：这里刻意**不查询也不返回 Conversation.title**。
+        会话标题由 LLM 从用户消息生成，等同于用户内容——例如
+        「帮我看看妇科检查」「离婚财产分割咨询」这类标题一旦对管理员
+        可见，就是内容层面的隐私泄露，超出了运营统计的必要范围。
+
+        同理，原先支持的 `keyword` 按标题模糊搜索也一并移除：
+        那不只是「看见标题」，而是可以对全站用户的对话标题做关键词检索，
+        属于系统性的内容窥探能力。
+
+        sort 只提供两个与规模统计相关的维度，不做通用排序：
+          created_desc  最新创建在前（默认，用于观察近期动态）
+          messages_desc 消息数从多到少（用于定位规模最大的会话）
+        """
         conditions = []
-        if keyword:
-            like = f"%{keyword.strip()}%"
-            conditions.append(Conversation.title.ilike(like))
         if user_id:
             conditions.append(Conversation.user_id == user_id)
 
@@ -146,7 +156,7 @@ class AdminRepo:
                 Conversation.id,
                 Conversation.user_id,
                 User.email,
-                Conversation.title,
+                # 不选 Conversation.title —— 见上方隐私说明
                 Conversation.message_count,
                 Conversation.created_at,
             )
@@ -157,20 +167,24 @@ class AdminRepo:
             list_stmt = list_stmt.where(cond)
 
         total = int((await self.db.execute(count_stmt)).scalar_one())
-        list_stmt = (
-            list_stmt.order_by(Conversation.created_at.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-        )
+        # 次级排序键统一用 id，保证同值行的顺序稳定（否则翻页会出现重复/遗漏）
+        if sort == "messages_desc":
+            list_stmt = list_stmt.order_by(
+                Conversation.message_count.desc(), Conversation.id.desc()
+            )
+        else:
+            list_stmt = list_stmt.order_by(
+                Conversation.created_at.desc(), Conversation.id.desc()
+            )
+        list_stmt = list_stmt.offset((page - 1) * page_size).limit(page_size)
         rows = (await self.db.execute(list_stmt)).all()
         items = [
             {
                 "id": r[0],
                 "user_id": r[1],
                 "user_email": r[2],
-                "title": r[3],
-                "message_count": r[4],
-                "created_at": r[5],
+                "message_count": r[3],
+                "created_at": r[4],
             }
             for r in rows
         ]

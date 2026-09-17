@@ -308,12 +308,18 @@ class AdminService(TransactionMixin):
         return await self.repo.conversation_stats()
 
     async def list_conversations(
-        self, *, page: int, page_size: int, keyword: str | None = None, user_id: int | None = None
+        self, *, page: int, page_size: int, user_id: int | None = None, sort: str = "created_desc"
     ) -> dict[str, Any]:
+        """会话元数据分页。
+
+        不再接受 keyword：原先它按会话标题模糊搜索，
+        等于给了管理员「对全站用户对话标题做关键词检索」的能力。
+        标题本身也已不返回（见 repo.list_conversations 的隐私说明）。
+        """
         page = max(1, page)
         page_size = max(1, min(page_size, config.ADMIN_PAGE_SIZE_MAX))
         items, total = await self.repo.list_conversations(
-            page=page, page_size=page_size, keyword=keyword, user_id=user_id
+            page=page, page_size=page_size, user_id=user_id, sort=sort
         )
         return {"total": total, "page": page, "page_size": page_size, "items": items}
 
