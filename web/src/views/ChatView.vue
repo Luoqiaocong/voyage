@@ -608,7 +608,8 @@ watch(streaming, (v) => {
             我的会话
           </button>
           <div class="chat-empty__logo" aria-hidden="true">
-            <!-- 改用新图标（voyage-mark-2），与登录页保持一致 -->
+            <!-- 这里显示 64px（3 倍屏需 192px），故用 512 的版本。
+                 缩小到 128 在这个尺寸会发虚，与导航栏的取舍不同。 -->
             <img src="/voyage-mark-2.png" alt="" />
           </div>
           <h2>{{ PAGE_COPY.chatEmptyTitle }}</h2>
@@ -685,9 +686,10 @@ watch(streaming, (v) => {
                 class="msg"
                 :class="`msg--${msg.role}`"
               >
-                <!-- 助手头像：改用新图标，与登录页的品牌形象统一 -->
+                <!-- 助手头像：用 logo-128（30px 显示，3 倍屏需 90px）
+                     logo-128 的内容是铺满画布的，故头像里不会被留白缩掉一圈 -->
                 <span v-if="msg.role === 'assistant'" class="msg__avatar" aria-hidden="true">
-                  <img src="/voyage-mark-2.png" alt="" />
+                  <img src="/logo-128.png" alt="" />
                 </span>
 
                 <div class="msg__col">
@@ -742,7 +744,7 @@ watch(streaming, (v) => {
               <!-- 首字等待：三点 -->
               <div v-if="thinking" class="msg msg--assistant">
                 <span class="msg__avatar" aria-hidden="true">
-                  <img src="/voyage-mark-2.png" alt="" />
+                  <img src="/logo-128.png" alt="" />
                 </span>
                 <div class="msg__col">
                   <div class="typing" aria-label="AI 正在生成">

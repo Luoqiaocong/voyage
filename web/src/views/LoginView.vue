@@ -324,11 +324,11 @@ function handleThirdParty() {
 
       <!-- 品牌落款 -->
       <RouterLink to="/" class="auth__brand" @click.stop>
-        <!-- 改用新图标（voyage-mark-2）。
-             它本身是完整方形图，故容器不再套蓝色渐变底——
-             否则会变成「渐变框套方块」，两层底色互相打架。 -->
+        <!-- 改用新图标（logo-128）。
+             与导航栏同源，都是「内容铺满画布」的方形版本，无四周留白。
+             这里显示 36px（3 倍屏需 108px），128 足够。 -->
         <span class="auth__brand-mark">
-          <img src="/voyage-mark-2.png" alt="" />
+          <img src="/logo-128.png" alt="" />
         </span>
         <span class="auth__brand-text">Voyage <em>AI</em></span>
       </RouterLink>
