@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import AppNavbar from '@/components/AppNavbar.vue'
 import ToolTimeline from '@/components/ToolTimeline.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
@@ -33,6 +33,7 @@ interface RdMsg extends ChatMessage {
 const HISTORY_ROUNDS = 30
 
 const router = useRouter()
+const route = useRoute()
 const ui = useUiStore()
 const user = useUserStore()
 
@@ -228,6 +229,20 @@ async function handleExtract() {
 async function send() {
   const text = input.value.trim()
   if (!text || streaming.value) return
+  input.value = ''
+  await runTurn(text, true)
+}
+
+/**
+ * 执行一轮对话。
+ *
+ * @param text      要发送的内容
+ * @param echoUser  是否把这条用户消息追加到界面。
+ *                  「重新生成」复用同一段逻辑但传 false——那条用户消息已经在列表里了，
+ *                  再插一次会出现两条一样的提问。
+ */
+async function runTurn(text: string, echoUser: boolean) {
+  if (!text || streaming.value) return
 
   if (!activeId.value) {
     try {
@@ -243,8 +258,7 @@ async function send() {
   }
 
   const cid = activeId.value!
-  messages.value.push({ role: 'user', content: text })
-  input.value = ''
+  if (echoUser) messages.value.push({ role: 'user', content: text })
   streaming.value = true
   resetStream()
   scrollToBottom()
@@ -288,6 +302,93 @@ async function send() {
     inputEl.value?.focus()
   }
 }
+
+/* ---------------- 消息操作 ---------------- */
+/** 复制某条消息的纯文本（Markdown 原文，便于粘到别处保留结构） */
+async function copyMessage(msg: RdMsg) {
+  try {
+    await navigator.clipboard.writeText(msg.content)
+    ui.toast('已复制到剪贴板', 'success')
+  } catch {
+    // 非 HTTPS 或未授权时 clipboard 不可用，退回手动选择
+    ui.toast('复制失败，请手动选择文本', 'error')
+  }
+}
+
+/**
+ * 重新生成：把上一条用户提问重发一遍。
+ *
+ * 不做「删除旧回答」——保留历史能让用户对比两次结果，
+ * 而删掉再生成会让人怀疑是不是真的重跑了。
+ */
+async function regenerate(index: number) {
+  if (streaming.value) return
+  // 往前找到最近的一条用户消息
+  let prev = ''
+  for (let i = index - 1; i >= 0; i--) {
+    if (renderedMessages.value[i]?.role === 'user') {
+      prev = renderedMessages.value[i].content
+      break
+    }
+  }
+  if (!prev) {
+    ui.toast('找不到对应的提问，无法重新生成', 'error')
+    return
+  }
+  await runTurn(prev, false)
+}
+
+/**
+ * 从指定对话重新提取行程。
+ *
+ * 与顶栏的「提取行程」不同：那个作用于当前会话，
+ * 这个让用户能对任意一条历史回答直接提取，省去先切会话的动作。
+ */
+async function extractFrom(convId: string) {
+  try {
+    const it = await extractItinerary(convId)
+    ui.toast('行程已提取', 'success')
+    router.push(`/itineraries/${it.id}`)
+  } catch (e: any) {
+    ui.toast(e?.message ?? '行程提取失败，请确认对话中已包含攻略信息', 'error')
+  }
+}
+
+/* ---------------- 会话搜索 ---------------- */
+const convKeyword = ref('')
+
+/** 窄屏抽屉开关：侧栏在手机上收起，需要能主动唤出 */
+const sideOpen = ref(false)
+
+/** 按标题过滤会话；空关键词返回全部 */
+const filteredConversations = computed(() => {
+  const kw = convKeyword.value.trim().toLowerCase()
+  if (!kw) return conversations.value
+  return conversations.value.filter((c) => (c.title ?? '').toLowerCase().includes(kw))
+})
+
+/** 会话项显示的时间：今天显示时刻，更早显示日期，避免一长串相同日期 */
+function convTime(createdAt?: string): string {
+  if (!createdAt) return ''
+  const d = new Date(createdAt)
+  if (Number.isNaN(d.getTime())) return createdAt.slice(0, 10)
+  const now = new Date()
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  if (sameDay) {
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  }
+  return `${d.getMonth() + 1}/${d.getDate()}`
+}
+
+/** 快捷示例：空态与输入框上方共用，改一处即可 */
+const QUICK_PROMPTS = [
+  '帮我规划广州到北京的 3 天行程',
+  '这周末去成都穿什么？',
+  '查一下明天广州南到北京西的高铁'
+]
 
 /** 把工具事件合并进当前时间线：result 会回填到同名且仍在运行的步骤 */
 function applyToolChunk(name: string, label: string, phase: 'call' | 'result', content?: string) {
@@ -363,6 +464,18 @@ onMounted(async () => {
   if (conversations.value.length > 0) {
     await openConversation(conversations.value[0].id)
   }
+
+  // 首页示例胶囊带来的问题：填进输入框并聚焦，用户确认后直接回车发送。
+  // 这里刻意不自动发送——自动发出去会让用户失去修改措辞的机会，
+  // 而示例文案本就是给人改的起点。
+  const raw = route.query.example
+  const example = Array.isArray(raw) ? raw[0] : raw
+  if (typeof example === 'string' && example.trim()) {
+    input.value = example.trim()
+    await nextTick()
+    // 进入时清掉 query，避免刷新或返回时重复填充
+    router.replace({ path: route.path })
+  }
 })
 
 watch(streaming, (v) => {
@@ -376,7 +489,9 @@ watch(streaming, (v) => {
 
     <main id="main" tabindex="-1" class="chat-main">
       <!-- ==================== 侧边栏 ==================== -->
-      <aside class="chat-side" aria-label="会话列表">
+      <!-- 窄屏为抽屉，遮罩点击关闭 -->
+      <div v-if="sideOpen" class="side-backdrop" @click="sideOpen = false"></div>
+      <aside class="chat-side" :class="{ 'chat-side--open': sideOpen }" aria-label="会话列表">
         <div class="chat-side__head">
           <span class="chat-side__title">会话</span>
           <button class="btn btn-primary btn--sm" :disabled="streaming" @click="newConversation">
@@ -384,22 +499,54 @@ watch(streaming, (v) => {
           </button>
         </div>
 
-        <div v-if="loadingList" class="chat-side__hint">加载中…</div>
-        <div v-else-if="conversations.length === 0" class="chat-side__hint">
-          还没有会话，点击「新建」开始
+        <!-- 会话搜索：会话一多就必须能找回来 -->
+        <div v-if="conversations.length" class="chat-side__search">
+          <TravelIcon name="compass" :size="14" />
+          <input v-model="convKeyword" type="search" placeholder="搜索会话…" aria-label="搜索会话" />
+          <button v-if="convKeyword" class="chat-side__clear" aria-label="清除搜索" @click="convKeyword = ''">
+            ✕
+          </button>
         </div>
 
-        <ul class="chat-side__list">
+        <div v-if="loadingList" class="chat-side__loading">
+          <span class="skel skel--line"></span>
+          <span class="skel skel--line"></span>
+          <span class="skel skel--line"></span>
+        </div>
+
+        <!-- 空状态：没有任何会话 -->
+        <div v-else-if="!conversations.length" class="chat-side__empty">
+          <span class="chat-side__empty-icon" aria-hidden="true">
+            <TravelIcon name="luggage" :size="26" />
+          </span>
+          <p>还没有行程对话</p>
+          <span>点上方「新建」，说说你想去哪</span>
+        </div>
+
+        <!-- 空状态：搜索无结果 -->
+        <div v-else-if="!filteredConversations.length" class="chat-side__empty">
+          <span class="chat-side__empty-icon" aria-hidden="true">
+            <TravelIcon name="map" :size="26" />
+          </span>
+          <p>没有匹配的会话</p>
+          <span>换个关键词，或清空搜索</span>
+        </div>
+
+        <ul v-else class="chat-side__list">
           <li
-            v-for="conv in conversations"
+            v-for="conv in filteredConversations"
             :key="conv.id"
             class="conv-item"
             :class="{ 'conv-item--active': conv.id === activeId }"
-            @click="openConversation(conv.id)"
+            @click="openConversation(conv.id); sideOpen = false"
           >
+            <span class="conv-item__pin" aria-hidden="true"></span>
             <span class="conv-item__main">
               <span class="conv-item__title">{{ conv.title || '新会话' }}</span>
-              <span class="conv-item__time">{{ conv.created_at?.slice(0, 10) }}</span>
+              <span class="conv-item__meta">
+                <span class="conv-item__time">{{ convTime(conv.created_at) }}</span>
+                <span v-if="!conv.title" class="conv-item__wip">待命名</span>
+              </span>
             </span>
             <span class="conv-item__ops" @click.stop>
               <button class="icon-btn" title="重命名" aria-label="重命名会话" @click="handleRename(conv)">✎</button>
@@ -413,6 +560,15 @@ watch(streaming, (v) => {
       <section class="chat-body">
         <!-- 空状态 -->
         <div v-if="!activeId" class="chat-empty">
+          <button
+            class="side-toggle chat-empty__toggle"
+            type="button"
+            aria-label="展开会话列表"
+            @click="sideOpen = !sideOpen"
+          >
+            <TravelIcon name="map" :size="16" />
+            我的会话
+          </button>
           <div class="chat-empty__logo" aria-hidden="true">
             <svg viewBox="0 0 32 32" fill="none">
               <circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="2.4" />
@@ -424,11 +580,12 @@ watch(streaming, (v) => {
           <p>{{ PAGE_COPY.chatEmptyDesc }}</p>
           <div class="chat-empty__quick">
             <button
-              v-for="q in ['帮我规划广州到北京的 3 天行程', '这周末去成都穿什么？', '查一下明天广州南到北京西的高铁']"
+              v-for="q in QUICK_PROMPTS"
               :key="q"
               class="quick-chip"
               @click="input = q; inputEl?.focus()"
             >
+              <TravelIcon name="route" :size="14" />
               {{ q }}
             </button>
           </div>
@@ -441,14 +598,34 @@ watch(streaming, (v) => {
         <template v-else>
           <!-- 工具栏 -->
           <div class="chat-toolbar">
+            <button
+              class="side-toggle"
+              type="button"
+              aria-label="展开会话列表"
+              @click="sideOpen = !sideOpen"
+            >
+              <TravelIcon name="map" :size="17" />
+            </button>
             <span class="chat-toolbar__title">{{ activeConversation?.title || '新会话' }}</span>
             <div class="chat-toolbar__ops">
-              <button class="btn btn-ghost btn--sm" :disabled="streaming" @click="handleExtract">
-                🧳 提取行程
+              <button class="tool-btn tool-btn--accent" :disabled="streaming" @click="handleExtract">
+                <TravelIcon name="luggage" :size="15" />
+                提取行程
               </button>
-              <button class="btn btn-ghost btn--sm" :disabled="streaming" @click="handleRename(activeConversation!)">
-                ✎ 重命名
+              <button class="tool-btn" :disabled="streaming" @click="handleRename(activeConversation!)">
+                <TravelIcon name="edit" :size="15" />
+                重命名
               </button>
+              <!-- 分享与导出统一在「行程详情」里操作（那边有完整的权限与格式选择），
+                   这里只做入口，避免两处各实现一套 -->
+              <RouterLink
+                to="/itineraries"
+                class="tool-btn"
+                title="分享与导出请到「行程」页打开对应行程"
+              >
+                <TravelIcon name="route" :size="15" />
+                分享 / 导出
+              </RouterLink>
             </div>
           </div>
 
@@ -510,6 +687,32 @@ watch(streaming, (v) => {
                     class="stream-caret"
                     aria-hidden="true"
                   ></span>
+
+                  <!-- 消息操作条：悬停浮现，避免常驻占用视线 -->
+                  <div v-if="msg.content && !streaming" class="msg__ops">
+                    <button class="op-btn" title="复制内容" @click="copyMessage(msg)">
+                      <TravelIcon name="check" :size="13" />
+                      复制
+                    </button>
+                    <button
+                      v-if="msg.role === 'assistant'"
+                      class="op-btn"
+                      title="用同一个问题再问一次"
+                      @click="regenerate(i)"
+                    >
+                      <TravelIcon name="compass" :size="13" />
+                      重新生成
+                    </button>
+                    <button
+                      v-if="msg.role === 'assistant' && activeId"
+                      class="op-btn op-btn--accent"
+                      title="把这条回答整理成可保存的行程"
+                      @click="extractFrom(activeId)"
+                    >
+                      <TravelIcon name="luggage" :size="13" />
+                      提取行程
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -567,6 +770,21 @@ watch(streaming, (v) => {
 <style scoped>
 .chat-page { height: 100vh; display: flex; flex-direction: column; position: relative; z-index: 1; }
 
+/* 消息区的底纹：一层几乎看不见的地图纹理。
+   目的不是「看到地图」，而是让大片留白不至于像一张死白的纸。
+   用 fixed 定位避免随滚动移动产生眩晕感。 */
+.chat-page::before {
+  content: '';
+  position: fixed;
+  inset: var(--nav-h) 0 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image:
+    radial-gradient(circle at 12% 22%, rgba(37, 99, 235, 0.05), transparent 42%),
+    radial-gradient(circle at 88% 72%, rgba(14, 165, 233, 0.045), transparent 45%);
+}
+
 .chat-main {
   flex: 1;
   min-height: 0;
@@ -574,6 +792,8 @@ watch(streaming, (v) => {
   grid-template-columns: 272px 1fr;
   margin: 0 16px 16px;
   gap: 16px;
+  position: relative;
+  z-index: 1;
 }
 
 /* ==================== 侧边栏 ==================== */
@@ -599,6 +819,87 @@ watch(streaming, (v) => {
 
 .chat-side__hint { padding: 18px 16px; color: var(--text3); font-size: 0.82rem; line-height: 1.6; }
 
+/* ---- 会话搜索 ---- */
+.chat-side__search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 8px;
+  padding: 0 12px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--panel2);
+  border: 1px solid transparent;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+.chat-side__search:focus-within {
+  background: var(--panel);
+  border-color: var(--blue-300);
+}
+.chat-side__search :deep(svg) { color: var(--text3); flex-shrink: 0; }
+.chat-side__search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font-size: 0.82rem;
+  color: var(--text);
+  outline: none;
+}
+.chat-side__search input::placeholder { color: var(--text3); }
+.chat-side__clear {
+  color: var(--text3);
+  font-size: 0.75rem;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.chat-side__clear:hover { color: var(--text); background: var(--surface-soft); }
+
+/* ---- 加载骨架：比「加载中…」更能表达结构 ---- */
+.chat-side__loading { padding: 12px 18px; display: flex; flex-direction: column; gap: 10px; }
+.skel {
+  display: block;
+  height: 10px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-soft) 25%, var(--panel2) 37%, var(--surface-soft) 63%);
+  background-size: 400% 100%;
+  animation: skelShine 1.4s ease infinite;
+}
+.skel--line:nth-child(2) { width: 78%; }
+.skel--line:nth-child(3) { width: 60%; }
+@keyframes skelShine {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skel { animation: none; }
+}
+
+/* ---- 侧栏空状态 ---- */
+.chat-side__empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 32px 22px;
+  text-align: center;
+}
+.chat-side__empty-icon {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  background: var(--grad-soft);
+  color: var(--prim);
+  margin-bottom: 6px;
+}
+.chat-side__empty p { font-size: 0.88rem; font-weight: 650; color: var(--text); }
+.chat-side__empty > span:last-child { font-size: 0.78rem; color: var(--text3); line-height: 1.6; }
+
 .chat-side__list {
   list-style: none;
   margin: 0;
@@ -611,6 +912,7 @@ watch(streaming, (v) => {
 }
 
 .conv-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -618,14 +920,30 @@ watch(streaming, (v) => {
   border-radius: 11px;
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  transition: background-color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
 }
-.conv-item:hover { background: var(--panel2); }
+.conv-item:hover { background: var(--panel2); transform: translateX(2px); }
 .conv-item--active {
   background: var(--grad-soft);
-  border-color: var(--border);
+  border-color: var(--blue-200);
   box-shadow: inset 2px 0 0 var(--prim);
 }
+
+/* 当前会话左侧的地图钉，比纯色条更有旅行意味 */
+.conv-item__pin {
+  position: absolute;
+  left: -3px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: var(--prim);
+  opacity: 0;
+  transform: scale(0.4);
+  transition: opacity 0.2s, transform 0.2s;
+}
+.conv-item--active .conv-item__pin { opacity: 1; transform: scale(1); }
 
 .conv-item__main { flex: 1; min-width: 0; }
 
@@ -637,7 +955,20 @@ watch(streaming, (v) => {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.conv-item__time { font-size: 0.68rem; color: var(--text3); }
+.conv-item__meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 3px;
+}
+.conv-item__time { font-size: 0.68rem; color: var(--text3); font-family: var(--mono); }
+.conv-item__wip {
+  font-size: 0.64rem;
+  color: var(--gold-600);
+  background: var(--gold-soft);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
 
 .conv-item__ops { display: none; gap: 2px; flex-shrink: 0; }
 .conv-item:hover .conv-item__ops { display: flex; }
@@ -702,20 +1033,27 @@ watch(streaming, (v) => {
 }
 
 .quick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   padding: 8px 14px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--panel2);
   color: var(--text2);
   font-size: 0.81rem;
-  transition: 0.18s;
+  transition: color 0.18s, border-color 0.18s, background-color 0.18s, transform 0.18s,
+              box-shadow 0.18s;
 }
+.quick-chip :deep(svg) { color: var(--text3); transition: color 0.18s; }
 .quick-chip:hover {
   color: var(--prim);
-  border-color: var(--prim);
+  border-color: var(--blue-300);
   background: var(--primary-soft);
   transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.1);
 }
+.quick-chip:hover :deep(svg) { color: var(--prim); }
 
 /* ---- 工具栏 ---- */
 .chat-toolbar {
@@ -738,6 +1076,41 @@ watch(streaming, (v) => {
 }
 
 .chat-toolbar__ops { display: flex; gap: 8px; flex-shrink: 0; }
+
+/* 工具栏按钮：与全局 .btn 区分开——这里是轻量操作，视觉重量要更低 */
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 13px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text2);
+  font-size: 0.82rem;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: transform 0.2s, border-color 0.2s, color 0.2s, box-shadow 0.2s;
+}
+.tool-btn :deep(svg) { color: var(--text3); transition: color 0.2s; }
+.tool-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--blue-300);
+  color: var(--text);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.1);
+}
+.tool-btn:hover:not(:disabled) :deep(svg) { color: var(--prim); }
+.tool-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 主操作（提取行程）用主色描边强调，但不抢发送按钮的实心高对比 */
+.tool-btn--accent {
+  border-color: var(--blue-200);
+  background: var(--primary-soft);
+  color: var(--prim);
+  font-weight: 600;
+}
+.tool-btn--accent :deep(svg) { color: var(--prim); }
+.tool-btn--accent:hover:not(:disabled) { background: var(--blue-100); }
 
 /* ---- 流式阶段条 ---- */
 .phase {
@@ -866,6 +1239,51 @@ watch(streaming, (v) => {
 }
 @keyframes caret { 50% { opacity: 0; } }
 
+/* ---- 消息操作条 ----
+   默认隐藏、悬停浮现，并轻微下移淡入——常驻会持续占用视线，
+   而这类操作的使用频率远低于阅读正文。 */
+.msg__ops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.22s, transform 0.22s;
+}
+.msg:hover .msg__ops,
+.msg:focus-within .msg__ops {
+  opacity: 1;
+  transform: none;
+}
+@media (hover: none) {
+  /* 触屏没有悬停，操作条直接常驻，否则永远点不到 */
+  .msg__ops { opacity: 1; transform: none; }
+}
+
+.op-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text3);
+  font-size: 0.75rem;
+  transition: background-color 0.18s, color 0.18s, border-color 0.18s;
+}
+.op-btn:hover {
+  background: var(--panel2);
+  border-color: var(--border);
+  color: var(--text);
+}
+.op-btn--accent:hover {
+  background: var(--primary-soft);
+  border-color: var(--blue-200);
+  color: var(--prim);
+}
+
 /* ---- 思考过程 ---- */
 .reason {
   border-left: 3px solid rgba(245, 158, 11, 0.7);
@@ -976,12 +1394,66 @@ watch(streaming, (v) => {
 .chat-inputbar__send { flex-shrink: 0; height: 46px; }
 
 /* ==================== 响应式 ==================== */
+/* 窄屏把侧栏收进抽屉。
+   关键：不能直接 display:none —— 那样手机上就没法切换会话、也没法新建了。
+   改为绝对定位的抽屉 + 工具栏按钮开关。 */
+.side-toggle { display: none; }
+.side-backdrop { display: none; }
+/* 空状态里的「我的会话」按钮自带文字，宽度不受上面的定尺限制 */
+.chat-empty__toggle { width: auto; gap: 7px; padding: 0 13px; font-size: 0.82rem; }
+
 @media (max-width: 860px) {
   .chat-main { grid-template-columns: 1fr; margin: 0 10px 10px; gap: 10px; }
-  .chat-side { display: none; }
-  .chat-toolbar__ops .btn { padding: 8px 10px; font-size: 0.78rem; }
+
+  .side-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text2);
+    flex-shrink: 0;
+    margin-right: 4px;
+  }
+  .chat-empty__toggle { width: auto; padding: 0 13px; margin: 0 0 4px; }
+  .side-toggle:active { transform: scale(0.96); }
+
+  .chat-side {
+    position: fixed;
+    z-index: 70;
+    top: var(--nav-h);
+    bottom: 0;
+    left: 0;
+    width: min(300px, 84vw);
+    border-radius: 0 var(--r-m) var(--r-m) 0;
+    transform: translateX(-102%);
+    transition: transform 0.28s cubic-bezier(0.2, 0.7, 0.2, 1);
+    box-shadow: var(--shadow-lift);
+  }
+  .chat-side--open { transform: none; }
+
+  /* 抽屉打开时的遮罩，点击关闭 */
+  .side-backdrop {
+    display: block;
+    position: fixed;
+    inset: var(--nav-h) 0 0;
+    z-index: 65;
+    background: rgba(15, 23, 42, 0.36);
+  }
+
+  .tool-btn { padding: 8px 10px; font-size: 0.78rem; }
+  .tool-btn span { display: none; }   /* 窄屏只留图标，靠 title 提示 */
   .msg__col { max-width: 92%; }
   .msg--user .msg__col { max-width: 88%; }
   .chat-inputbar__hint { display: none; }
+}
+
+@media (max-width: 560px) {
+  .chat-toolbar { padding: 10px 12px; }
+  .chat-toolbar__title { font-size: 0.9rem; }
+  .chat-scroll { padding: 18px 14px; }
 }
 </style>

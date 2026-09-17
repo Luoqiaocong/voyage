@@ -178,6 +178,37 @@ defineProps<{ name: string; size?: number }>()
       <path d="M12 7.6v5.2M12 16.2h.01" />
     </template>
 
+    <template v-else-if="name === 'train'">
+      <!-- 车次：原有代码已在使用该名称，此前落到 fallback 渲染成日落图标，语义不符 -->
+      <rect x="5" y="3" width="14" height="12" rx="3" />
+      <path d="M5 9.5h14M9.5 19l1.2-3M14.5 19l-1.2-3M9 12.2h.01M15 12.2h.01M7.5 19h9" />
+    </template>
+
+    <template v-else-if="name === 'chat'">
+      <!-- 对话：同上，此前也落到 fallback -->
+      <path d="M21 12a8.2 8.2 0 0 1-8.2 8.2H6.4L2.5 22l1.1-4.4A8.2 8.2 0 1 1 21 12z" />
+      <path d="M8.6 11.4h.01M12 11.4h.01M15.4 11.4h.01" />
+    </template>
+
+    <template v-else-if="name === 'edit'">
+      <!-- 编辑铅笔：HomeView 的行程预览卡已在用该名称，此前落到 fallback -->
+      <path d="M4 20h4.2L19 9.2a2.1 2.1 0 0 0-3-3L5.2 17z" />
+      <path d="M14.5 6.7l2.8 2.8" />
+    </template>
+
+    <template v-else-if="name === 'route'">
+      <!-- 航线：用于地图纹理上的路径点缀 -->
+      <circle cx="5.5" cy="18.5" r="2.5" />
+      <circle cx="18.5" cy="5.5" r="2.5" />
+      <path d="M8 18.5h5.2a3 3 0 0 0 0-6H9.8a3 3 0 0 1 0-6H16" stroke-dasharray="2.4 2.6" />
+    </template>
+
+    <template v-else-if="name === 'spark'">
+      <!-- 智能/生成：用于「实时数据」等科技感点缀 -->
+      <path d="M12 3.5l1.7 4.4 4.4 1.7-4.4 1.7-1.7 4.4-1.7-4.4L5.9 9.6l4.4-1.7z" />
+      <path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" />
+    </template>
+
     <!-- 日落 / 启程 -->
     <template v-else>
       <path d="M2.5 18.5h19" />

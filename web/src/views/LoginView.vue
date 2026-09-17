@@ -159,7 +159,7 @@ async function handleLogin() {
       /* 忽略 */
     }
     ui.toast(AUTH_COPY.loginSuccess, 'success')
-    router.replace(safeRedirect())
+    router.replace(withExample(safeRedirect()))
   } catch (e: any) {
     // 关键：走到这里说明本次登录流程没有完整成功（例如令牌写入后
     // fetchUserInfo 抛错）。若不清理，localStorage 里会留下一个「已登录但不可用」
@@ -170,6 +170,25 @@ async function handleLogin() {
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 首页示例胶囊带来的预填问题（?example=...）。
+ *
+ * 从首页点「试试这样说」过来时，这句话要一路带到对话页并填进输入框，
+ * 否则用户点了一下却什么都没发生。用 query 传递以免刷新后丢失。
+ */
+const pendingExample = computed(() => {
+  const raw = route.query.example
+  const value = Array.isArray(raw) ? raw[0] : raw
+  return typeof value === 'string' ? value : ''
+})
+
+/** 把待发送的问题附加到跳转目标上 */
+function withExample(path: string): string {
+  if (!pendingExample.value) return path
+  const sep = path.includes('?') ? '&' : '?'
+  return `${path}${sep}example=${encodeURIComponent(pendingExample.value)}`
 }
 
 /**
@@ -247,7 +266,7 @@ async function handleRegister() {
     const res = await login(email, regForm.password)
     user.setAuth(res)
     await user.fetchUserInfo(true)
-    router.replace('/chat')
+    router.replace(withExample('/chat'))
   } catch (e: any) {
     errors.form = e?.message ?? '注册失败，稍后重试'
   } finally {

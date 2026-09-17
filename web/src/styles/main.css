@@ -5,17 +5,22 @@
 :root {
   color-scheme: light;
 
-  /* ---------- 主色：清新旅行蓝（冷调，主导全局） ---------- */
-  --blue-900: #0f2c4d;
-  --blue-800: #1a4470;
-  --blue-700: #2b6cb0;
-  --blue-600: #3182ce;
-  --blue-500: #4a9ee0;
-  --blue-400: #6cb6ea;
-  --blue-300: #a5d2f2;
-  --blue-200: #cfe6f8;
-  --blue-100: #e6f2fb;
-  --blue-50: #f2f8fd;
+  /* ---------- 主色：旅行蓝（冷调，主导全局） ----------
+     色调由「清新蓝」升级为更饱和、更有辨识度的旅行蓝，用于按钮、链接、
+     高亮与渐变起点。取值经对比度核算（配白字）：
+       blue-600 #2563EB  = 5.17:1  ✅ WCAG AA
+       blue-700 #1D4ED8  = 6.70:1  ✅ WCAG AA
+     顺带修掉一个既有问题：原 blue-600 #3182ce 配白字仅 4.03:1，不达 AA。 */
+  --blue-900: #0B1F4B;
+  --blue-800: #16308C;
+  --blue-700: #1D4ED8;
+  --blue-600: #2563EB;
+  --blue-500: #4F8BF5;
+  --blue-400: #7FA8F8;
+  --blue-300: #A9C5FA;
+  --blue-200: #CBDDFC;
+  --blue-100: #E4EDFE;
+  --blue-50: #F1F5FE;
 
   /* ---------- 青蓝（科技感辅助，用于渐变尾端） ---------- */
   --cyan-600: #0e91b8;
@@ -61,17 +66,17 @@
   --ink-deep: var(--slate-900);
   --ink-soft: var(--slate-600);
 
-  --prim: var(--blue-700);
-  --primary: var(--blue-700);
-  --primary-deep: var(--blue-800);
-  --primary-soft: rgba(43, 108, 176, 0.09);
+  --prim: var(--blue-600);
+  --primary: var(--blue-600);
+  --primary-deep: var(--blue-700);
+  --primary-soft: rgba(37, 99, 235, 0.09);
   --secondary: var(--cyan-500);
 
-  /* 主渐变：清新蓝 → 青蓝（冷调，替代原橙色主导） */
+  /* 主渐变：旅行蓝 → 青蓝（冷调，替代原橙色主导） */
   --grad: linear-gradient(135deg, var(--blue-600), var(--cyan-500));
-  --grad-soft: linear-gradient(135deg, rgba(49, 130, 206, 0.09), rgba(14, 165, 233, 0.09));
+  --grad-soft: linear-gradient(135deg, rgba(37, 99, 235, 0.09), rgba(14, 165, 233, 0.09));
   --grad-deep: linear-gradient(135deg, var(--blue-800), var(--blue-900));
-  --glow: rgba(49, 130, 206, 0.28);
+  --glow: rgba(37, 99, 235, 0.28);
   /* 点缀渐变：仅在需要暖意的局部使用 */
   --grad-gold: linear-gradient(135deg, var(--gold-500), var(--gold-600));
 
@@ -83,10 +88,10 @@
   --hairline: rgba(26, 32, 44, 0.06);
   --line: rgba(26, 32, 44, 0.1);
   /* 冷色阴影：带一点蓝，避免灰蒙蒙 */
-  --shadow: 0 10px 30px rgba(43, 108, 176, 0.07);
-  --shadow-sm: 0 1px 2px rgba(43, 108, 176, 0.05), 0 6px 18px rgba(43, 108, 176, 0.05);
+  --shadow: 0 10px 30px rgba(37, 99, 235, 0.07);
+  --shadow-sm: 0 1px 2px rgba(37, 99, 235, 0.05), 0 6px 18px rgba(37, 99, 235, 0.05);
   --shadow-md: var(--shadow);
-  --shadow-lift: 0 18px 44px rgba(43, 108, 176, 0.14);
+  --shadow-lift: 0 18px 44px rgba(37, 99, 235, 0.14);
   --nav-bg: rgba(247, 249, 252, 0.82);
   --bubble-ai: rgba(26, 32, 44, 0.04);
 
@@ -98,10 +103,15 @@
   --nav-h: 64px;
   --t: 0.35s;
 
-  --font-display: "HarmonyOS Sans SC", "MiSans", "PingFang SC", -apple-system,
+  /* ---------- 字体 ----------
+     西文/数字用 Sora（几何感强，标题更有力量），中文回落系统优质字体。
+     为什么不引中文 Web 字体：思源黑体一类动辄 4~8MB，对一个以首屏速度
+     为卖点的落地页不划算；中文用系统字体在 Windows/macOS 上都已足够清晰。
+     如将来要统一中文字形，可自托管 MiSans 子集并放在 Sora 之前。 */
+  --font-display: "Sora", "HarmonyOS Sans SC", "MiSans", "PingFang SC", -apple-system,
     BlinkMacSystemFont, "Segoe UI", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  --sans: "HarmonyOS Sans SC", "MiSans", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --sans: "Sora", "HarmonyOS Sans SC", "MiSans", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 
   --display: var(--font-display);
@@ -174,8 +184,8 @@ body::before {
   pointer-events: none;
   opacity: 0.55;
   background-image:
-    linear-gradient(rgba(43, 108, 176, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(43, 108, 176, 0.035) 1px, transparent 1px);
+    linear-gradient(rgba(37, 99, 235, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(37, 99, 235, 0.035) 1px, transparent 1px);
   background-size: 56px 56px, 56px 56px;
   mask-image: radial-gradient(circle at 50% 0%, #000 0%, transparent 72%);
   -webkit-mask-image: radial-gradient(circle at 50% 0%, #000 0%, transparent 72%);
@@ -200,7 +210,7 @@ a { color: inherit; text-decoration: none; }
 button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
 input, textarea, select { font-family: inherit; }
 
-::selection { background: rgba(49, 130, 206, 0.18); }
+::selection { background: rgba(37, 99, 235, 0.18); }
 
 :focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: 4px; }
 

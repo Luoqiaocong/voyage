@@ -68,14 +68,25 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
-  /** 确保有可用 access token；过期则尝试 refresh */
+  /**
+   * 确保有可用 access token；过期则尝试 refresh。
+   *
+   * 关键：这里必须自己吞掉异常。刷新令牌是网络请求，后端重启、网络抖动
+   * 或刷新令牌失效都可能让它抛错。此前异常会一路冒泡到路由守卫，
+   * 导致导航被中止、页面渲染成空白——表现就是「首次打开空白，刷新才好」。
+   * 返回 false 让调用方按「未登录」处理，永不抛错。
+   */
   async function ensureValidToken(): Promise<boolean> {
     if (accessToken.value) return true
     if (!refreshToken.value) return false
-    const ok = await refreshAccessToken()
-    if (ok) {
-      accessToken.value = localStorage.getItem(ACCESS_TOKEN_KEY) ?? ''
-      return true
+    try {
+      if (await refreshAccessToken()) {
+        // refreshAccessToken 内部已写入 localStorage，这里同步内存中的值
+        accessToken.value = localStorage.getItem(ACCESS_TOKEN_KEY) ?? ''
+        if (accessToken.value) return true
+      }
+    } catch {
+      /* 刷新过程中的任何异常都按失败处理，由下面统一清理 */
     }
     clearAuth()
     return false

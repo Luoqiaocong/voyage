@@ -8,6 +8,17 @@
     <meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0b1020" media="(prefers-color-scheme: dark)" />
     <title>Voyage AI · 智能旅行规划</title>
+
+    <!-- Sora：只取西文与数字（约 30KB），让标题与数据带几何感；
+         中文继续走系统字体，不为此付几 MB 的下载代价。
+         preconnect 提前建连，避免字体请求拖慢首屏文字渲染。
+         若部署环境无法访问外网，删掉这三行即可——字体栈有完整回落。 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap"
+      rel="stylesheet"
+    />
     <script>
       // 首屏前确定主题，避免浅色/深色闪烁
       ;(function () {
