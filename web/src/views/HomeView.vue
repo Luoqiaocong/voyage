@@ -1607,17 +1607,21 @@ onUnmounted(() => {
   color: var(--text3);
 }
 
-/* ==================== CTA ==================== */
-.cta-wrap { padding: 0 0 96px; }
+/* ==================== CTA ====================
+   纯文字收尾，不套卡片。
+   原来是一张白底卡片（背景 + 边框 + 大圆角 + 阴影），
+   与上方「使用流程」区块的卡片堆在一起显得重复，也把收尾做得过重。
+   现在只留文字与按钮，靠留白分隔。 */
+.cta-wrap {
+  /* 上边距：原先为 0，导致与「使用流程」区块贴住（只靠该区块自身
+     88px 的下边距撑着，卡片边框一顶上来就显挤）。 */
+  padding: 96px 0 120px;
+}
 .cta {
-  position: relative;
-  overflow: hidden;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 26px;
-  padding: 66px 40px;
   text-align: center;
-  box-shadow: 0 24px 60px rgba(37, 99, 235, 0.1);
+  /* 无背景、无边框、无圆角、无阴影 —— 单纯文字 */
+  max-width: 640px;
+  margin: 0 auto;
 }
 .cta__eyebrow { margin-bottom: 14px; }
 .cta h2 {
@@ -1665,7 +1669,7 @@ onUnmounted(() => {
   .timeline__slot { width: fit-content; padding: 5px 12px; }
   .timeline__nav { flex-direction: column; align-items: flex-start; }
   .flow__preview { padding: 24px 18px; min-height: 340px; }
-  .cta { padding: 48px 22px; border-radius: 20px; }
-  .cta-wrap { padding-bottom: 64px; }
+  /* CTA 已无卡片，只需收紧上下留白（原先的 padding / border-radius 是给卡片用的） */
+  .cta-wrap { padding: 64px 0 80px; }
 }
 </style>
