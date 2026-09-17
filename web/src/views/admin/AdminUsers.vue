@@ -168,34 +168,38 @@ onMounted(async () => {
         <table class="table">
           <thead>
             <tr>
-              <th>ID</th>
+              <!-- 已去掉独立的 ID 列：它只占宽度、日常几乎不用。
+                   需要 ID 时「详情」抽屉里仍有完整展示。 -->
               <th>邮箱</th>
               <th>昵称</th>
               <th>角色</th>
               <th>状态</th>
-              <th>注册时间</th>
+              <th>注册</th>
               <th class="table__ops">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="u in items" :key="u.id">
-              <td class="table__mono">{{ u.id }}</td>
               <td class="table__email">
-                {{ u.email }}
+                <!-- 邮箱长度差异极大（实测最长 266px），故截断并保留完整值在 title 里，
+                     避免个别长邮箱把整列撑开导致表格横向滚动。 -->
+                <span class="email" :title="u.email">{{ u.email }}</span>
                 <span v-if="isSelf(u)" class="tag tag--me">我</span>
               </td>
               <td>{{ u.username ?? '—' }}</td>
               <td>
                 <span class="tag" :class="u.role === 'admin' ? 'tag--admin' : 'tag--user'">
-                  {{ u.role === 'admin' ? '管理员' : '普通用户' }}
+                  {{ u.role === 'admin' ? '管理员' : '用户' }}
                 </span>
               </td>
               <td>
                 <span class="tag" :class="u.is_active ? 'tag--ok' : 'tag--off'">
-                  {{ u.is_active ? '已启用' : '已禁用' }}
+                  {{ u.is_active ? '启用' : '禁用' }}
                 </span>
               </td>
-              <td class="table__mono table__date">{{ u.created_at }}</td>
+              <td class="table__mono table__date" :title="u.created_at">
+                {{ u.created_at?.slice(0, 10) }}
+              </td>
               <td class="table__ops">
                 <button class="btn btn-link btn--xs" @click="openDetail(u)">详情</button>
                 <button
@@ -276,23 +280,53 @@ onMounted(async () => {
 
 .users__panel { padding: 0; overflow: hidden; }
 
+/* 横向滚动仅作为兜底（例如窗口被拖得极窄），不再依赖它来显示完整表格。
+   实测修复前表格最小宽 916px > 容器可用 888px，必然出滚动条。 */
 .table-wrap { overflow-x: auto; }
-.table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  /* fixed 让列宽由表格算法分配而不是由内容撑开，
+     配合下面的列宽声明，长邮箱就不会把整列顶宽。 */
+  table-layout: fixed;
+}
 .table th {
   text-align: left;
   font-weight: 600;
   color: var(--text3);
   font-size: 0.75rem;
-  padding: 12px 14px;
+  /* 内边距由 14px 收到 11px：6 列共省约 36px */
+  padding: 12px 11px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
   background: var(--panel2);
 }
-.table td { padding: 12px 14px; border-bottom: 1px solid var(--hairline); }
+.table td { padding: 12px 11px; border-bottom: 1px solid var(--hairline); }
+
+/* 列宽分配：把富余留给邮箱，其余按内容固定 */
+.table th:nth-child(1), .table td:nth-child(1) { width: auto; }        /* 邮箱：占剩余 */
+.table th:nth-child(2), .table td:nth-child(2) { width: 92px; }        /* 昵称 */
+.table th:nth-child(3), .table td:nth-child(3) { width: 88px; }        /* 角色 */
+.table th:nth-child(4), .table td:nth-child(4) { width: 76px; }        /* 状态 */
+.table th:nth-child(5), .table td:nth-child(5) { width: 104px; }       /* 注册 */
+.table th:nth-child(6), .table td:nth-child(6) { width: 186px; }       /* 操作 */
+
 .table__mono { font-family: var(--mono); font-size: 0.8rem; }
 .table__date { color: var(--text3); white-space: nowrap; }
 .table__email { font-weight: 500; }
 .table__ops { white-space: nowrap; text-align: right; }
+
+/* 邮箱截断：否则单个超长邮箱（实测 266px）就能把表格撑出滚动条。
+   完整值在 title 属性里，鼠标悬停可见。 */
+.email {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
 .table__empty { text-align: center; color: var(--text3); padding: 32px 0; }
 
 .tag {
