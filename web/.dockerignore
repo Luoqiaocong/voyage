@@ -1,0 +1,26 @@
+# ============================================================================
+# 前端镜像构建上下文排除清单（上下文是 web/ 目录）
+# ============================================================================
+
+# 依赖与构建产物：容器内由 npm ci 与 npm run build 重新生成
+node_modules/
+dist/
+
+# 本地环境变量：VITE_API_BASE_URL 在 Dockerfile 里固定为同源相对路径，
+# 带上本机的 .env 会覆盖它，导致前端指向 localhost 而非 nginx 反代
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# 本目录下的 Dockerfile 自身无需进镜像；
+# ⚠ 但 nginx.conf 必须保留——Dockerfile 里要 COPY 它，
+#   排除掉会导致构建在 COPY 步骤直接失败。
+Dockerfile
+.dockerignore
+
+# 编辑器与系统文件
+.vscode/
+.idea/
+*.log
+.DS_Store

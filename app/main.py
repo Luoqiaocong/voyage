@@ -9,6 +9,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from app.shared.utils import init_log, close_log
+from app.config import config
 from app.shared.redis import redis_client
 from app.shared.flush_task import usage_flush_task
 from app.shared.memory_task import memory_extract_task
@@ -42,7 +43,9 @@ app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 开发环境允许所有来源
+    # 默认允许所有来源（开发便利）；配置了 ALLOWED_ORIGINS 就按白名单收窄。
+    # 同源部署（nginx 把 /api 反代到后端）时浏览器不会发跨域请求，无需配置此项。
+    allow_origins=config.ALLOWED_ORIGINS or ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -239,6 +239,76 @@ voyage/
 
 ---
 
+## 🐳 Docker 部署
+
+已提供完整容器化配置，一条命令拉起 Redis + 后端 + 前端：
+
+```bash
+cp .env.example .env      # 填入真实密钥（模型 API Key、JWT、邮件等）
+docker compose up -d --build
+```
+
+启动后访问 `http://<服务器地址>/`（默认 80 端口，可用 `WEB_PORT=8080` 覆盖）。
+
+### 服务构成
+
+| 服务 | 镜像 | 说明 |
+|---|---|---|
+| `redis` | `redis:7-alpine` | 限流、验证码、Refresh Token、Token 用量统计 |
+| `backend` | 本地构建 | FastAPI，**启动时自动执行 `alembic upgrade head`** |
+| `web` | 本地构建 | nginx 托管前端，并把 `/api` 反代到 backend |
+
+只有 `web` 对外暴露端口；后端与 Redis 仅在内网可达，浏览器只看到一个源，
+因此**无需配置 CORS**。
+
+### ⚠️ 部署前必须改的两项
+
+1. **`SHARE_BASE_URL`** —— 分享链接的对外基址。默认是 `http://localhost`，
+   不改的话复制出来的分享链接别人打不开：
+   ```bash
+   SHARE_BASE_URL=https://your-domain.com docker compose up -d
+   ```
+
+2. **数据持久化** —— SQLite（`app.db` + `checkpoints.sqlite`）与日志通过
+   `./data:/app/data` 挂载到宿主机。**这个目录就是全部业务数据**，
+   升级重建容器不会丢，但请自行纳入备份。
+
+### 常用操作
+
+```bash
+docker compose logs -f backend      # 跟踪后端日志
+docker compose restart backend      # 重启后端
+docker compose down                 # 停止（保留数据卷）
+docker compose up -d --build        # 更新代码后重新部署（会自动跑迁移）
+```
+
+在容器内执行管理脚本（如创建管理员）：
+
+```bash
+docker compose exec backend python app/scripts/create_admin.py \
+  --email you@example.com --username 你的昵称
+```
+
+### 关于 Redis 版本
+
+必须使用 **Redis ≥ 7**。限流的计数原语依赖 `EXPIRE` 的 `NX` 选项
+（7.0 才引入）；当前实现已改用 Lua 脚本以兼容 5.x/6.x，
+但 7.x 才有完整的过期语义。
+
+### 不使用 Docker 时
+
+`Dockerfile` 是标准的单镜像构建，也可单独使用：
+
+```bash
+docker build -t voyage-backend .        # 后端（上下文为仓库根）
+docker build -f web/Dockerfile -t voyage-web ./web   # 前端（上下文为 web/）
+```
+
+构建上下文与 `.dockerignore` 已配置妥当：`.env`（密钥）与 `data/`（本机数据）
+都会被排除，不会进镜像层。
+
+---
+
 ## 📋 开发计划
 
 | 阶段 | 内容 | 状态 |

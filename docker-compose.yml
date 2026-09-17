@@ -1,0 +1,106 @@
+# ============================================================================
+# Voyage 一键部署
+#
+#   docker compose up -d --build
+#
+# 三个服务：
+#   redis    —— 限流、验证码、Refresh Token、Token 用量统计（必须 Redis >= 7）
+#   backend  —— FastAPI 后端，容器启动时自动执行 alembic upgrade head
+#   web      —— nginx 托管前端静态资源，并把 /api 反代到 backend
+#
+# 只需对外暴露 web 的 80 端口；后端与 Redis 只在内部网络可达。
+# ============================================================================
+
+services:
+  # ---------------------------------------------------------------- Redis
+  redis:
+    # 必须是 7.x：限流原语依赖 EXPIRE 的 NX 选项（5.x/6.x 不支持）。
+    # 早前用本地 Redis 5.0 时登录接口会直接 500，这里改用 Lua 脚本兼容，
+    # 但部署环境仍建议 7.x 以获得完整语义。
+    image: redis:7-alpine
+    container_name: voyage-redis
+    restart: unless-stopped
+    # 数据落到命名卷：容器重建后验证码/限流计数/令牌不丢
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks: [voyage]
+
+  # -------------------------------------------------------------- Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: voyage-backend:latest
+    container_name: voyage-backend
+    restart: unless-stopped
+    # 读取与本机开发相同的 .env（密钥、模型通道、邮箱等都在里面）。
+    # 该文件已被 .gitignore 忽略，不会进版本库。
+    env_file:
+      - .env
+    environment:
+      # ⚠ 必须覆盖：.env 里的 REDIS_URL 指向本机或云 Redis，
+      # 容器内应使用 compose 网络里的服务名。
+      REDIS_URL: redis://redis:6379/7
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_DB: "7"
+      # 分享链接的对外基址：改成你的服务器地址或域名，
+      # 否则「分享链接」复制出来仍是 localhost，别人打不开。
+      SHARE_BASE_URL: ${SHARE_BASE_URL:-http://localhost}
+      # 日志输出到文件（挂载在 data 卷里，便于排查线上问题）
+      LOG_TO_FILE: "true"
+    volumes:
+      # SQLite（app.db + checkpoints.sqlite）与日志都在这里，必须持久化，
+      # 否则容器重建会丢掉全部用户、会话与行程数据。
+      - ./data:/app/data
+    # 与 Dockerfile 里的 HEALTHCHECK 一致，此处显式声明便于阅读与调整。
+    # depends_on 的 service_healthy 条件正是靠它生效。
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/docs"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [voyage]
+
+  # ------------------------------------------------------------------ Web
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: voyage-web:latest
+    container_name: voyage-web
+    restart: unless-stopped
+    ports:
+      # 只暴露这一个端口。换端口改左侧即可，例如 "8080:80"；
+      # 也可以用环境变量覆盖：WEB_PORT=8080 docker compose up -d
+      - "${WEB_PORT:-80}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    depends_on:
+      # 等后端通过健康检查再启动，避免首屏请求打到还没就绪的接口
+      backend:
+        condition: service_healthy
+    networks: [voyage]
+
+volumes:
+  redis-data:
+    driver: local
+
+networks:
+  voyage:
+    driver: bridge
