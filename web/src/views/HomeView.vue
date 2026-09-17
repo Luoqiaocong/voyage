@@ -19,7 +19,6 @@ import AppNavbar from '@/components/AppNavbar.vue'
 import AppFooter from '@/components/AppFooter.vue'
 import FeatureIcon from '@/components/FeatureIcon.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
-import MapTexture from '@/components/MapTexture.vue'
 
 const user = useUserStore()
 const router = useRouter()
@@ -373,8 +372,6 @@ onUnmounted(() => {
       <div class="hero__bg" aria-hidden="true">
         <span class="hero__glow hero__glow--a"></span>
         <span class="hero__glow hero__glow--b"></span>
-        <!-- 地图纹理 + 航线：淡到几乎察觉不到，只在余光里提供「旅行」的暗示 -->
-        <MapTexture class="hero__map" routes />
       </div>
 
       <div class="container hero__inner">
@@ -746,7 +743,6 @@ onUnmounted(() => {
     <section class="cta-wrap">
       <div class="container">
         <div class="cta rv">
-          <MapTexture class="cta__map" routes />
           <p class="eyebrow eyebrow--plain cta__eyebrow">Get Started</p>
           <h2>下一站，交给我们规划</h2>
           <p>登录后即可与 Voyage AI 对话，生成你的第一份结构化行程。</p>
@@ -788,16 +784,6 @@ onUnmounted(() => {
   width: 560px; height: 420px;
   top: -140px; right: -100px;
   background: radial-gradient(circle, rgba(14, 165, 233, 0.13), transparent 68%);
-}
-
-.hero__map {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  color: var(--blue-600);
-  mask-image: radial-gradient(ellipse 90% 80% at 50% 30%, #000 20%, transparent 78%);
-  -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 30%, #000 20%, transparent 78%);
 }
 
 .hero__inner {
@@ -1633,17 +1619,6 @@ onUnmounted(() => {
   text-align: center;
   box-shadow: 0 24px 60px rgba(37, 99, 235, 0.1);
 }
-.cta__map {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  color: var(--blue-600);
-  opacity: 0.7;
-  mask-image: radial-gradient(ellipse 70% 90% at 50% 50%, #000 10%, transparent 72%);
-  -webkit-mask-image: radial-gradient(ellipse 70% 90% at 50% 50%, #000 10%, transparent 72%);
-}
-.cta > *:not(.cta__map) { position: relative; z-index: 1; }
 .cta__eyebrow { margin-bottom: 14px; }
 .cta h2 {
   font-size: clamp(1.7rem, 3.2vw, 2.4rem);

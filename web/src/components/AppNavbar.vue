@@ -48,17 +48,12 @@ onUnmounted(() => {
     <div class="nav__inner">
       <RouterLink to="/" class="brand" @click="close">
         <span class="brand__mark" aria-hidden="true">
-          <!-- 保持原有内联 SVG 品牌标记不变。
-               曾试过换成位图 logo，但那张图是「白底 + 极浅粉彩图形」，
-               与渐变底的对比度不足；且用户要求导航栏图标保持原样。 -->
-          <svg viewBox="0 0 32 32" fill="none">
-            <circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="2.4" />
-            <path
-              d="M16 4.5 L18.8 13.2 L27.5 16 L18.8 18.8 L16 27.5 L13.2 18.8 L4.5 16 L13.2 13.2 Z"
-              fill="currentColor"
-            />
-            <circle cx="16" cy="16" r="2.2" fill="#fff" />
-          </svg>
+          <!-- 首页 Logo 改回位图：用 apple-touch-icon.png（180x180）。
+               选它而不是 512 的 voyage-mark.png，是因为导航栏只显示 34px，
+               180 的尺寸已绰绰有余且体积更小。
+               容器保留渐变底会与图标自带底色叠加成「渐变框套方块」，
+               故改为白底 + 细边框。 -->
+          <img src="/apple-touch-icon.png" alt="" />
         </span>
         <span class="brand__text">Voyage <em>AI</em></span>
       </RouterLink>
@@ -161,17 +156,26 @@ onUnmounted(() => {
 
 .brand { display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
+/* Logo 容器：白底圆角方块 + 细边框。
+   图标本身是完整方形图（自带底色），容器再叠渐变会变成两层底色打架，
+   故改为中性白底；浅色系界面里也更干净。 */
 .brand__mark {
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  background: var(--grad);
-  color: #fff;
+  background: var(--panel);
+  border: 1px solid var(--border);
   display: grid;
   place-items: center;
-  box-shadow: 0 6px 16px var(--glow);
+  overflow: hidden;
+  flex-shrink: 0;
 }
-.brand__mark svg { width: 21px; height: 21px; }
+.brand__mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 
 .brand__text {
   font-family: var(--font-display);
