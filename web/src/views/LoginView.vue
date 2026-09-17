@@ -8,7 +8,7 @@
  */
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { login, register, resetPassword, resetToken, sendCode } from '@/api/user'
+import { login, register, sendCode } from '@/api/user'
 import { useUserStore } from '@/stores/user'
 import { useUiStore } from '@/stores/ui'
 import { useTheme } from '@/composables/useTheme'
@@ -16,7 +16,14 @@ import TravelScene from '@/components/TravelScene.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
 import { AUTH_COPY, AUTH_SCENES } from '@/constants/copy'
 
-type Mode = 'login' | 'register' | 'forgot'
+/**
+ * 本页只负责「登录」与「注册」两件事。
+ *
+ * 重置密码已拆到独立页面 /forgot（ForgotView.vue）——三者共用一个组件时
+ * 字段与文案会互相渗透，例如注册的「旅行昵称」曾出现在重置流程里。
+ * 想改重置密码请去 ForgotView，不要在这里加回 forgot 分支。
+ */
+type Mode = 'login' | 'register'
 
 const router = useRouter()
 const route = useRoute()
@@ -26,7 +33,7 @@ const { isDark, toggleTheme } = useTheme()
 
 /* ---------------- 模式 ---------------- */
 const initial = route.query.tab
-const mode = ref<Mode>(initial === 'register' ? 'register' : initial === 'forgot' ? 'forgot' : 'login')
+const mode = ref<Mode>(initial === 'register' ? 'register' : 'login')
 /** 1 = 登录，2 = 注册，用于滑轨位移 */
 const slideIndex = computed(() => (mode.value === 'login' ? 0 : 1))
 const loading = ref(false)
@@ -70,9 +77,6 @@ const remember = ref(true)
 const regForm = reactive({ email: '', username: '', password: '', code: '' })
 const countdown = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
-
-const forgotForm = reactive({ email: '', code: '', token: '', password: '', confirm: '' })
-const forgotStep = ref<1 | 2>(1)
 
 const showLoginPwd = ref(false)
 const showRegPwd = ref(false)
@@ -127,8 +131,8 @@ function switchMode(m: Mode) {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-async function handleSendCode(target: 'register' | 'forgot') {
-  const email = (target === 'register' ? regForm.email : forgotForm.email).trim()
+async function handleSendCode() {
+  const email = regForm.email.trim()
   if (!EMAIL_RE.test(email)) {
     errors.email = AUTH_COPY.emailInvalid
     return
@@ -274,51 +278,6 @@ async function handleRegister() {
   }
 }
 
-async function handleVerifyCode() {
-  Object.keys(errors).forEach((k) => delete errors[k])
-  if (!forgotForm.email.trim() || !EMAIL_RE.test(forgotForm.email.trim())) {
-    errors.email = AUTH_COPY.emailInvalid
-    return
-  }
-  if (!forgotForm.code.trim()) {
-    errors.code = AUTH_COPY.codeRequired
-    return
-  }
-  loading.value = true
-  try {
-    const res = await resetToken(forgotForm.email.trim(), forgotForm.code.trim())
-    forgotForm.token = res.token
-    forgotStep.value = 2
-  } catch (e: any) {
-    errors.form = e?.message ?? '验证码校验失败'
-  } finally {
-    loading.value = false
-  }
-}
-
-async function handleReset() {
-  Object.keys(errors).forEach((k) => delete errors[k])
-  if (forgotForm.password.length < 8) {
-    errors.password = AUTH_COPY.passwordShort
-    return
-  }
-  if (forgotForm.password !== forgotForm.confirm) {
-    errors.confirm = AUTH_COPY.passwordMismatch
-    return
-  }
-  loading.value = true
-  try {
-    await resetPassword(forgotForm.password, forgotForm.token)
-    ui.toast(AUTH_COPY.resetSuccess, 'success')
-    forgotStep.value = 1
-    switchMode('login')
-  } catch (e: any) {
-    errors.form = e?.message ?? '重置失败，稍后重试'
-  } finally {
-    loading.value = false
-  }
-}
-
 /* ---------------- 第三方登录（占位，待后端接入） ---------------- */
 const thirdParty = [
   { name: 'wechat' as const, label: '微信' },
@@ -416,7 +375,7 @@ function handleThirdParty() {
         </header>
 
         <!-- 滑动切换：登录 / 注册 -->
-        <div v-if="mode !== 'forgot'" class="auth__tabs" role="tablist" aria-label="登录或注册">
+        <div class="auth__tabs" role="tablist" aria-label="登录或注册">
           <span class="auth__tabs-thumb" :style="{ transform: `translateX(${slideIndex * 100}%)` }"></span>
           <button
             class="auth__tab"
@@ -498,7 +457,7 @@ function handleThirdParty() {
                     <span class="checkbox__box"><TravelIcon name="check" :size="12" /></span>
                     <span>{{ AUTH_COPY.rememberMe }}</span>
                   </label>
-                  <button type="button" class="link-btn" @click="switchMode('forgot')">忘记密码？</button>
+                  <RouterLink to="/forgot" class="link-btn">忘记密码？</RouterLink>
                 </div>
 
                 <p v-if="errors.form" class="form-err form-err--block">
@@ -558,7 +517,7 @@ function handleThirdParty() {
                       type="button"
                       class="btn btn-ghost btn--sm code-btn"
                       :disabled="countdown > 0 || mode !== 'register'"
-                      @click="handleSendCode('register')"
+                      @click="handleSendCode"
                     >
                       {{ countdown > 0 ? countdown + 's 后重发' : '获取验证码' }}
                     </button>
@@ -631,116 +590,29 @@ function handleThirdParty() {
           </div>
         </div>
 
-        <!-- ======== 忘记密码 ======== -->
-        <Transition name="copy" mode="out-in">
-          <form
-            v-if="mode === 'forgot'"
-            key="forgot"
-            class="form form--forgot"
-            @submit.prevent="forgotStep === 1 ? handleVerifyCode() : handleReset()"
-          >
-            <!-- 步骤指示 -->
-            <ol class="steps">
-              <li class="steps__item" :class="{ 'steps__item--on': forgotStep === 1, 'steps__item--done': forgotStep === 2 }">
-                <span class="steps__no">1</span>
-                <span class="steps__label">验证邮箱</span>
-              </li>
-              <li class="steps__item" :class="{ 'steps__item--on': forgotStep === 2 }">
-                <span class="steps__no">2</span>
-                <span class="steps__label">设置新密码</span>
-              </li>
-            </ol>
-
-            <template v-if="forgotStep === 1">
-              <div class="field">
-                <label for="fg-email">注册邮箱</label>
-                <div class="input-icon">
-                  <TravelIcon name="mail" />
-                  <input id="fg-email" v-model="forgotForm.email" class="input" type="email" placeholder="you@example.com" @input="clearError('email')" />
-                </div>
-                <p v-if="errors.email" class="form-err"><TravelIcon name="alert" :size="14" />{{ errors.email }}</p>
-              </div>
-
-              <div class="field">
-                <label for="fg-code">验证码</label>
-                <div class="code-row">
-                  <div class="input-icon">
-                    <TravelIcon name="shield" />
-                    <input id="fg-code" v-model="forgotForm.code" class="input" maxlength="6" inputmode="numeric" placeholder="6 位数字" @input="clearError('code')" />
-                  </div>
-                  <button type="button" class="btn btn-ghost btn--sm code-btn" :disabled="countdown > 0" @click="handleSendCode('forgot')">
-                    {{ countdown > 0 ? countdown + 's 后重发' : '获取验证码' }}
-                  </button>
-                </div>
-                <p v-if="errors.code" class="form-err"><TravelIcon name="alert" :size="14" />{{ errors.code }}</p>
-              </div>
-            </template>
-
-            <template v-else>
-              <div class="field">
-                <label for="fg-pwd">新密码</label>
-                <div class="input-icon">
-                  <TravelIcon name="lock" />
-                  <input id="fg-pwd" v-model="forgotForm.password" class="input" type="password" autocomplete="new-password" placeholder="至少 8 位" @input="clearError('password')" />
-                </div>
-                <p v-if="errors.password" class="form-err"><TravelIcon name="alert" :size="14" />{{ errors.password }}</p>
-              </div>
-
-              <div class="field">
-                <label for="fg-confirm">确认新密码</label>
-                <div class="input-icon">
-                  <TravelIcon name="lock" />
-                  <input id="fg-confirm" v-model="forgotForm.confirm" class="input" type="password" autocomplete="new-password" placeholder="再输入一次" @input="clearError('confirm')" />
-                </div>
-                <p v-if="errors.confirm" class="form-err"><TravelIcon name="alert" :size="14" />{{ errors.confirm }}</p>
-              </div>
-            </template>
-
-            <p v-if="errors.form" class="form-err form-err--block"><TravelIcon name="alert" :size="14" />{{ errors.form }}</p>
-
-            <button class="btn btn-primary btn--block btn--lg" type="submit" :disabled="loading">
-              <template v-if="loading">处理中…</template>
-              <template v-else-if="forgotStep === 1">
-                下一步
-                <TravelIcon name="arrow-right" :size="17" />
-              </template>
-              <template v-else>
-                更新密码
-                <TravelIcon name="key" :size="17" />
-              </template>
-            </button>
-
-            <button type="button" class="link-btn link-btn--center" @click="switchMode('login')">
-              <TravelIcon name="arrow-left" :size="14" />返回登录
-            </button>
-          </form>
-        </Transition>
-
         <!-- 第三方登录 -->
-        <template v-if="mode !== 'forgot'">
-          <div class="divider"><span>或从别处登机</span></div>
+        <div class="divider"><span>或从别处登机</span></div>
 
-          <div class="oauth">
-            <button
-              v-for="p in thirdParty"
-              :key="p.name"
-              type="button"
-              class="oauth__btn"
-              :aria-label="`使用 ${p.label} 登录`"
-              @click="handleThirdParty"
-            >
-              <TravelIcon :name="p.name" :size="19" />
-              <span>{{ p.label }}</span>
-            </button>
-          </div>
+        <div class="oauth">
+          <button
+            v-for="p in thirdParty"
+            :key="p.name"
+            type="button"
+            class="oauth__btn"
+            :aria-label="`使用 ${p.label} 登录`"
+            @click="handleThirdParty"
+          >
+            <TravelIcon :name="p.name" :size="19" />
+            <span>{{ p.label }}</span>
+          </button>
+        </div>
 
-          <p class="auth__foot">
-            {{ mode === 'login' ? '还没有账号？' : '已经有账号了？' }}
-            <button type="button" class="link-btn" @click="switchMode(mode === 'login' ? 'register' : 'login')">
-              {{ mode === 'login' ? '注册一个' : '直接登录' }}
-            </button>
-          </p>
-        </template>
+        <p class="auth__foot">
+          {{ mode === 'login' ? '还没有账号？' : '已经有账号了？' }}
+          <button type="button" class="link-btn" @click="switchMode(mode === 'login' ? 'register' : 'login')">
+            {{ mode === 'login' ? '注册一个' : '直接登录' }}
+          </button>
+        </p>
 
         <p class="auth__legal">
           继续即表示同意
@@ -956,7 +828,6 @@ function handleThirdParty() {
 .auth__pane:last-child { padding-left: 2px; padding-right: 0; }
 
 .form { display: flex; flex-direction: column; gap: 15px; }
-.form--forgot { margin-top: 4px; }
 
 /* 密码可见性切换 */
 .input--pwd { padding-right: 42px; }

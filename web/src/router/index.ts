@@ -8,6 +8,9 @@ const router = createRouter({
   routes: [
     { path: '/', name: 'home', component: HomeView },
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { guestOnly: true } },
+    // 找回通行证独立成页：重置密码与登录/注册是不同任务，
+    // 挂在同一组件里会让字段与文案互相渗透
+    { path: '/forgot', name: 'forgot', component: () => import('@/views/ForgotView.vue'), meta: { guestOnly: true } },
     { path: '/chat', name: 'chat', component: () => import('@/views/ChatView.vue'), meta: { requiresAuth: true } },
     { path: '/itineraries', name: 'itineraries', component: () => import('@/views/ItinerariesView.vue'), meta: { requiresAuth: true } },
     { path: '/itineraries/:id(\\d+)', name: 'itinerary-detail', component: () => import('@/views/ItineraryDetailView.vue'), meta: { requiresAuth: true } },
