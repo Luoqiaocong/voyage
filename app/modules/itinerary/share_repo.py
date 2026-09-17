@@ -73,3 +73,15 @@ class ShareRepo:
         share.view_count = (share.view_count or 0) + 1
         await self.db.flush()
         return share.view_count
+
+    async def delete(self, share: ItineraryShare) -> None:
+        """物理删除分享记录。
+
+        为什么是删除而不是置 revoked_at：
+        - 对外的接口就是 DELETE /itineraries/shares/{id}，语义上应当删除
+        - 原先只置失效，导致记录仍留在列表里，用户以为「删不掉」
+        - 链接一旦撤销就已失效，保留失效记录的追溯价值很低；
+          真正需要留痕的是管理端操作，那由 admin_audit_log 负责
+        """
+        await self.db.delete(share)
+        await self.db.flush()

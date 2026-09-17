@@ -122,15 +122,19 @@ async function toggleEdit(item: ShareItem) {
 }
 
 async function revoke(item: ShareItem) {
-  const ok = await ui.confirm('撤销后该链接立即失效，且无法恢复。确认撤销？')
+  // 现在是真的删除（记录会从列表移除），不只是失效——文案要说清，
+  // 别让用户以为删完还能找回
+  const ok = await ui.confirm(
+    '删除后该链接立即失效，记录也会从列表中移除，无法恢复。确认删除？'
+  )
   if (!ok) return
   busyId.value = item.id
   try {
     await revokeShare(item.id)
-    ui.toast('已撤销', 'success')
+    ui.toast('分享链接已删除', 'success')
     await load()
   } catch (e: any) {
-    ui.toast(e?.message ?? '撤销失败', 'error')
+    ui.toast(e?.message ?? '删除失败', 'error')
   } finally {
     busyId.value = null
   }
@@ -220,13 +224,14 @@ defineExpose({ reload: load })
           <button class="btn btn-link btn--xs" :disabled="busyId === s.id" @click="toggleEdit(s)">
             {{ s.allow_edit ? '关闭编辑' : '允许编辑' }}
           </button>
+          <!-- 删除按钮对所有状态都可点：既然是真删除，已过期/已失效的链接
+               也应允许清理掉，否则只能一直挂在列表里 -->
           <button
-            v-if="s.status === 'active'"
             class="btn btn-link btn--xs is-danger"
             :disabled="busyId === s.id"
             @click="revoke(s)"
           >
-            撤销
+            删除
           </button>
         </div>
       </li>

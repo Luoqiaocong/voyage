@@ -91,8 +91,17 @@ export async function updateShare(
   })) as unknown as ShareItem
 }
 
-export async function revokeShare(shareId: number): Promise<ShareItem> {
-  return (await http.delete(`/itineraries/shares/${shareId}`)) as unknown as ShareItem
+/**
+ * 删除分享链接（物理删除，记录不再出现在列表里）。
+ *
+ * 后端返回 {id, deleted} 而不是被删对象——记录已不存在，
+ * 序列化一个已删除的实体没有意义。
+ */
+export async function revokeShare(shareId: number): Promise<{ id: number; deleted: boolean }> {
+  return (await http.delete(`/itineraries/shares/${shareId}`)) as unknown as {
+    id: number
+    deleted: boolean
+  }
 }
 
 // ==================== 访问者侧（公开）====================

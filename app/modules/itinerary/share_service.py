@@ -162,14 +162,19 @@ class ShareService(TransactionMixin):
             await self.db.flush()
         return share
 
-    async def revoke_share(self, *, user_id: int, share_id: int):
-        """撤销分享（保留记录以便追溯，只是置失效）。"""
+    async def revoke_share(self, *, user_id: int, share_id: int) -> None:
+        """撤销分享 = 删除该分享链接（物理删除）。
+
+        之所以改成真删除：对外接口是 DELETE /itineraries/shares/{id}，
+        原先的实现只置 revoked_at 让链接失效、记录仍留在列表里，
+        用户看到「已撤销」的条目一直挂着，会认为删除功能坏了。
+
+        删除后该 token 立即失效：get_by_token 查不到，访问侧统一按
+        「链接不存在或已失效」处理（见 _status_of / inspect 的分支）。
+        """
         share = await self._require_own_share(user_id, share_id)
-        if share.revoked_at is None:
-            share.revoked_at = datetime.now(timezone.utc)
-            async with self.transaction_scope():
-                await self.db.flush()
-        return share
+        async with self.transaction_scope():
+            await self.share_repo.delete(share)
 
     async def _require_own_share(self, user_id: int, share_id: int):
         """取分享并确认属于该用户；否则按「不存在」处理避免探测他人分享 ID。"""
