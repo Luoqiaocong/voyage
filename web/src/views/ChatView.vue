@@ -211,9 +211,63 @@ async function handleDelete(conv: Conversation) {
   }
 }
 
+/**
+ * 取当前会话里「会被后端提取的那条消息」——即最后一条有文本的 AI 回复。
+ *
+ * 后端 /itineraries/extract/{id} 的 id 是**会话 ID**，提取范围由服务端定为
+ * 「最后一条 AI 文本」（见 app/modules/itinerary/service.py 的 get_last_ai_text），
+ * 前端无法指定某条消息。所以界面上必须按这个口径来说明与判断，
+ * 否则用户会以为能从任意一条历史回答里提取。
+ */
+function lastAiMessage(): RdMsg | null {
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    if (messages.value[i].role === 'assistant' && messages.value[i].content.trim()) {
+      return messages.value[i]
+    }
+  }
+  return null
+}
+
+/**
+ * 粗略判断一段文本是否像行程攻略。
+ *
+ * 为什么需要：抽取接口是把任意文本交给 LLM 转成结构化行程。
+ * 若最后一条 AI 回复其实是「生成完毕，行程已保存到账户」这类收尾语，
+ * 模型会尽力发挥，很可能**编造出一份假行程**并落库——这比直接报错更糟。
+ * 因此在发请求前先拦一道，宁可不做也不造假。
+ */
+function looksLikeItinerary(text: string): boolean {
+  const t = text
+  // 天数结构：Day 1 / 第一天 / D1
+  const dayMarkers = (t.match(/(?:day\s*\d|第\s*[一二三四五六七八九十\d]+\s*天|d\d)/gi) || []).length
+  // 时段或行程要素
+  const slotMarkers = (t.match(/上午|下午|晚上|傍晚|清晨|中午/g) || []).length
+  const travelMarkers = (t.match(/景点|门票|人均|住宿|酒店|交通|高铁|航班|预算|行程|路线|打卡|游览/g) || []).length
+  // 至少要有天数结构的迹象，外加若干行程要素
+  return dayMarkers >= 1 && slotMarkers + travelMarkers >= 3
+}
+
 async function handleExtract() {
   if (!activeId.value || streaming.value) return
-  const sure = await ui.confirm('根据本次对话的完整内容提取并保存旅行行程？（可能耗时较长）')
+
+  const target = lastAiMessage()
+  if (!target) {
+    ui.toast('这个会话里还没有 AI 回复，无法提取', 'error')
+    return
+  }
+  if (!looksLikeItinerary(target.content)) {
+    // 说清「提取的是哪一条」以及「为什么不行」，而不是丢一句笼统的失败
+    ui.toast(
+      '最后一条 AI 回复看起来不是行程安排，提取可能会编造内容。请先让 AI 生成一份完整行程。',
+      'error',
+      5200
+    )
+    return
+  }
+
+  const sure = await ui.confirm(
+    '将根据本会话「最后一条 AI 回复」提取并保存行程（后端只取最后一条，不是整个对话）。继续？'
+  )
   if (!sure) return
   ui.toast('AI 正在提取行程，请稍候…', 'info')
   try {
@@ -221,7 +275,7 @@ async function handleExtract() {
     ui.toast(`行程已提取：${it.plan.destination}（${it.plan.days} 天）`, 'success', 4200)
     router.push(`/itineraries/${it.id}`)
   } catch (e: any) {
-    ui.toast(e?.message ?? '行程提取失败，请确认对话中已包含可用攻略信息', 'error')
+    ui.toast(e?.message ?? '行程提取失败，请确认最后一条 AI 回复中包含完整行程', 'error')
   }
 }
 
@@ -336,22 +390,6 @@ async function regenerate(index: number) {
     return
   }
   await runTurn(prev, false)
-}
-
-/**
- * 从指定对话重新提取行程。
- *
- * 与顶栏的「提取行程」不同：那个作用于当前会话，
- * 这个让用户能对任意一条历史回答直接提取，省去先切会话的动作。
- */
-async function extractFrom(convId: string) {
-  try {
-    const it = await extractItinerary(convId)
-    ui.toast('行程已提取', 'success')
-    router.push(`/itineraries/${it.id}`)
-  } catch (e: any) {
-    ui.toast(e?.message ?? '行程提取失败，请确认对话中已包含攻略信息', 'error')
-  }
 }
 
 /* ---------------- 会话搜索 ---------------- */
@@ -702,15 +740,6 @@ watch(streaming, (v) => {
                     >
                       <TravelIcon name="compass" :size="13" />
                       重新生成
-                    </button>
-                    <button
-                      v-if="msg.role === 'assistant' && activeId"
-                      class="op-btn op-btn--accent"
-                      title="把这条回答整理成可保存的行程"
-                      @click="extractFrom(activeId)"
-                    >
-                      <TravelIcon name="luggage" :size="13" />
-                      提取行程
                     </button>
                   </div>
                 </div>
