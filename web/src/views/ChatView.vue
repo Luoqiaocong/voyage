@@ -228,25 +228,6 @@ function lastAiMessage(): RdMsg | null {
   return null
 }
 
-/**
- * 粗略判断一段文本是否像行程攻略。
- *
- * 为什么需要：抽取接口是把任意文本交给 LLM 转成结构化行程。
- * 若最后一条 AI 回复其实是「生成完毕，行程已保存到账户」这类收尾语，
- * 模型会尽力发挥，很可能**编造出一份假行程**并落库——这比直接报错更糟。
- * 因此在发请求前先拦一道，宁可不做也不造假。
- */
-function looksLikeItinerary(text: string): boolean {
-  const t = text
-  // 天数结构：Day 1 / 第一天 / D1
-  const dayMarkers = (t.match(/(?:day\s*\d|第\s*[一二三四五六七八九十\d]+\s*天|d\d)/gi) || []).length
-  // 时段或行程要素
-  const slotMarkers = (t.match(/上午|下午|晚上|傍晚|清晨|中午/g) || []).length
-  const travelMarkers = (t.match(/景点|门票|人均|住宿|酒店|交通|高铁|航班|预算|行程|路线|打卡|游览/g) || []).length
-  // 至少要有天数结构的迹象，外加若干行程要素
-  return dayMarkers >= 1 && slotMarkers + travelMarkers >= 3
-}
-
 async function handleExtract() {
   if (!activeId.value || streaming.value) return
 
@@ -255,20 +236,24 @@ async function handleExtract() {
     ui.toast('这个会话里还没有 AI 回复，无法提取', 'error')
     return
   }
-  if (!looksLikeItinerary(target.content)) {
-    // 说清「提取的是哪一条」以及「为什么不行」，而不是丢一句笼统的失败
-    ui.toast(
-      '最后一条 AI 回复看起来不是行程安排，提取可能会编造内容。请先让 AI 生成一份完整行程。',
-      'error',
-      5200
-    )
-    return
-  }
 
+  // 这里刻意**不做内容预判**。
+  //
+  // 曾经加过一个 looksLikeItinerary() 启发式（要求出现 Day N 且时段/要素达标），
+  // 想拦住「最后一条是收尾语、提取会编造」的情况。实测证明它两向都错：
+  //   - 误拦真行程：一份含「路线/高铁/酒店/预算/行程」6 个要素的攻略，
+  //     因没写「Day 1」而被拦（真实数据里 8 个会话只放行 1 个）
+  //   - 放行非行程：纯车次表因车次号里的 "D7" 被误判成天数标记而通过
+  // 根源是「这段文本能否被 LLM 抽成行程」本质上猜不准。
+  // 真正的判定器在后端：extract_itinerary_plan 失败返回 None，
+  // service 抛 ITINERARY_GEN_FAILED，**不会编造**。所以交给它判断即可。
   const sure = await ui.confirm(
-    '将根据本会话「最后一条 AI 回复」提取并保存行程（后端只取最后一条，不是整个对话）。继续？'
+    '将从本会话「最后一条 AI 回复」提取行程。\n\n' +
+      `后端只取最后一条 AI 回复（不是整个对话），当前这条约 ${target.content.length} 字。\n` +
+      '若它不是行程安排，提取会失败且不会生成任何行程。继续？'
   )
   if (!sure) return
+
   ui.toast('AI 正在提取行程，请稍候…', 'info')
   try {
     const it = await extractItinerary(activeId.value)
