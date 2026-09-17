@@ -2,7 +2,12 @@
 <html lang="zh-CN" data-theme="light">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/voyage-mark.svg" />
+    <!-- 站点图标。
+         由 public/voyage-mark.jpeg（832x1248 竖版白底原图）自动裁出的方形版本：
+         原图内容实际只占中央 646x713、宽高比 0.906，故裁方形不会切到图形。
+         注意 favicon 必须是 PNG/SVG/ICO——浏览器不支持 JPEG 图标。 -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Voyage AI — 智能旅行规划平台：多 Agent 协作、实时天气与车次查询、结构化行程生成与编辑。" />
     <meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)" />

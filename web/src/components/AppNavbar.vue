@@ -48,14 +48,11 @@ onUnmounted(() => {
     <div class="nav__inner">
       <RouterLink to="/" class="brand" @click="close">
         <span class="brand__mark" aria-hidden="true">
-          <svg viewBox="0 0 32 32" fill="none">
-            <circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="2.4" />
-            <path
-              d="M16 4.5 L18.8 13.2 L27.5 16 L18.8 18.8 L16 27.5 L13.2 18.8 L4.5 16 L13.2 13.2 Z"
-              fill="currentColor"
-            />
-            <circle cx="16" cy="16" r="2.2" fill="#fff" />
-          </svg>
+          <!-- 位图 logo：白底彩图，故用白色圆角方块作底。
+               为什么不是原来的蓝色渐变方块：这张 logo 是「白底 + 极浅粉彩图形」，
+               图形与背景亮度只差约 29 级。放在饱和彩色底上图形会与背景融为一体。
+               用白色容器反而让它在浅色系界面里干净、不割裂。 -->
+          <img src="/voyage-mark.png" alt="" />
         </span>
         <span class="brand__text">Voyage <em>AI</em></span>
       </RouterLink>
@@ -158,17 +155,30 @@ onUnmounted(() => {
 
 .brand { display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
+/* 品牌标记：白色圆角方块 + logo。
+   底色用白而非渐变，原因见模板注释——这张 logo 的图形本身极浅，
+   放在饱和彩色底上会看不清。浅色界面里白方块也更干净。 */
 .brand__mark {
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  background: var(--grad);
-  color: #fff;
+  background: #fff;
+  border: 1px solid var(--border);
   display: grid;
   place-items: center;
-  box-shadow: 0 6px 16px var(--glow);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1);
+  overflow: hidden;
 }
-.brand__mark svg { width: 21px; height: 21px; }
+.brand__mark img {
+  width: 100%;
+  height: 100%;
+  /* object-fit: cover + 放大：源图标为了给 favicon 留边距，白边较多
+     （内容只占 78%）。直接放满会让图形显得偏小、视觉重量轻于原来的图标，
+     故按 34px 方块的观感放大到 118%。 */
+  object-fit: cover;
+  transform: scale(1.18);
+  display: block;
+}
 
 .brand__text {
   font-family: var(--font-display);
