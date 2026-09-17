@@ -20,10 +20,6 @@ export async function listConversations(): Promise<Conversation[]> {
   return data.conversations ?? []
 }
 
-export async function getMessages(conversationId: string): Promise<unknown[]> {
-  return http.get(`/conversations/${conversationId}/messages`)
-}
-
 /** 历史消息里 assistant 的 tool_calls：后端已收敛为只留工具名 */
 export interface MessageToolCall {
   name: string
@@ -57,6 +53,18 @@ export async function getMessagesPage(
   return (await http.get(`/conversations/${conversationId}/messages`, {
     params: limit ? { limit } : {}
   })) as unknown as MessagesPage
+}
+
+/**
+ * 获取全部历史消息（不分页）。
+ *
+ * 注意返回的是分页对象而非裸数组——后端在引入分页时把响应从数组改成了
+ * 这个结构，而此处原先的类型标注仍是 `unknown[]`，与真实响应不符：
+ * 调用方按数组遍历就会抛 "raw is not iterable"，整条历史都渲染不出来。
+ * 类型已修正，实现也统一走 getMessagesPage，避免两处形状不一致。
+ */
+export async function getMessages(conversationId: string): Promise<MessagesPage> {
+  return getMessagesPage(conversationId)
 }
 
 export async function renameConversation(conversationId: string, title: string): Promise<void> {

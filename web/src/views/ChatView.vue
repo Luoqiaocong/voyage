@@ -8,13 +8,14 @@ import type { ToolStep } from '@/types/tool'
 import {
   createConversation,
   deleteConversations,
-  getMessages,
+  getMessagesPage,
   listConversations,
   renameConversation,
   streamChat,
   toolLabel,
   type ChatMessage,
-  type Conversation
+  type Conversation,
+  type MessagesPage
 } from '@/api/conversation'
 import { extractItinerary } from '@/api/itinerary'
 import { useUiStore } from '@/stores/ui'
@@ -28,6 +29,9 @@ interface RdMsg extends ChatMessage {
   reasoning?: string
 }
 
+/** 打开会话时默认加载的历史轮次（一轮 = 一条用户消息及其后的回复） */
+const HISTORY_ROUNDS = 30
+
 const router = useRouter()
 const ui = useUiStore()
 const user = useUserStore()
@@ -35,6 +39,8 @@ const user = useUserStore()
 const conversations = ref<Conversation[]>([])
 const activeId = ref<string | null>(null)
 const messages = ref<RdMsg[]>([])
+/** 更早的历史是否被截断（后端按轮次分页），用于给出提示 */
+const historyTruncated = ref(false)
 const input = ref('')
 const loadingList = ref(false)
 const streaming = ref(false)
@@ -92,16 +98,37 @@ async function loadConversations() {
   }
 }
 
-function normalizeMessages(raw: unknown[]): RdMsg[] {
+/**
+ * 把后端返回的历史消息规整成可渲染的消息列表。
+ *
+ * 兼容两种响应形状：
+ * - 分页对象 `{ messages, total_rounds, returned_rounds, truncated }`（当前后端）
+ * - 裸数组 `[...]`（更早的后端版本）
+ *
+ * 后端在「历史消息分页」这次改动中把返回从数组改成了分页对象，
+ * 而调用方当时仍按数组遍历，导致 `for...of` 抛 "raw is not iterable"，
+ * 整条历史记录都渲染不出来。这里做形状归一，避免后端再次调整时同类问题复发。
+ */
+function normalizeMessages(payload: unknown): RdMsg[] {
+  const list: unknown[] = Array.isArray(payload)
+    ? payload
+    : Array.isArray((payload as { messages?: unknown })?.messages)
+      ? ((payload as { messages: unknown[] }).messages)
+      : []
+
   const out: RdMsg[] = []
-  for (const m of raw as Array<{ role?: string; content?: unknown }>) {
+  for (const item of list) {
+    const m = (item ?? {}) as { role?: string; content?: unknown }
     let content = m.content ?? ''
+    // content 可能是多模态数组（[{type:'text', text:'...'}]），拼成纯文本
     if (Array.isArray(content)) {
       content = content
         .map((p) => (typeof p === 'string' ? p : ((p as { text?: string })?.text ?? '')))
         .join('')
     }
     const text = String(content).trim()
+    // 跳过空内容：工具调用产生的中间态 assistant 消息没有文本，
+    // 保留会渲染成空气泡
     if (!text) continue
     out.push({
       role: m.role === 'user' ? 'user' : 'assistant',
@@ -117,8 +144,10 @@ async function openConversation(id: string) {
   messages.value = []
   resetStream()
   try {
-    const raw = await getMessages(id)
-    messages.value = normalizeMessages(raw as unknown[])
+    // 用带 limit 的分页版本：长会话不必一次拉全量，减少首屏等待
+    const page = (await getMessagesPage(id, HISTORY_ROUNDS)) as MessagesPage
+    messages.value = normalizeMessages(page)
+    historyTruncated.value = page.truncated
   } catch (e: any) {
     ui.toast(e?.message ?? '历史消息加载失败', 'error')
   }
@@ -434,6 +463,10 @@ watch(streaming, (v) => {
           <!-- 消息区 -->
           <div ref="scrollEl" class="chat-scroll">
             <div class="chat-stream">
+              <!-- 历史被截断时的提示：后端按轮次分页，更早的内容不在此次响应里 -->
+              <p v-if="historyTruncated" class="chat-truncated">
+                仅显示最近 {{ HISTORY_ROUNDS }} 轮对话
+              </p>
               <div
                 v-for="(msg, i) in renderedMessages"
                 :key="i"
@@ -749,6 +782,26 @@ watch(streaming, (v) => {
 }
 
 .chat-stream { max-width: 820px; margin-inline: auto; display: flex; flex-direction: column; gap: 22px; }
+
+/* 历史截断提示：居中细字，不抢消息的视觉重心 */
+.chat-truncated {
+  text-align: center;
+  font-size: 0.76rem;
+  color: var(--text3);
+  padding: 2px 0 6px;
+  position: relative;
+}
+.chat-truncated::before,
+.chat-truncated::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 42px;
+  height: 1px;
+  background: var(--hairline);
+}
+.chat-truncated::before { left: calc(50% - 110px); }
+.chat-truncated::after { right: calc(50% - 110px); }
 
 .msg { display: flex; gap: 10px; align-items: flex-start; }
 .msg--user { flex-direction: row-reverse; }
