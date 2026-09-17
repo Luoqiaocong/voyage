@@ -608,11 +608,8 @@ watch(streaming, (v) => {
             我的会话
           </button>
           <div class="chat-empty__logo" aria-hidden="true">
-            <svg viewBox="0 0 32 32" fill="none">
-              <circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="2.4" />
-              <path d="M16 4.5 L18.8 13.2 L27.5 16 L18.8 18.8 L16 27.5 L13.2 18.8 L4.5 16 L13.2 13.2 Z" fill="currentColor" />
-              <circle cx="16" cy="16" r="2.2" fill="var(--panel)" />
-            </svg>
+            <!-- 改用新图标（voyage-mark-2），与登录页保持一致 -->
+            <img src="/voyage-mark-2.png" alt="" />
           </div>
           <h2>{{ PAGE_COPY.chatEmptyTitle }}</h2>
           <p>{{ PAGE_COPY.chatEmptyDesc }}</p>
@@ -688,12 +685,9 @@ watch(streaming, (v) => {
                 class="msg"
                 :class="`msg--${msg.role}`"
               >
-                <!-- 助手头像 -->
+                <!-- 助手头像：改用新图标，与登录页的品牌形象统一 -->
                 <span v-if="msg.role === 'assistant'" class="msg__avatar" aria-hidden="true">
-                  <svg viewBox="0 0 32 32" fill="none">
-                    <circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="2.6" />
-                    <path d="M16 4.5 L18.8 13.2 L27.5 16 L18.8 18.8 L16 27.5 L13.2 18.8 L4.5 16 L13.2 13.2 Z" fill="currentColor" />
-                  </svg>
+                  <img src="/voyage-mark-2.png" alt="" />
                 </span>
 
                 <div class="msg__col">
@@ -748,10 +742,7 @@ watch(streaming, (v) => {
               <!-- 首字等待：三点 -->
               <div v-if="thinking" class="msg msg--assistant">
                 <span class="msg__avatar" aria-hidden="true">
-                  <svg viewBox="0 0 32 32" fill="none">
-                    <circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="2.6" />
-                    <path d="M16 4.5 L18.8 13.2 L27.5 16 L18.8 18.8 L16 27.5 L13.2 18.8 L4.5 16 L13.2 13.2 Z" fill="currentColor" />
-                  </svg>
+                  <img src="/voyage-mark-2.png" alt="" />
                 </span>
                 <div class="msg__col">
                   <div class="typing" aria-label="AI 正在生成">
@@ -1041,14 +1032,16 @@ watch(streaming, (v) => {
 .chat-empty__logo {
   width: 64px;
   height: 64px;
-  color: #fff;
   display: grid;
   place-items: center;
   border-radius: 18px;
-  background: var(--grad);
-  box-shadow: 0 12px 30px var(--glow);
+  /* 去掉渐变底：新图标本身是完整方形图，再套一层渐变会变成「渐变框套方块」 */
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
 }
-.chat-empty__logo svg { width: 38px; height: 38px; }
+.chat-empty__logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .chat-empty h2 { font-size: 1.45rem; }
 .chat-empty p { color: var(--text2); max-width: 30em; font-size: 0.9rem; }
 
@@ -1213,15 +1206,16 @@ watch(streaming, (v) => {
   width: 30px;
   height: 30px;
   border-radius: 9px;
-  background: var(--grad);
-  color: #fff;
+  /* 同 chat-empty__logo：图标自带完整方形底，故容器不再叠渐变 */
+  background: var(--panel);
+  border: 1px solid var(--border);
   display: grid;
   place-items: center;
   flex-shrink: 0;
   margin-top: 2px;
-  box-shadow: 0 4px 12px var(--glow);
+  overflow: hidden;
 }
-.msg__avatar svg { width: 18px; height: 18px; }
+.msg__avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 .msg__col { display: flex; flex-direction: column; gap: 8px; min-width: 0; max-width: min(680px, 88%); }
 .msg--user .msg__col { align-items: flex-end; max-width: min(600px, 84%); }

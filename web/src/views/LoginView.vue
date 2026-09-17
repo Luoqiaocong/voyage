@@ -324,11 +324,11 @@ function handleThirdParty() {
 
       <!-- 品牌落款 -->
       <RouterLink to="/" class="auth__brand" @click.stop>
+        <!-- 改用新图标（voyage-mark-2）。
+             它本身是完整方形图，故容器不再套蓝色渐变底——
+             否则会变成「渐变框套方块」，两层底色互相打架。 -->
         <span class="auth__brand-mark">
-          <svg viewBox="0 0 32 32" fill="none">
-            <circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="2.4" />
-            <path d="M16 4.5 L18.8 13.2 L27.5 16 L18.8 18.8 L16 27.5 L13.2 18.8 L4.5 16 L13.2 13.2 Z" fill="currentColor" />
-          </svg>
+          <img src="/voyage-mark-2.png" alt="" />
         </span>
         <span class="auth__brand-text">Voyage <em>AI</em></span>
       </RouterLink>
@@ -719,8 +719,15 @@ function handleThirdParty() {
   backdrop-filter: blur(10px);
   color: var(--blue-700);
   box-shadow: var(--shadow-sm);
+  overflow: hidden;
 }
-.auth__brand-mark svg { width: 22px; height: 22px; }
+/* 新图标是完整方形图，直接铺满容器；容器本身也是圆角白底，两者衔接自然 */
+.auth__brand-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 
 .auth__brand-text {
   font-family: var(--font-display);
