@@ -424,16 +424,16 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 右侧：实时行程卡片 -->
+        <!-- 右侧：示例行程卡片。
+             内容是静态示例（车次与票价均为写死的示范数据），
+             故这里必须标「示例」而不是「实时」——标成实时会让用户
+             以为这是此刻查到的真实车次，属于误导。 -->
         <div class="hero__art" style="--d: 180ms">
           <div class="hero__card">
             <div class="hero__card-head">
               <TravelIcon name="map" :size="16" />
               <span>广州 → 北京</span>
-              <span class="hero__card-chip">
-                <i class="pulse"></i>
-                实时
-              </span>
+              <span class="hero__card-chip">示例</span>
             </div>
             <div class="hero__card-route">
               <span class="hero__card-city">
@@ -465,7 +465,7 @@ onUnmounted(() => {
               </div>
             </div>
             <div class="hero__card-bar"><i></i></div>
-            <p class="hero__card-foot">行程生成中 · 已核对 2 项实时数据</p>
+            <p class="hero__card-foot">示例行程 · 实际车次与票价以对话中查询结果为准</p>
           </div>
         </div>
       </div>
@@ -680,7 +680,7 @@ onUnmounted(() => {
             </button>
           </div>
 
-          <!-- 右侧实时预览：随选中步骤切换内容，避免大片留白 -->
+          <!-- 右侧预览：静态示意，随选中步骤切换内容，避免大片留白 -->
           <div class="flow__preview rv">
             <!-- 步骤 1：用户输入 -->
             <div v-if="activeStep === 0" class="pv">
@@ -695,7 +695,7 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <!-- 步骤 2：实时数据核对 -->
+            <!-- 步骤 2：数据核对（静态示意） -->
             <div v-else-if="activeStep === 1" class="pv">
               <p class="pv-label">Step 02 · 我查</p>
               <ul class="pv-checks">
@@ -712,7 +712,9 @@ onUnmounted(() => {
                   <b>住宿</b><span>市中心两晚，含早 ¥1160</span>
                 </li>
               </ul>
-              <p class="pv-foot">以上均为实时查询结果，不是模型编造</p>
+              <!-- 这里说的是「产品在对话中会怎么做」，不是指上方卡片本身是实时数据。
+                   卡片是静态示意，故用「对话中」限定范围，避免读成「此刻查到的结果」。 -->
+              <p class="pv-foot">对话中的车次与天气均来自实时查询，不是模型编造</p>
             </div>
 
             <!-- 步骤 3：行程成稿 -->
@@ -752,7 +754,6 @@ onUnmounted(() => {
             开启旅程
             <TravelIcon name="arrow-right" :size="17" />
           </RouterLink>
-          <p class="cta__note">免费使用 · 无需信用卡</p>
         </div>
       </div>
     </section>
@@ -900,7 +901,7 @@ onUnmounted(() => {
 .chip-say:hover .chip-say__go { opacity: 1; transform: none; }
 .chip-say:active { transform: translateY(0); }
 
-/* ---------- 右侧实时卡片 ---------- */
+/* ---------- 右侧示例卡片 ---------- */
 .hero__art { position: relative; }
 .hero__card {
   position: relative;
@@ -931,27 +932,18 @@ onUnmounted(() => {
 }
 .hero__card-head :deep(svg) { color: var(--prim); }
 
+/* 「示例」徽标：用中性的暖金点缀而非绿色——
+   绿色传达「在线 / 正常」，用在「这是示例数据」上语义不对 */
 .hero__card-chip {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   font-size: 0.7rem;
   font-weight: 600;
-  color: var(--success);
-  background: rgba(72, 187, 120, 0.12);
+  color: var(--gold-600);
+  background: var(--gold-soft);
   padding: 3px 9px;
   border-radius: 999px;
-}
-/* 呼吸点：传达「数据在跳动」的感觉，比静态徽标更可信 */
-.pulse {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--success);
-  animation: pulseDot 1.8s ease-in-out infinite;
-}
-@keyframes pulseDot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.45; transform: scale(0.8); }
 }
 
 .hero__card-route {
@@ -1666,7 +1658,6 @@ onUnmounted(() => {
   line-height: 1.75;
 }
 .cta__btn { margin-top: 30px; }
-.cta__note { margin-top: 16px; font-size: 0.78rem; color: var(--text3); }
 
 /* ==================== 响应式 ==================== */
 @media (max-width: 1024px) {
