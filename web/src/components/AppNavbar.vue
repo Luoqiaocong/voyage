@@ -48,17 +48,15 @@ onUnmounted(() => {
     <div class="nav__inner">
       <RouterLink to="/" class="brand" @click="close">
         <span class="brand__mark" aria-hidden="true">
-          <!-- Logo 用 logo-128.png（128x128，27.8 KB）。
-               为什么不用 voyage-mark-2.png：那是 512x512 / 207.9 KB，
-               而导航栏只显示 34px（3 倍屏需 102px），为它下载两百多 KB 不成比例。
-               为什么它四周没有空白：实测各文件「内容占画布比例」——
-                 logo-128.png        100% / 100%  ← 铺满，无留白
-                 voyage-mark-2.png   100% / 100%  ← 同样铺满，但体积大 7 倍
-                 apple-touch-icon.png 82% /  91%  ← 有留白，34px 下显得偏小
-                 voyage-mark.jpeg     78% /  57%  ← 留白最多
-               logo-128 由 voyage-mark-2.jpg 裁方形后直接缩放，未加内边距，
-               故内容撑满整个画布。 -->
-          <img src="/logo-128.png" alt="" />
+          <!-- 站点图标组的 voyage-mark-128.png（128x128，15.5 KB）。
+               资源分工：apple-touch-icon / favicon-32 / voyage-mark 三件套
+               由 voyage-mark.jpeg 扩展而来，用于站点与导航栏；
+               voyage-mark-2.* 专供对话页与登录页。
+               此版内边距仅 1.5%/边，内容占画布 88%/97%——
+               横向做不到 100% 是因为源内容本身是 646x713 的竖形，
+               塞进正方形只能横向多留一点（要铺满就得裁掉内容）。
+               34px 显示、3 倍屏需 102px，128 足够且体积只有 15.5 KB。 -->
+          <img src="/voyage-mark-128.png" alt="" />
         </span>
         <span class="brand__text">Voyage <em>AI</em></span>
       </RouterLink>

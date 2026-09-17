@@ -686,10 +686,11 @@ watch(streaming, (v) => {
                 class="msg"
                 :class="`msg--${msg.role}`"
               >
-                <!-- 助手头像：用 logo-128（30px 显示，3 倍屏需 90px）
-                     logo-128 的内容是铺满画布的，故头像里不会被留白缩掉一圈 -->
+                <!-- 助手头像：用站点图标组的 voyage-mark-128
+                     （30px 显示，3 倍屏需 90px；内边距仅 1.5%/边，
+                      在 30px 方块里不会被空白缩掉一圈） -->
                 <span v-if="msg.role === 'assistant'" class="msg__avatar" aria-hidden="true">
-                  <img src="/logo-128.png" alt="" />
+                  <img src="/voyage-mark-128.png" alt="" />
                 </span>
 
                 <div class="msg__col">
@@ -744,7 +745,7 @@ watch(streaming, (v) => {
               <!-- 首字等待：三点 -->
               <div v-if="thinking" class="msg msg--assistant">
                 <span class="msg__avatar" aria-hidden="true">
-                  <img src="/logo-128.png" alt="" />
+                  <img src="/voyage-mark-128.png" alt="" />
                 </span>
                 <div class="msg__col">
                   <div class="typing" aria-label="AI 正在生成">

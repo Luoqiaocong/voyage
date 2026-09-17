@@ -324,11 +324,13 @@ function handleThirdParty() {
 
       <!-- 品牌落款 -->
       <RouterLink to="/" class="auth__brand" @click.stop>
-        <!-- 改用新图标（logo-128）。
-             与导航栏同源，都是「内容铺满画布」的方形版本，无四周留白。
-             这里显示 36px（3 倍屏需 108px），128 足够。 -->
+        <!-- 登录页属 voyage-mark-2 系列（该系列专供登录页与对话页）。
+             voyage-mark-2-128.png 是由该系列源图裁好的 128x128 版本：
+             内容铺满画布无留白，体积 27.8 KB。
+             这里显示 36px（3 倍屏需 108px），128 足够；
+             若直接引 512 的 voyage-mark-2.png 要下 207.9 KB，不成比例。 -->
         <span class="auth__brand-mark">
-          <img src="/logo-128.png" alt="" />
+          <img src="/voyage-mark-2-128.png" alt="" />
         </span>
         <span class="auth__brand-text">Voyage <em>AI</em></span>
       </RouterLink>
