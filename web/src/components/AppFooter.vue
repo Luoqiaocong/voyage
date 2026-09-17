@@ -21,12 +21,6 @@
       </div>
 
       <p class="footer__tagline">像和资深向导聊天一样，把旅程交给 AI。</p>
-
-      <div class="footer__meta">
-        <span>Powered by Supervisor 多 Agent</span>
-        <span class="footer__dot">·</span>
-        <span>FastAPI + Vue 3</span>
-      </div>
     </div>
   </footer>
 </template>
@@ -79,10 +73,6 @@
 }
 
 .footer__tagline { color: var(--text2); font-size: 0.88rem; }
-
-.footer__meta { color: var(--text3); font-size: 0.78rem; letter-spacing: 0.04em; }
-
-.footer__dot { margin: 0 8px; opacity: 0.6; }
 
 @media (max-width: 640px) {
   .footer__tagline { display: none; }

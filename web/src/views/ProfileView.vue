@@ -1,19 +1,23 @@
 <script setup lang="ts">
 /**
- * ProfileView · 个人主页
+ * ProfileView · 我的 / 个人中心
  *
- * 布局：信息头部（头像 + 昵称 + 旅行足迹）→ 两列卡片（基本资料 / 账号安全）
- *       → 通栏长期记忆
+ * 布局（方案1：上沉浸 + 下分栏）
+ *   1. 顶部沉浸区：旅行感渐变 + 地图纹理，大头像（可点击更换）、
+ *      昵称与关键数据、两个主操作
+ *   2. 下方左右分栏：左「基本资料」，右「账号安全 + 会话与账号」
+ *   3. 通栏「我的记忆」
  *
- * 视觉：与首页、对话页统一为清爽浅色系 + 旅行蓝主色。
- * 「旅行足迹」的数据全部来自真实接口（行程数、会话数、记忆数），
- * 不使用编造的统计数字——个人主页上出现假数据最伤信任。
+ * 数据真实性：顶部的行程/对话/记忆数全部来自真实接口，
+ * 三个请求并行且各自 catch——某一个失败只影响对应数字，不让整块消失。
+ * 个人主页上出现写死的假数字最伤信任，所以宁可显示 0 也不编。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppNavbar from '@/components/AppNavbar.vue'
 import MemoryPanel from '@/components/MemoryPanel.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
+import MapTexture from '@/components/MapTexture.vue'
 import { AVATAR_BASE_URL } from '@/constants'
 import { changePassword, deleteAccount, getAvatars, logout, updateProfile } from '@/api/user'
 import { listItineraries } from '@/api/itinerary'
@@ -30,14 +34,16 @@ const avatars = ref<string[]>([])
 const username = ref('')
 const avatar = ref('')
 const savingProfile = ref(false)
-/** 资料是否存在未保存的改动，用于按钮状态与离开提醒 */
+/** 是否存在未保存改动：决定保存按钮的可用态与文案 */
 const dirty = ref(false)
+/** 头像选择弹窗 */
+const pickerOpen = ref(false)
+const loadingAvatars = ref(true)
 
 const pwdForm = reactive({ current: '', next: '', confirm: '' })
 const savingPwd = ref(false)
 const showPwd = ref(false)
 
-/** 旅行足迹：各计数独立失败，不因某一个接口出错就让整块消失 */
 const footprint = reactive({ itineraries: 0, conversations: 0, memories: 0 })
 const loadingFootprint = ref(true)
 
@@ -49,19 +55,18 @@ onMounted(async () => {
   }
   dirty.value = false
 
-  try {
-    const lib = await getAvatars()
-    avatars.value = lib.avatars
-  } catch (e: any) {
-    ui.toast(e?.message ?? '头像库加载失败', 'error')
-  }
-
-  // 三个计数并行拉取；各自 catch，避免一个失败拖垮整块
-  const [its, convs, mems] = await Promise.allSettled([
+  // 头像库与足迹数据互不依赖，并行拉取
+  const [lib, its, convs, mems] = await Promise.allSettled([
+    getAvatars(),
     listItineraries(),
     listConversations(),
     listMemories(false)
   ])
+
+  if (lib.status === 'fulfilled') avatars.value = lib.value.avatars
+  else ui.toast('头像库加载失败，可稍后重试', 'error')
+  loadingAvatars.value = false
+
   if (its.status === 'fulfilled') footprint.itineraries = its.value.length
   if (convs.status === 'fulfilled') footprint.conversations = convs.value.length
   if (mems.status === 'fulfilled') footprint.memories = mems.value.memories.length
@@ -73,12 +78,28 @@ const displayName = computed(
   () => user.userInfo?.username || user.userInfo?.email?.split('@')[0] || '旅行者'
 )
 const initial = computed(() => displayName.value.slice(0, 1).toUpperCase())
+const isAdmin = computed(() => user.userInfo?.role === 'admin')
+
+/* ---------------- 顶部数据与主操作 ---------------- */
+const heroStats = computed(() => [
+  { value: footprint.itineraries, label: '行程', to: '/itineraries' },
+  { value: footprint.conversations, label: '对话', to: '/chat' },
+  { value: footprint.memories, label: '偏好记忆', to: '' }
+])
+
+/** 新建行程：对话是唯一的生成入口，故带着一句起始语过去 */
+function newTrip() {
+  router.push({ path: '/chat', query: { example: '帮我规划一次新的旅行' } })
+}
+
+function continueChat() {
+  router.push('/chat')
+}
 
 /**
- * 密码强度评分（0–4）。
- *
- * 前端只做提示，真正校验在后端；这里不引入 zxcvbn 之类的库——
- * 一个几十行的启发式规则足以覆盖「太短 / 太单一 / 常见词」这三类主要问题。
+ * 密码强度（0–4）。
+ * 前端只做提示，真正校验在后端；不引第三方库，
+ * 一个启发式规则足以覆盖「太短 / 太单一 / 常见弱口令」三类主要问题。
  */
 const pwdStrength = computed(() => {
   const v = pwdForm.next
@@ -108,7 +129,6 @@ const pwdStrength = computed(() => {
   return { score: s, label: labels[s], hint: hints[s] }
 })
 
-/** 两次输入是否一致（只在确认框有内容时才提示，避免边打字边报错） */
 const pwdMismatch = computed(
   () => pwdForm.confirm.length > 0 && pwdForm.next !== pwdForm.confirm
 )
@@ -120,8 +140,23 @@ const canSubmitPwd = computed(
     pwdForm.next === pwdForm.confirm
 )
 
-function onProfileChange() {
+/* ---------------- 资料 ---------------- */
+function openPicker() {
+  if (loadingAvatars.value) {
+    ui.toast('头像库还在加载…', 'info')
+    return
+  }
+  if (!avatars.value.length) {
+    ui.toast('头像库暂时不可用', 'error')
+    return
+  }
+  pickerOpen.value = true
+}
+
+function chooseAvatar(name: string) {
+  avatar.value = name
   dirty.value = true
+  pickerOpen.value = false
 }
 
 async function saveProfile() {
@@ -178,7 +213,7 @@ async function handleLogout() {
   try {
     if (user.refreshToken) await logout(user.refreshToken)
   } catch {
-    /* 即使后端撤销失败也继续本地登出 */
+    /* 即使后端撤销失败也继续本地登出，否则用户被困在当前会话里 */
   }
   user.clearAuth()
   ui.toast('已退出登录', 'success')
@@ -197,12 +232,6 @@ async function handleDeleteAccount() {
     ui.toast(e?.message ?? '注销失败', 'error')
   }
 }
-
-/** 快捷入口：都用真实路由，不做点了没反应的占位 */
-const shortcuts = [
-  { to: '/itineraries', icon: 'map', label: '我的行程', desc: '查看与编辑已保存的行程' },
-  { to: '/chat', icon: 'chat', label: '继续对话', desc: '和旅行顾问接着聊' }
-]
 </script>
 
 <template>
@@ -210,55 +239,63 @@ const shortcuts = [
     <AppNavbar />
     <main id="main" tabindex="-1">
       <div class="container page">
-        <!-- ==================== 信息头部 ==================== -->
-        <section class="pf-hero">
-          <div class="pf-hero__avatar">
-            <img v-if="avatarUrl" :src="avatarUrl" alt="当前头像" />
-            <span v-else class="pf-hero__initial">{{ initial }}</span>
-          </div>
+        <!-- ==================== 1. 顶部沉浸区 ==================== -->
+        <section class="hero-card">
+          <MapTexture class="hero-card__map" routes />
 
-          <div class="pf-hero__info">
-            <h1 class="pf-hero__name">
-              {{ displayName }}
-              <span v-if="user.userInfo?.role === 'admin'" class="pf-hero__role">管理员</span>
-            </h1>
-            <p class="pf-hero__email">{{ user.userInfo?.email ?? '—' }}</p>
-
-            <!-- 旅行足迹：全部来自真实接口 -->
-            <div class="pf-fp" :class="{ 'is-loading': loadingFootprint }">
-              <div class="pf-fp__item">
-                <TravelIcon name="map" :size="15" />
-                <b>{{ loadingFootprint ? '—' : footprint.itineraries }}</b>
-                <span>份行程</span>
-              </div>
-              <div class="pf-fp__item">
-                <TravelIcon name="chat" :size="15" />
-                <b>{{ loadingFootprint ? '—' : footprint.conversations }}</b>
-                <span>次对话</span>
-              </div>
-              <div class="pf-fp__item">
-                <TravelIcon name="spark" :size="15" />
-                <b>{{ loadingFootprint ? '—' : footprint.memories }}</b>
-                <span>条偏好记忆</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="pf-hero__nav">
-            <RouterLink v-for="s in shortcuts" :key="s.to" :to="s.to" class="pf-shortcut">
-              <TravelIcon :name="s.icon" :size="17" />
-              <span class="pf-shortcut__body">
-                <b>{{ s.label }}</b>
-                <i>{{ s.desc }}</i>
+          <div class="hero-card__inner">
+            <!-- 大头像：点击更换 -->
+            <button
+              class="hero-avatar"
+              type="button"
+              :aria-label="avatarUrl ? '更换头像' : '选择头像'"
+              @click="openPicker"
+            >
+              <img v-if="avatarUrl" :src="avatarUrl" alt="当前头像" />
+              <span v-else class="hero-avatar__initial">{{ initial }}</span>
+              <span class="hero-avatar__edit" aria-hidden="true">
+                <TravelIcon name="camera" :size="15" />
               </span>
-              <TravelIcon name="arrow-right" :size="14" />
-            </RouterLink>
+            </button>
+
+            <div class="hero-body">
+              <h1 class="hero-name">
+                {{ displayName }}
+                <span v-if="isAdmin" class="hero-role">管理员</span>
+              </h1>
+              <p class="hero-email">{{ user.userInfo?.email ?? '—' }}</p>
+
+              <!-- 关键数据：可点进对应页面 -->
+              <ul class="hero-stats" :class="{ 'is-loading': loadingFootprint }">
+                <li v-for="s in heroStats" :key="s.label">
+                  <component
+                    :is="s.to ? 'RouterLink' : 'div'"
+                    :to="s.to || undefined"
+                    class="hero-stat"
+                  >
+                    <b>{{ loadingFootprint ? '—' : s.value }}</b>
+                    <span>{{ s.label }}</span>
+                  </component>
+                </li>
+              </ul>
+            </div>
+
+            <div class="hero-cta">
+              <button class="btn btn-primary" @click="continueChat">
+                <TravelIcon name="chat" :size="16" />
+                继续对话
+              </button>
+              <button class="btn btn-ghost" @click="newTrip">
+                <TravelIcon name="plane" :size="16" />
+                新建行程
+              </button>
+            </div>
           </div>
         </section>
 
-        <!-- ==================== 两列卡片 ==================== -->
+        <!-- ==================== 2. 下方左右分栏 ==================== -->
         <div class="pf-grid">
-          <!-- ---------- 基本资料 ---------- -->
+          <!-- ---------- 左：基本资料 ---------- -->
           <section class="card pf-card">
             <header class="pf-card__head">
               <h2 class="pf-title">基本资料</h2>
@@ -273,7 +310,7 @@ const shortcuts = [
                 class="input"
                 maxlength="10"
                 placeholder="2-10 个字符"
-                @input="onProfileChange"
+                @input="dirty = true"
               />
               <p class="pf-counter">{{ username.length }} / 10</p>
             </div>
@@ -281,27 +318,23 @@ const shortcuts = [
             <div class="field">
               <label for="pf-email">邮箱</label>
               <input id="pf-email" class="input" :value="user.userInfo?.email ?? ''" disabled />
-              <p class="pf-tip">邮箱作为账号标识，暂不支持修改</p>
+              <p class="pf-tip">邮箱是账号标识，暂不支持修改</p>
             </div>
 
-            <div v-if="avatars.length" class="field">
-              <label>选择头像</label>
-              <div class="pf-avatar-grid">
-                <button
-                  v-for="a in avatars"
-                  :key="a"
-                  class="pf-avatar-opt"
-                  :class="{ 'pf-avatar-opt--active': a === avatar }"
-                  :aria-label="'选择头像 ' + a"
-                  type="button"
-                  @click="avatar = a; onProfileChange()"
-                >
-                  <img :src="AVATAR_BASE_URL + a" :alt="a" loading="lazy" />
-                  <span v-if="a === avatar" class="pf-avatar-opt__check" aria-hidden="true">
-                    <TravelIcon name="check" :size="12" />
-                  </span>
-                </button>
-              </div>
+            <!-- 头像选择：顶部可点，这里也留一个入口，不必非得回到顶部 -->
+            <div class="field">
+              <label>头像</label>
+              <button class="avatar-trigger" type="button" @click="openPicker">
+                <img v-if="avatarUrl" :src="avatarUrl" alt="" class="avatar-trigger__img" />
+                <span v-else class="avatar-trigger__img avatar-trigger__img--empty">
+                  {{ initial }}
+                </span>
+                <span class="avatar-trigger__text">
+                  <b>更换头像</b>
+                  <i>{{ loadingAvatars ? '正在加载头像库…' : `共 ${avatars.length} 款可选` }}</i>
+                </span>
+                <TravelIcon name="arrow-right" :size="15" />
+              </button>
             </div>
 
             <div class="pf-actions">
@@ -316,7 +349,7 @@ const shortcuts = [
             </div>
           </section>
 
-          <!-- ---------- 账号安全 ---------- -->
+          <!-- ---------- 右：账号安全 + 会话与账号 ---------- -->
           <section class="card pf-card">
             <header class="pf-card__head">
               <h2 class="pf-title">账号安全</h2>
@@ -366,7 +399,9 @@ const shortcuts = [
                     :class="[`lv-${pwdStrength.score}`, { on: n <= pwdStrength.score }]"
                   ></i>
                 </span>
-                <span class="pf-strength__text">{{ pwdStrength.label }} · {{ pwdStrength.hint }}</span>
+                <span class="pf-strength__text">
+                  {{ pwdStrength.label }} · {{ pwdStrength.hint }}
+                </span>
               </div>
             </div>
 
@@ -384,7 +419,7 @@ const shortcuts = [
               <p v-if="pwdMismatch" class="pf-error">两次输入的新密码不一致</p>
             </div>
 
-            <!-- 提示做得显眼但不吓人：用信息色而非警告色 -->
+            <!-- 提示显眼但不吓人：用信息色而非警告色 -->
             <p class="pf-notice">
               <TravelIcon name="shield" :size="15" />
               修改密码后，所有设备都会退出登录，需要用新密码重新登录。
@@ -402,63 +437,107 @@ const shortcuts = [
               退出登录
             </button>
             <p class="pf-tip pf-tip--center">退出后本地会清除登录凭证</p>
+
             <button class="btn btn-danger btn--block pf-danger" @click="handleDeleteAccount">
+              <TravelIcon name="alert" :size="15" />
               注销账号
             </button>
             <p class="pf-tip pf-tip--center">注销将永久删除全部会话与行程，无法恢复</p>
           </section>
         </div>
 
-        <!-- ==================== 长期记忆（通栏）==================== -->
+        <!-- ==================== 3. 通栏：我的记忆 ==================== -->
         <div class="pf-memory">
           <MemoryPanel />
         </div>
       </div>
     </main>
+
+    <!-- ==================== 头像选择弹窗 ==================== -->
+    <div v-if="pickerOpen" class="picker" @click.self="pickerOpen = false">
+      <div class="picker__panel" role="dialog" aria-label="选择头像">
+        <header class="picker__head">
+          <h3>选择头像</h3>
+          <button class="picker__close" aria-label="关闭" @click="pickerOpen = false">×</button>
+        </header>
+        <p class="picker__hint">选好后记得点「保存资料」，否则不会生效</p>
+
+        <div class="picker__grid">
+          <button
+            v-for="a in avatars"
+            :key="a"
+            class="picker__opt"
+            :class="{ 'picker__opt--active': a === avatar }"
+            :aria-label="`选择头像 ${a}`"
+            type="button"
+            @click="chooseAvatar(a)"
+          >
+            <img :src="AVATAR_BASE_URL + a" :alt="a" loading="lazy" />
+            <span v-if="a === avatar" class="picker__check" aria-hidden="true">
+              <TravelIcon name="check" :size="12" />
+            </span>
+          </button>
+        </div>
+
+        <footer class="picker__foot">
+          <button class="btn btn-ghost btn--sm" @click="pickerOpen = false">取消</button>
+          <button class="btn btn-primary btn--sm" @click="pickerOpen = false">完成</button>
+        </footer>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-/* ==================== 信息头部 ==================== */
-.pf-hero {
+/* ==================== 1. 顶部沉浸区 ==================== */
+.hero-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--r-l);
+  padding: 30px 32px;
+  margin-bottom: 22px;
+  /* 浅色旅行感渐变：冷雾蓝到白，不走高饱和 */
+  background: linear-gradient(135deg, #eef4ff 0%, #f7f9fc 46%, #f0f9ff 100%);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+.hero-card__map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--blue-600);
+  opacity: 0.85;
+  mask-image: radial-gradient(ellipse 70% 120% at 88% 10%, #000 6%, transparent 68%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 120% at 88% 10%, #000 6%, transparent 68%);
+}
+
+.hero-card__inner {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 26px;
-  padding: 26px 28px;
-  margin-bottom: 22px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-l);
-  box-shadow: var(--shadow-sm);
-  position: relative;
-  overflow: hidden;
-}
-/* 右上角一层极淡的蓝晕，让头部区块不至于太平 */
-.pf-hero::after {
-  content: '';
-  position: absolute;
-  top: -80px;
-  right: -60px;
-  width: 260px;
-  height: 200px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(37, 99, 235, 0.1), transparent 70%);
-  pointer-events: none;
+  gap: 24px;
 }
 
-.pf-hero__avatar {
+/* ---- 大头像（可点击更换）---- */
+.hero-avatar {
   position: relative;
-  width: 96px;
-  height: 96px;
+  width: 104px;
+  height: 104px;
   border-radius: 50%;
-  flex-shrink: 0;
   padding: 3px;
   background: var(--grad);
-  box-shadow: 0 10px 26px var(--glow);
+  box-shadow: 0 12px 30px var(--glow);
+  flex-shrink: 0;
+  transition: transform 0.24s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
-.pf-hero__avatar img,
-.pf-hero__initial {
+.hero-avatar:hover { transform: translateY(-2px) scale(1.02); }
+.hero-avatar:active { transform: scale(0.99); }
+
+.hero-avatar img,
+.hero-avatar__initial {
   width: 100%;
   height: 100%;
   border-radius: 50%;
@@ -467,21 +546,37 @@ const shortcuts = [
   place-items: center;
   background: var(--panel);
   font-family: var(--font-display);
-  font-size: 2.3rem;
+  font-size: 2.5rem;
   font-weight: 800;
   color: var(--prim);
 }
 
-.pf-hero__info { min-width: 0; }
-.pf-hero__name {
+/* 相机角标：暗示头像可点 */
+.hero-avatar__edit {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--panel);
+  color: var(--prim);
+  border: 2px solid var(--panel);
+  box-shadow: var(--shadow-sm);
+}
+
+.hero-body { min-width: 0; }
+.hero-name {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 1.45rem;
+  font-size: 1.5rem;
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.022em;
 }
-.pf-hero__role {
+.hero-role {
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -490,76 +585,58 @@ const shortcuts = [
   background: var(--grad);
   color: #fff;
 }
-.pf-hero__email {
+.hero-email {
   margin-top: 5px;
-  font-size: 0.86rem;
+  font-size: 0.85rem;
   color: var(--text3);
   font-family: var(--mono);
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* 旅行足迹 */
-.pf-fp { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
-.pf-fp__item {
-  display: inline-flex;
+.hero-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+  list-style: none;
+  padding: 0;
+}
+.hero-stat {
+  display: flex;
   align-items: baseline;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 7px 14px;
   border-radius: 999px;
-  background: var(--panel2);
+  background: rgba(255, 255, 255, 0.78);
   border: 1px solid var(--hairline);
-  font-size: 0.78rem;
-  color: var(--text3);
+  backdrop-filter: blur(6px);
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
 }
-.pf-fp__item :deep(svg) { color: var(--prim); align-self: center; }
-.pf-fp__item b {
+a.hero-stat:hover {
+  transform: translateY(-1px);
+  border-color: var(--blue-300);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.12);
+}
+.hero-stat b {
   font-family: var(--font-display);
-  font-size: 0.98rem;
+  font-size: 1.05rem;
   font-weight: 800;
   color: var(--text);
 }
-.pf-fp.is-loading .pf-fp__item b { color: var(--text3); }
+.hero-stat span { font-size: 0.76rem; color: var(--text2); }
+.hero-stats.is-loading .hero-stat b { color: var(--text3); }
 
-/* 快捷入口 */
-.pf-hero__nav { display: flex; flex-direction: column; gap: 8px; position: relative; z-index: 1; }
-.pf-shortcut {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  min-width: 208px;
-  padding: 11px 14px;
-  border-radius: var(--r-s);
-  border: 1px solid var(--border);
-  background: var(--panel);
-  transition: transform 0.22s, border-color 0.22s, box-shadow 0.22s;
-}
-.pf-shortcut > :deep(svg:first-child) { color: var(--prim); flex-shrink: 0; }
-.pf-shortcut > :deep(svg:last-child) { color: var(--text3); margin-left: auto; flex-shrink: 0; }
-.pf-shortcut__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.pf-shortcut__body b { font-size: 0.85rem; font-weight: 650; }
-.pf-shortcut__body i {
-  font-style: normal;
-  font-size: 0.72rem;
-  color: var(--text3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.pf-shortcut:hover {
-  transform: translateY(-2px);
-  border-color: var(--blue-300);
-  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.12);
-}
+.hero-cta { display: flex; flex-direction: column; gap: 9px; flex-shrink: 0; }
+.hero-cta .btn { justify-content: center; white-space: nowrap; }
 
-/* ==================== 两列卡片 ==================== */
+/* ==================== 2. 左右分栏 ==================== */
 .pf-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 22px;
   align-items: start;
 }
-
 .pf-card { padding: 26px 28px; display: flex; flex-direction: column; gap: 16px; }
 
 .pf-card__head {
@@ -585,44 +662,47 @@ const shortcuts = [
 .pf-error { font-size: 0.75rem; color: var(--danger); }
 .pf-danger { margin-top: 12px; }
 
-/* ---- 头像选择 ---- */
-.pf-avatar-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
-  gap: 10px;
-  max-height: 210px;
-  overflow-y: auto;
-  padding: 2px;
+/* ---- 头像触发条 ---- */
+.avatar-trigger {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: var(--r-s);
+  border: 1px solid var(--border);
+  background: var(--panel);
+  text-align: left;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
 }
-.pf-avatar-opt {
-  position: relative;
-  border: 2px solid transparent;
-  border-radius: 12px;
-  padding: 0;
-  overflow: hidden;
-  background: var(--surface-soft);
-  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+.avatar-trigger:hover {
+  border-color: var(--blue-300);
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.1);
+  transform: translateY(-1px);
 }
-.pf-avatar-opt img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
-.pf-avatar-opt:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); }
-.pf-avatar-opt--active {
-  border-color: var(--prim);
-  box-shadow: 0 0 0 3px var(--primary-soft);
-}
-/* 选中角标：光靠描边在缩略图上不够醒目 */
-.pf-avatar-opt__check {
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 18px;
-  height: 18px;
+.avatar-trigger__img {
+  width: 46px;
+  height: 46px;
   border-radius: 50%;
-  background: var(--grad);
-  color: #fff;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 2px solid var(--blue-100);
+}
+.avatar-trigger__img--empty {
   display: grid;
   place-items: center;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.28);
+  background: var(--primary-soft);
+  color: var(--prim);
+  font-weight: 700;
 }
+.avatar-trigger__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.avatar-trigger__text b { font-size: 0.87rem; font-weight: 650; }
+.avatar-trigger__text i {
+  font-style: normal;
+  font-size: 0.74rem;
+  color: var(--text3);
+}
+.avatar-trigger > :deep(svg) { margin-left: auto; color: var(--text3); flex-shrink: 0; }
 
 .pf-actions { display: flex; gap: 10px; align-items: center; margin-top: auto; }
 
@@ -659,7 +739,6 @@ const shortcuts = [
 .pf-strength__bars i.on.lv-4 { background: var(--success); }
 .pf-strength__text { font-size: 0.73rem; color: var(--text3); }
 
-/* 提示条：信息色而非警告色——这件事是正常的，不该让用户紧张 */
 .pf-notice {
   display: flex;
   align-items: flex-start;
@@ -678,24 +757,107 @@ const shortcuts = [
 
 .pf-memory { margin-top: 22px; }
 
+/* ==================== 头像弹窗 ==================== */
+.picker {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(2px);
+}
+.picker__panel {
+  width: min(520px, 100%);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-radius: var(--r-l);
+  padding: 22px 24px;
+  box-shadow: var(--shadow-lift);
+  animation: pickerIn 0.26s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes pickerIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .picker__panel { animation: none; }
+}
+
+.picker__head { display: flex; align-items: center; justify-content: space-between; }
+.picker__head h3 { font-size: 1.05rem; font-weight: 700; }
+.picker__close {
+  border: none;
+  background: transparent;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--text3);
+  padding: 0 4px;
+}
+.picker__close:hover { color: var(--text); }
+.picker__hint { margin-top: 6px; font-size: 0.76rem; color: var(--text3); }
+
+.picker__grid {
+  margin: 16px 0;
+  padding: 2px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 10px;
+  overflow-y: auto;
+  flex: 1;
+}
+.picker__opt {
+  position: relative;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  padding: 0;
+  overflow: hidden;
+  background: var(--surface-soft);
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+.picker__opt img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+.picker__opt:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); }
+.picker__opt--active {
+  border-color: var(--prim);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+.picker__check {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--grad);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.28);
+}
+.picker__foot { display: flex; justify-content: flex-end; gap: 10px; }
+
 /* ==================== 响应式 ==================== */
 @media (max-width: 900px) {
-  /* 头部改为上下堆叠：头像与信息一行，快捷入口铺满 */
-  .pf-hero { grid-template-columns: auto minmax(0, 1fr); gap: 18px; }
-  .pf-hero__nav { grid-column: 1 / -1; flex-direction: row; }
-  .pf-shortcut { flex: 1; min-width: 0; }
+  /* 顶部改为：头像与信息一行，按钮组占满一行 */
+  .hero-card__inner { grid-template-columns: auto minmax(0, 1fr); gap: 20px; }
+  .hero-cta { grid-column: 1 / -1; flex-direction: row; }
+  .hero-cta .btn { flex: 1; }
 }
 
 @media (max-width: 760px) {
   .pf-grid { grid-template-columns: 1fr; gap: 18px; }
   .pf-card { padding: 22px 20px; }
+  .hero-card { padding: 24px 20px; }
 }
 
 @media (max-width: 560px) {
-  .pf-hero { grid-template-columns: 1fr; justify-items: center; text-align: center; padding: 22px 18px; }
-  .pf-hero__name { justify-content: center; }
-  .pf-fp { justify-content: center; }
-  .pf-hero__nav { flex-direction: column; width: 100%; }
-  .pf-shortcut { min-width: 0; }
+  .hero-card__inner { grid-template-columns: 1fr; justify-items: center; text-align: center; }
+  .hero-name { justify-content: center; }
+  .hero-stats { justify-content: center; }
+  .hero-cta { width: 100%; }
+  .picker__grid { grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); }
 }
 </style>
