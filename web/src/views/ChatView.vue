@@ -435,6 +435,14 @@ async function runTurn(text: string, echoUser: boolean) {
 
   try {
     for await (const chunk of streamChat(cid, text)) {
+      /*
+       * 事件名以 api/conversation.ts 的 SSE 解析层为准：那一层已把后端的
+       * tool_call / tool_result 归一成前端的 'tool'，并带上 label / phase /
+       * content。这里只消费归一后的类型，不要改成后端的事件名。
+       *
+       * （曾误判此处与后端事件名不匹配并改动过，实为误判：
+       *   抓原始 SSE 帧确认后端正常发出、前端解析层也正常映射。）
+       */
       if (chunk.type === 'text') {
         streamText.value += chunk.content
         scrollToBottom()
