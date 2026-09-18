@@ -86,8 +86,15 @@ onUnmounted(() => {
           </RouterLink>
         </template>
         <template v-else>
-          <RouterLink to="/login" class="btn btn-ghost btn--sm" @click="close">登录</RouterLink>
-          <RouterLink to="/login" class="btn btn-primary btn--sm" @click="close">开始规划</RouterLink>
+          <!--
+            未登录时只保留一个入口。
+            原先「登录」与「开始规划」是两个按钮、指向同一个 /login，
+            既重复又让人以为有两条不同的路。登录页本身就是唯一入口，
+            进去既可以登录也可以注册。
+          -->
+          <RouterLink to="/login" class="btn btn-primary btn--sm" @click="close">
+            开始规划
+          </RouterLink>
         </template>
       </div>
 
@@ -122,8 +129,15 @@ onUnmounted(() => {
           <RouterLink to="/chat" class="btn btn-primary btn--sm" @click="close">进入助手</RouterLink>
         </template>
         <template v-else>
-          <RouterLink to="/login" class="btn btn-ghost btn--sm" @click="close">登录</RouterLink>
-          <RouterLink to="/login" class="btn btn-primary btn--sm" @click="close">开始规划</RouterLink>
+          <!--
+            未登录时只保留一个入口。
+            原先「登录」与「开始规划」是两个按钮、指向同一个 /login，
+            既重复又让人以为有两条不同的路。登录页本身就是唯一入口，
+            进去既可以登录也可以注册。
+          -->
+          <RouterLink to="/login" class="btn btn-primary btn--sm" @click="close">
+            开始规划
+          </RouterLink>
         </template>
       </div>
     </div>
