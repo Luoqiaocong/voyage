@@ -56,9 +56,18 @@ services:
       SHARE_BASE_URL: ${SHARE_BASE_URL:-http://localhost}
       # 日志输出到文件（挂载在 data 卷里，便于排查线上问题）
       LOG_TO_FILE: "true"
+      # 数据库：默认沿用 .env 里的 DATABASE_URL（通常指向外部 PostgreSQL，
+      # 如 Neon / 自建实例）。若启用了下方可选的 postgres 服务，
+      # 把这一项改成容器内的地址即可：
+      #   DATABASE_URL: postgresql+asyncpg://voyage:voyage@postgres:5432/voyage
+      #
+      # 注意：**不配 DATABASE_URL 时后端会回退到容器内的 SQLite**
+      # （/app/data/app.db），单机演示够用，但不适合多人使用。
     volumes:
-      # SQLite（app.db + checkpoints.sqlite）与日志都在这里，必须持久化，
-      # 否则容器重建会丢掉全部用户、会话与行程数据。
+      # 这里挂载 data 目录有两个作用：
+      #   1. 日志文件（LOG_TO_FILE=true 时写在这里）
+      #   2. 未配置 DATABASE_URL 时，SQLite 回退库也在这里
+      # 配了 PostgreSQL 时，业务数据不在容器内，本卷只承载日志。
       - ./data:/app/data
     # 与 Dockerfile 里的 HEALTHCHECK 一致，此处显式声明便于阅读与调整。
     # depends_on 的 service_healthy 条件正是靠它生效。
@@ -71,6 +80,39 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    networks: [voyage]
+
+  # ------------------------------------------------------- PostgreSQL（可选）
+  # 默认**不启动**：只在你没有外部 PostgreSQL 时才需要它。
+  #
+  # 启用方式：
+  #   1. docker compose --profile with-db up -d
+  #   2. 把上面 backend 的 DATABASE_URL 指向它：
+  #        DATABASE_URL: postgresql+asyncpg://voyage:voyage@postgres:5432/voyage
+  #      （注意用服务名 postgres 而不是 localhost——容器之间走 compose 网络）
+  #
+  # 用 profile 而不是直接放开的原因：多数部署连的是外部托管 PG
+  # （如 Neon），若无条件拉起一个本地 PG，会同时存在两个数据库，
+  # 容易出现「数据写进了哪个库」的混乱。
+  postgres:
+    image: postgres:16-alpine
+    container_name: voyage-postgres
+    restart: unless-stopped
+    profiles: ["with-db"]
+    environment:
+      POSTGRES_USER: voyage
+      POSTGRES_PASSWORD: voyage
+      POSTGRES_DB: voyage
+      # 中文内容不受影响（库默认 UTF8），这里只固定排序规则便于索引行为可预期
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voyage -d voyage"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks: [voyage]
 
   # ------------------------------------------------------------------ Web
@@ -99,6 +141,9 @@ services:
 
 volumes:
   redis-data:
+    driver: local
+  # postgres 服务的持久化卷（仅在启用 with-db profile 时使用）
+  pg-data:
     driver: local
 
 networks:

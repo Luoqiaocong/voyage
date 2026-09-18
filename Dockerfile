@@ -52,8 +52,14 @@ COPY --from=builder /app/.venv /app/.venv
 COPY app/ ./app/
 COPY alembic/ ./alembic/
 COPY alembic.ini pyproject.toml uv.lock .env.example ./
+# run.py 是仓库约定的启动入口（内含事件循环处理），一并打包。
+# Linux 下 CMD 直接用 uvicorn 即可（默认就是 SelectorEventLoop），
+# 带上它可保证容器内外启动方式一致，也便于进容器手动排查。
+COPY run.py ./
 
-# 应用启动时会写这两个目录（SQLite 文件与日志），必须先建好并授权给非 root 用户
+# 日志目录必须先建好并授权给非 root 用户。
+# 注意：这里同时建 data/exports 是为了兼容「不配 DATABASE_URL 时回退 SQLite」
+# 的用法；配了 PostgreSQL 时业务数据不在容器里，该目录只放日志。
 RUN mkdir -p /app/data/exports /app/data/output/logs \
     && chown -R voyage:voyage /app
 
@@ -74,4 +80,10 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
 ENTRYPOINT ["/usr/bin/tini", "--"]
 # 先执行数据库迁移再启动服务：新部署或代码升级后表结构自动就绪。
 # 只做 upgrade 不做 downgrade——避免误操作回退掉线上数据。
+#
+# 关于直接用 uvicorn 而不经 run.py：
+# 迁移到 PostgreSQL 后会话状态由 psycopg checkpointer 持久化，而 psycopg
+# 异步模式不接受 ProactorEventLoop——Windows 上必须用 run.py 显式指定
+# SelectorEventLoop。但**本镜像是 Linux，默认就是 SelectorEventLoop**，
+# 故此处直接 uvicorn 即可，无需 run.py。（run.py 仍打进镜像以便一致启动。）
 CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"]

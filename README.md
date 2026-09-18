@@ -281,11 +281,21 @@ cp .env.example .env      # 填入真实密钥（数据库、模型 API Key、JW
 docker compose up -d --build
 ```
 
-> **数据库不在 compose 里**：默认连 `DATABASE_URL` 指向的外部 PostgreSQL
-> （如 Neon / 自建实例）。若要用容器内 PG，自行在 compose 中加一个
-> `postgres:16-alpine` 服务并把 `DATABASE_URL` 指向它。
-> 不配 `DATABASE_URL` 时后端会回退到容器内 SQLite（`/app/data` 卷），
-> 适合单机演示，但不适合多人使用。
+> **数据库**：默认连 `.env` 里 `DATABASE_URL` 指向的**外部 PostgreSQL**
+> （如 Neon / 自建实例）。若没有外部 PG，compose 里提供了可选的容器内 PG：
+>
+> ```bash
+> # 1. 启动带数据库的一组服务
+> docker compose --profile with-db up -d --build
+> # 2. 把 backend 的 DATABASE_URL 指向它（取消 docker-compose.yml 中该行注释）
+> #    DATABASE_URL: postgresql+asyncpg://voyage:voyage@postgres:5432/voyage
+> ```
+>
+> 该服务用 `profiles` 隔离，默认不启动——多数部署连的是外部托管 PG，
+> 无条件拉起本地 PG 会同时存在两个库，容易混淆「数据写进了哪个」。
+>
+> 完全不配 `DATABASE_URL` 时后端回退到容器内 SQLite（`/app/data` 卷），
+> 单机演示够用，但不适合多人使用。
 
 启动后访问 `http://<服务器地址>/`（默认 80 端口，可用 `WEB_PORT=8080` 覆盖）。
 
@@ -296,6 +306,7 @@ docker compose up -d --build
 | `redis` | `redis:7-alpine` | 限流、验证码、Refresh Token、Token 用量统计 |
 | `backend` | 本地构建 | FastAPI，**启动时自动执行 `alembic upgrade head`** |
 | `web` | 本地构建 | nginx 托管前端，并把 `/api` 反代到 backend |
+| `postgres` | `postgres:16-alpine` | **可选**（`--profile with-db`），无外部 PG 时才需要 |
 
 只有 `web` 对外暴露端口；后端与 Redis 仅在内网可达，浏览器只看到一个源，
 因此**无需配置 CORS**。
