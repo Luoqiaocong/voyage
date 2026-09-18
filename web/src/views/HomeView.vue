@@ -100,8 +100,8 @@ const heroBudget = [
   { label: '餐饮', value: 579 }
 ]
 
-/** 生成阶段文案：让「正在发生什么」可见，而不是干等 */
-const buildStages = ['正在解析出行需求', '已核对应季天气', '车次与票价已确认', '行程已生成']
+/** 生成阶段文案：用于说明这张卡片是怎么来的 */
+const buildStages = ['解析出行需求', '核对应季天气', '确认车次票价']
 
 /* ==================== 2. 示例行程（结果优先） ==================== */
 /** 时段：示例区的行程与 Hero 的时段标签共用 */
@@ -339,17 +339,6 @@ function stopStepTimer() {
 /* ==================== 入场与滚动揭示 ==================== */
 const entered = ref(false)
 
-/**
- * Hero 卡片的构建进度：已揭示的区块数（车次 → 天气 → 预算）。
- *
- * 改成区块计数而非逐行计数，是因为卡片内容从「成品行程的每一行」
- * 换成了「查到的东西」。三个区块恰好对应 buildStages 的四段文案
- * （解析需求 → 核对天气 → 确认车次 → 生成完成）。
- */
-const BUILD_TOTAL = 3
-const builtRows = ref(0)
-
-let buildTimer: number | null = null
 let revealTimer: number | null = null
 let io: IntersectionObserver | null = null
 
@@ -358,7 +347,6 @@ onMounted(() => {
 
   if (reduce) {
     entered.value = true
-    builtRows.value = BUILD_TOTAL
     document.querySelectorAll('.rv').forEach((el) => el.classList.add('in'))
     return
   }
@@ -366,14 +354,6 @@ onMounted(() => {
   // 等两帧再置位，确保过渡有起点可播
   revealTimer = window.setTimeout(() => {
     entered.value = true
-    // 入场后逐块揭示：每 420ms 一块（比逐行慢，让每块有时间被看清）
-    buildTimer = window.setInterval(() => {
-      builtRows.value += 1
-      if (builtRows.value >= BUILD_TOTAL && buildTimer !== null) {
-        window.clearInterval(buildTimer)
-        buildTimer = null
-      }
-    }, 420)
   }, 60)
 
   io = new IntersectionObserver(
@@ -397,20 +377,8 @@ onMounted(() => {
 onUnmounted(() => {
   io?.disconnect()
   stopStepTimer()
-  if (buildTimer !== null) window.clearInterval(buildTimer)
   if (revealTimer !== null) window.clearTimeout(revealTimer)
 })
-
-/** 当前生成阶段，按已构建进度推进 */
-const buildStage = computed(() => {
-  const ratio = builtRows.value / BUILD_TOTAL
-  if (ratio <= 0.15) return buildStages[0]
-  if (ratio <= 0.5) return buildStages[1]
-  if (ratio < 0.99) return buildStages[2]
-  return buildStages[3]
-})
-
-const done = computed(() => builtRows.value >= BUILD_TOTAL)
 
 function startHref(): string {
   return user.isLoggedIn ? '/chat' : '/login'
@@ -507,7 +475,7 @@ function startHref(): string {
 
             <div class="plan__body">
               <!-- 车次比选：给出备选而非单一答案，也证明数据是查来的 -->
-              <section v-show="builtRows >= 1" class="blk blk--in">
+              <section class="blk">
                 <p class="blk__title">
                   <TravelIcon name="train" :size="14" />
                   高铁车次
@@ -530,7 +498,7 @@ function startHref(): string {
               </section>
 
               <!-- 逐日天气：对应行程里每一天 -->
-              <section v-show="builtRows >= 2" class="blk blk--in">
+              <section class="blk">
                 <p class="blk__title">
                   <TravelIcon name="sun" :size="14" />
                   出行天气
@@ -546,7 +514,7 @@ function startHref(): string {
               </section>
 
               <!-- 预算构成：让「¥3000」有出处 -->
-              <section v-show="builtRows >= 3" class="blk blk--in">
+              <section class="blk">
                 <p class="blk__title">
                   <TravelIcon name="luggage" :size="14" />
                   预算构成
@@ -564,12 +532,23 @@ function startHref(): string {
               </section>
             </div>
 
-            <footer class="plan__foot" :class="{ 'is-done': done }">
-              <span class="plan__pulse" aria-hidden="true"></span>
-              <span class="plan__stage">{{ buildStage }}</span>
-              <span v-if="done" class="plan__done">
-                <TravelIcon name="check" :size="13" /> 可保存为行程
+            <!--
+              页脚说明这张卡片经过了哪几步，而不是播放进度。
+              原先这里是一段「正在解析 → 正在核对 → 已确认」的动态进度条，
+              配合区块逐块揭示。实测观感不好：卡片会从空盒子里分三层
+              往外跳，刷新页面时尤其突兀。
+              行程卡本身就是最好的说明，不需要再演一遍生成过程。
+            -->
+            <footer class="plan__foot">
+              <span class="plan__stages">
+                <template v-for="(s, si) in buildStages" :key="s">
+                  <span class="plan__stage-i">
+                    <TravelIcon name="check" :size="11" />{{ s }}
+                  </span>
+                  <span v-if="si < buildStages.length - 1" class="plan__stage-sep" aria-hidden="true">·</span>
+                </template>
               </span>
+              <span class="plan__done">可保存</span>
             </footer>
           </article>
 
@@ -1087,9 +1066,13 @@ function startHref(): string {
 }
 
 /* ---------- 三个信息区块（车次 / 天气 / 预算） ---------- */
-/* 固定最小高度：三块逐一揭示时卡片不会跳高把下方内容顶来顶去 */
+/*
+ * 不再固定最小高度：原先写 min-height: 268px 是为了让区块逐块揭示时
+ * 卡片不跳高，但那也意味着页面刚加载时有一段空白占位。
+ * 现在三块一次性呈现，高度由内容决定即可。
+ */
 .plan__body {
-  min-height: 268px;
+  padding-top: 2px;
 }
 .blk {
   padding: 12px 0;
@@ -1097,25 +1080,6 @@ function startHref(): string {
 }
 .blk:last-child {
   border-bottom: none;
-}
-/* 区块被揭示时淡入上移，与 builtRows 的推进同步 */
-.blk--in {
-  animation: rowIn 0.44s cubic-bezier(0.2, 0.7, 0.2, 1) both;
-}
-@keyframes rowIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .blk--in {
-    animation: none;
-  }
 }
 .blk__title {
   display: flex;
@@ -1254,52 +1218,44 @@ function startHref(): string {
   font-weight: 600;
 }
 
+/* 页脚：左侧列出这张卡片经过的三步，右侧标「可保存」 */
 .plan__foot {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 14px;
-  padding-top: 13px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px solid var(--hairline);
-  font-size: 0.78rem;
-  color: var(--prim);
-  font-weight: 600;
+  font-size: 0.72rem;
+  color: var(--text3);
 }
-.plan__pulse {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--prim);
-  animation: pulse 1.4s ease-in-out infinite;
+.plan__stages {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
-.plan__foot.is-done {
+.plan__stage-i {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+.plan__stage-i :deep(svg) {
   color: var(--success);
+  flex-shrink: 0;
 }
-.plan__foot.is-done .plan__pulse {
-  background: var(--success);
-  animation: none;
-}
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.35;
-    transform: scale(0.75);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .plan__pulse {
-    animation: none;
-  }
+.plan__stage-sep {
+  opacity: 0.45;
 }
 .plan__done {
   margin-left: auto;
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  font-weight: 650;
+  color: var(--success);
 }
 
 .hero__note {
