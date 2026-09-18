@@ -509,6 +509,13 @@ const QUICK_PROMPTS = [
   '查一下明天广州南到北京西的高铁'
 ]
 
+/**
+ * 是否展示快捷示例。
+ * 只在「没在生成」且「输入框为空」时出现：用户一开始打字，
+ * 建议就从帮助变成了干扰，而且那一行会把输入框顶上去。
+ */
+const showQuickChips = computed(() => !streaming.value && !input.value.trim())
+
 /** 把工具事件合并进当前时间线：result 会回填到同名且仍在运行的步骤 */
 function applyToolChunk(name: string, label: string, phase: 'call' | 'result', content?: string) {
   if (phase === 'call') {
@@ -879,14 +886,19 @@ watch(streaming, (v) => {
                 </div>
               </div>
 
-              <!-- 首字等待：三点 -->
+              <!-- 首字等待：三点 + 当前阶段
+                   只说「正在生成」等于没说；告诉用户此刻在做什么
+                   （解析需求 / 核对天气 / 查车次），等待才不焦躁 -->
               <div v-if="thinking" class="msg msg--assistant">
                 <span class="msg__avatar" aria-hidden="true">
                   <img src="/voyage-mark-128.png" alt="" />
                 </span>
                 <div class="msg__col">
-                  <div class="typing" aria-label="AI 正在生成">
-                    <span></span><span></span><span></span>
+                  <div class="waiting" role="status" aria-live="polite">
+                    <span class="waiting__dots" aria-hidden="true">
+                      <i></i><i></i><i></i>
+                    </span>
+                    <span class="waiting__text">{{ streamPhase }}</span>
                   </div>
                 </div>
               </div>
@@ -895,31 +907,69 @@ watch(streaming, (v) => {
 
           <!-- 输入区 -->
           <div class="chat-inputbar">
-            <div class="chat-inputbar__field">
-              <textarea
-                ref="inputEl"
-                v-model="input"
-                class="textarea chat-inputbar__box"
-                rows="1"
-                :placeholder="streaming ? 'AI 正在回答中…' : '例如：帮我规划 8/17-8/19 广州到北京的行程，预算 500 元以内'"
-                :disabled="streaming"
-                @keydown="onKeydown"
-              ></textarea>
-              <span class="chat-inputbar__hint">Enter 发送 · Shift + Enter 换行</span>
+            <!--
+              快捷示例：只在输入框为空且没在生成时出现。
+              用户一旦开始打字就收起——那时的建议会变成干扰，
+              而且占一行高度会把输入框往上顶。
+            -->
+            <Transition name="chips">
+              <div v-if="showQuickChips" class="quick-bar">
+                <span class="quick-bar__label">试试</span>
+                <button
+                  v-for="q in QUICK_PROMPTS"
+                  :key="q"
+                  type="button"
+                  class="quick-chip quick-chip--sm"
+                  @click="input = q; inputEl?.focus()"
+                >
+                  {{ q }}
+                </button>
+              </div>
+            </Transition>
+
+            <div class="chat-inputbar__row">
+              <div class="chat-inputbar__field" :class="{ 'is-busy': streaming }">
+                <textarea
+                  ref="inputEl"
+                  v-model="input"
+                  class="textarea chat-inputbar__box"
+                  rows="1"
+                  :placeholder="
+                    streaming
+                      ? '正在回答，稍候可以继续追问…'
+                      : '说说你想去哪、几天、预算多少…'
+                  "
+                  :disabled="streaming"
+                  @keydown="onKeydown"
+                ></textarea>
+
+                <!-- 回车提示做成一枚键帽，比一行小字更易读 -->
+                <div class="chat-inputbar__foot">
+                  <span class="kbd-hint">
+                    <kbd>Enter</kbd> 发送
+                    <span class="kbd-hint__sep">·</span>
+                    <kbd>Shift</kbd><kbd>Enter</kbd> 换行
+                  </span>
+                  <span v-if="input.trim()" class="charcount">{{ input.length }}</span>
+                </div>
+              </div>
+
+              <button
+                class="send-btn"
+                :disabled="streaming || !input.trim()"
+                :aria-label="streaming ? '正在生成' : '发送消息'"
+                @click="send"
+              >
+                <template v-if="streaming">
+                  <span class="send-btn__spin" aria-hidden="true"></span>
+                </template>
+                <template v-else>
+                  <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 12h14M13 6l6 6-6 6" />
+                  </svg>
+                </template>
+              </button>
             </div>
-            <button
-              class="btn btn-primary chat-inputbar__send"
-              :disabled="streaming || !input.trim()"
-              @click="send"
-            >
-              <template v-if="streaming">生成中…</template>
-              <template v-else>
-                发送
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
-              </template>
-            </button>
           </div>
         </template>
       </section>
@@ -1479,7 +1529,27 @@ watch(streaming, (v) => {
 .chat-truncated::before { left: calc(50% - 110px); }
 .chat-truncated::after { right: calc(50% - 110px); }
 
-.msg { display: flex; gap: 10px; align-items: flex-start; }
+.msg {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  /* 消息进入时轻微上移淡入。新消息硬出现会让人猝不及防，
+     尤其实时对话里用户的注意力正在输入框上 */
+  animation: msgIn 0.32s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@keyframes msgIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg { animation: none; }
+}
 .msg--user { flex-direction: row-reverse; }
 .msg--assistant { flex-direction: row; }
 
@@ -1617,18 +1687,48 @@ watch(streaming, (v) => {
  * 这里再留一份 .md-body 规则只会成为永远不会命中的死代码。
  */
 
-/* ---- 打字点 ---- */
-.typing { display: flex; gap: 6px; padding: 14px 16px; background: var(--bubble-ai); border: 1px solid var(--border); border-radius: 5px 16px 16px 16px; width: fit-content; }
-.typing span {
+/* ---- 等待状态：三点 + 当前阶段 ---- */
+.waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 17px;
+  background: var(--bubble-ai);
+  border: 1px solid var(--border);
+  border-radius: 5px 16px 16px 16px;
+  width: fit-content;
+}
+.waiting__dots {
+  display: inline-flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.waiting__dots i {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--prim);
   animation: bounce 1.2s ease-in-out infinite;
 }
-.typing span:nth-child(2) { animation-delay: 0.15s; }
-.typing span:nth-child(3) { animation-delay: 0.3s; }
-
+.waiting__dots i:nth-child(2) { animation-delay: 0.15s; }
+.waiting__dots i:nth-child(3) { animation-delay: 0.3s; }
+/* 阶段文字用主题色并与点同步呼吸，整体像「正在处理」而非静止 */
+.waiting__text {
+  font-size: 0.85rem;
+  color: var(--prim);
+  font-weight: 550;
+  animation: waitFade 1.6s ease-in-out infinite;
+}
+@keyframes waitFade {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.62; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .waiting__dots i,
+  .waiting__text { animation: none; }
+}
+/* bounce 关键帧由 .waiting__dots 使用；旧的 .typing span 规则已随
+   等待组件改造移除（改为 .waiting__dots i） */
 @keyframes bounce {
   0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
   40% { transform: translateY(-7px); opacity: 1; }
@@ -1637,26 +1737,164 @@ watch(streaming, (v) => {
 /* ---- 输入区 ---- */
 .chat-inputbar {
   display: flex;
-  gap: 10px;
-  padding: 14px 18px 16px;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px 18px 16px;
   border-top: 1px solid var(--hairline);
-  align-items: flex-end;
   flex-shrink: 0;
   background: var(--panel);
 }
 
-.chat-inputbar__field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-
-.chat-inputbar__box {
-  min-height: 46px;
-  max-height: 160px;
-  resize: none;
-  background: var(--panel2);
+.chat-inputbar__row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
 }
 
-.chat-inputbar__hint { font-size: 0.68rem; color: var(--text3); padding-left: 2px; }
+/* 输入框容器：整体做聚焦态，而不是只给 textarea 描边——
+   这样键帽提示也在同一个视觉容器里 */
+.chat-inputbar__field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: var(--panel2);
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+}
+.chat-inputbar__field:focus-within {
+  background: var(--panel);
+  border-color: var(--blue-300);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+/* 生成中降低视觉存在感，暗示此刻不该输入 */
+.chat-inputbar__field.is-busy {
+  opacity: 0.72;
+}
 
-.chat-inputbar__send { flex-shrink: 0; height: 46px; }
+.chat-inputbar__box {
+  min-height: 34px;
+  max-height: 160px;
+  resize: none;
+  background: transparent;
+  border: none;
+  padding: 8px 0 0;
+  font-size: 0.94rem;
+}
+.chat-inputbar__box:focus {
+  outline: none;
+}
+
+.chat-inputbar__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 18px;
+}
+
+/* 键帽：比一行灰字更容易一眼扫到 */
+.kbd-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.68rem;
+  color: var(--text3);
+  user-select: none;
+}
+.kbd-hint kbd {
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text2);
+  box-shadow: 0 1px 0 var(--border);
+}
+.kbd-hint__sep { opacity: 0.5; }
+
+.charcount {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--text3);
+  font-variant-numeric: tabular-nums;
+}
+/* 接近上限才变色提醒，平时不打扰 */
+.charcount--warn { color: var(--gold-600); }
+
+/* ---- 发送按钮：高对比圆形主按钮 ---- */
+.send-btn {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: var(--grad);
+  color: #fff;
+  box-shadow: 0 8px 20px var(--glow);
+  transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s, filter 0.2s;
+}
+.send-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: saturate(1.08);
+  box-shadow: 0 12px 26px var(--glow);
+}
+.send-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.send-btn:disabled {
+  opacity: 0.42;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+/* 生成中的转圈：用边框缺口旋转，比三点更安静 */
+.send-btn__spin {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  animation: sendSpin 0.72s linear infinite;
+}
+@keyframes sendSpin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .send-btn__spin { animation: none; }
+}
+
+/* ---- 快捷示例条 ---- */
+.quick-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.quick-bar__label {
+  font-size: 0.72rem;
+  color: var(--text3);
+  flex-shrink: 0;
+}
+.quick-chip--sm {
+  padding: 5px 11px;
+  font-size: 0.78rem;
+}
+/* 展开/收起：轻微上移淡入，不推动布局 */
+.chips-enter-active,
+.chips-leave-active {
+  transition: opacity 0.22s, transform 0.22s;
+}
+.chips-enter-from,
+.chips-leave-to {
+  opacity: 0;
+  transform: translateY(5px);
+}
 
 /* ==================== 响应式 ==================== */
 /* 窄屏把侧栏收进抽屉。
@@ -1713,7 +1951,9 @@ watch(streaming, (v) => {
   .tool-btn span { display: none; }   /* 窄屏只留图标，靠 title 提示 */
   .msg__col { max-width: 92%; }
   .msg--user .msg__col { max-width: 88%; }
-  .chat-inputbar__hint { display: none; }
+  /* 窄屏没有物理键盘，键帽提示没有意义，收起以省一行高度 */
+  .kbd-hint { display: none; }
+  .quick-bar { gap: 6px; }
 }
 
 @media (max-width: 560px) {

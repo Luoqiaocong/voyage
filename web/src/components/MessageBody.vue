@@ -86,6 +86,15 @@ const blocks = computed<Block[]>(() =>
           <b v-if="s.bold">{{ s.text }}</b>
           <template v-else>{{ s.text }}</template>
         </template>
+        <!--
+          流式光标：ChatView 里原先单独渲染一个，集成到本组件后由这里接管。
+          只在最后一块后面画，否则中间每个段落都会挂一个光标。
+        -->
+        <span
+          v-if="streaming && i === blocks.length - 1"
+          class="mb__caret"
+          aria-hidden="true"
+        ></span>
       </p>
     </template>
   </div>
@@ -139,6 +148,24 @@ const blocks = computed<Block[]>(() =>
 .mb__p b {
   font-weight: 700;
   color: var(--blue-700);
+}
+
+/* 流式光标：贴着最后一个字，随文字增长自然右移 */
+.mb__caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.14em;
+  border-radius: 1px;
+  background: var(--prim);
+  animation: mbCaret 1.05s steps(2) infinite;
+}
+@keyframes mbCaret {
+  50% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mb__caret { animation: none; }
 }
 
 /* ---------- 提示块 ---------- */
