@@ -18,3 +18,6 @@ frontend/
 web/node_modules/
 web/dist/
 web/.env
+
+# 会话中产生的临时脚本与文件（验证脚本、迁移消息等），不入库
+.dsh_*
