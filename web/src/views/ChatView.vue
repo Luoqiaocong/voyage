@@ -907,8 +907,14 @@ watch(streaming, (v) => {
               <span class="chat-toolbar__title">{{ activeConversation?.title || '新会话' }}</span>
               <!-- 会话状态提示：让用户知道这段对话进行到哪、能不能提取 -->
               <span class="chat-toolbar__status">
+                <!--
+                  生成中只显示一个简短状态，不重复消息区的阶段文字。
+                  工具条常驻可见、消息区会随滚动离开视野，所以两边都需要
+                  一个「还在进行」的信号；但把同一句「正在理解你的需求」
+                  渲染两遍是冗余的——细节留给用户正在看的那一处。
+                -->
                 <span v-if="streaming" class="tstatus tstatus--busy">
-                  <i class="tstatus__dot"></i>{{ streamPhase }}
+                  <i class="tstatus__dot"></i>生成中
                 </span>
                 <span v-else-if="canExtract" class="tstatus tstatus--ready">
                   <i class="tstatus__dot"></i>{{ rounds }} 轮对话 · 可提取行程
@@ -951,13 +957,15 @@ watch(streaming, (v) => {
             </div>
           </div>
 
-          <!-- 流式状态条：始终告诉用户 AI 在做什么 -->
-          <Transition name="phase">
-            <div v-if="streaming" class="phase" role="status" aria-live="polite">
-              <span class="phase__wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-              <span class="phase__text">{{ streamPhase }}</span>
-            </div>
-          </Transition>
+          <!--
+            这里原先还有一条全宽的「流式状态条」（波浪动画 + streamPhase）。
+            已移除，因为同一句话被渲染了两遍：
+              - 消息区的等待块（首字未到时的三点 + 阶段文字）
+              - 这条状态条
+            两者都表达「AI 正在做什么」，且同时出现。此外它是一条通栏的
+            强调色横条，出现与消失会推挤整个消息区，视觉重量远大于信息量。
+            工具条上保留了一个安静的「生成中」，让滚走消息区时仍有信号。
+          -->
 
           <!-- 消息区 -->
           <div ref="scrollEl" class="chat-scroll">
@@ -1642,39 +1650,11 @@ watch(streaming, (v) => {
 .tool-btn--accent :deep(svg) { color: var(--prim); }
 .tool-btn--accent:hover:not(:disabled) { background: var(--blue-100); }
 
-/* ---- 流式阶段条 ---- */
-.phase {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 18px;
-  background: var(--grad-soft);
-  border-bottom: 1px solid var(--hairline);
-  font-size: 0.82rem;
-  color: var(--prim);
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.phase__wave { display: inline-flex; align-items: flex-end; gap: 3px; height: 14px; }
-.phase__wave i {
-  width: 3px;
-  border-radius: 2px;
-  background: var(--prim);
-  animation: wave 1s ease-in-out infinite;
-}
-.phase__wave i:nth-child(1) { height: 6px; animation-delay: 0s; }
-.phase__wave i:nth-child(2) { height: 13px; animation-delay: 0.12s; }
-.phase__wave i:nth-child(3) { height: 9px; animation-delay: 0.24s; }
-.phase__wave i:nth-child(4) { height: 12px; animation-delay: 0.36s; }
-
-@keyframes wave {
-  0%, 100% { transform: scaleY(0.45); opacity: 0.55; }
-  50% { transform: scaleY(1); opacity: 1; }
-}
-
-.phase-enter-active, .phase-leave-active { transition: opacity 0.25s, transform 0.25s; }
-.phase-enter-from, .phase-leave-to { opacity: 0; transform: translateY(-6px); }
+/* 流式阶段条的样式已随该组件一并移除。
+   它曾是夹在工具条与消息区之间的一条通栏强调色横条，与消息区的等待块
+   重复表达同一件事，且出现/消失会推挤消息区。相关规则
+   （.phase / .phase__wave / keyframes wave / phase-enter|leave）全部删除，
+   避免留下永不命中的死样式。 */
 
 /* ---- 消息区 ---- */
 .chat-scroll {
