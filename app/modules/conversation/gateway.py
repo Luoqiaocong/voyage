@@ -120,7 +120,12 @@ class ConversationGateway:
         return cleaned
 
     async def get_last_ai_text(self, conversation_id: str) -> str:
-        """取最后一条含文本内容的 AI 回复；没有则返回空串（供行程提取等场景复用）。"""
+        """取最后一条含文本内容的 AI 回复；没有则返回空串。
+
+        保留此方法供「就是想要最后一条」的调用方使用。
+        行程提取已改用 get_ai_texts（需要在整个历史里挑选），
+        见 app/modules/itinerary/service.py 的 _select_source_text。
+        """
         messages = await self.get_messages(conversation_id)
         for message in reversed(messages):
             if message.get("role") != "assistant":
@@ -129,6 +134,25 @@ class ConversationGateway:
             if isinstance(content, str) and content.strip():
                 return content
         return ""
+
+    async def get_ai_texts(self, conversation_id: str) -> list[str]:
+        """按时间顺序（旧 → 新）返回全部含文本的 AI 回复。
+
+        供需要在整段历史里挑选的调用方使用（如行程提取要找出
+        「最像行程的那条」而不是固定的最后一条）。
+
+        多模态消息的 content 是数组，这里只收纯文本——
+        行程提取只对文本有意义，数组形态留给前端渲染。
+        """
+        messages = await self.get_messages(conversation_id)
+        texts: list[str] = []
+        for message in messages:
+            if message.get("role") != "assistant":
+                continue
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                texts.append(content)
+        return texts
 
     # -------------------- 2. 流式发送消息 --------------------
     async def stream_message(self, message: str, conversation_id: str):
