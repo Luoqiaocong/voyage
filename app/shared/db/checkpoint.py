@@ -58,17 +58,15 @@ def resolve_checkpoint_url() -> str | None:
 
 @asynccontextmanager
 async def open_checkpointer():
-    """打开 checkpointer，交给 FastAPI lifespan 管理生命周期。"""
+    """打开 checkpointer，交给 FastAPI lifespan 管理生命周期。
+
+    PostgreSQL 分支**必须用连接池**，不能用 from_conn_string。
+    原因见下方 _open_pg_checkpointer 的注释。
+    """
     pg_url = resolve_checkpoint_url()
 
     if pg_url:
-        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-
-        log.info("[checkpoint] 使用 PostgreSQL 作为会话状态后端")
-        async with AsyncPostgresSaver.from_conn_string(pg_url) as saver:
-            # 首次运行自动建表（langgraph 自管的 checkpoints / writes 等表）。
-            # 幂等：已存在时是空操作。
-            await saver.setup()
+        async with _open_pg_checkpointer(pg_url) as saver:
             yield saver
         return
 
@@ -78,3 +76,57 @@ async def open_checkpointer():
     log.info(f"[checkpoint] 使用 SQLite 作为会话状态后端: {SQLITE_PATH}")
     async with AsyncSqliteSaver.from_conn_string(str(SQLITE_PATH)) as saver:
         yield saver
+
+
+@asynccontextmanager
+async def _open_pg_checkpointer(pg_url: str):
+    """用连接池打开 PG checkpointer。
+
+    为什么不能用 AsyncPostgresSaver.from_conn_string：
+
+    它内部是 `AsyncConnection.connect(...)`，**只持有一条长连接**，
+    整进程共用一个 connection 对象。这在本地 PostgreSQL 上没问题，
+    但在**托管型 serverless PG（Neon / Supabase 等）上必然出事**：
+    服务端会在空闲后主动断开连接，那条连接一旦失效就永远不会重建，
+    此后所有读会话的操作全部 500，且无法自愈。
+
+    实测表现（Neon 18.6，闲置一段时间后）：
+        psycopg.OperationalError: consuming input failed:
+                                  SSL connection has been closed unexpectedly
+        psycopg.OperationalError: the connection is closed
+    而前端只看到 CORS 报错（500 响应不带 CORS 头），完全掩盖了真实原因。
+
+    改用 AsyncConnectionPool 后：
+      - check=check_connection  取用前先校验，死连接直接丢弃重建
+      - max_idle / max_lifetime 在服务端断开前主动回收
+      - 连接数按需增长（min_size=1 不常驻多余空闲连接）
+    """
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    from psycopg_pool import AsyncConnectionPool
+
+    log.info("[checkpoint] 使用 PostgreSQL 作为会话状态后端（连接池）")
+
+    pool = AsyncConnectionPool(
+        conninfo=pg_url,
+        min_size=1,
+        max_size=8,
+        open=False,
+        # 取用前校验连接可用性 —— 这是应对 serverless PG 空闲断连的关键
+        check=AsyncConnectionPool.check_connection,
+        # 比服务端更早回收：Neon 空闲约 5 分钟后可能断连
+        max_idle=180.0,
+        max_lifetime=1800.0,
+        timeout=30.0,
+        # 与 from_conn_string 内部保持一致，否则 saver 的批量写入会踩到
+        # 预处理语句与事务语义的差异
+        kwargs={"autocommit": True, "prepare_threshold": 0},
+    )
+    await pool.open(wait=True, timeout=30.0)
+    try:
+        saver = AsyncPostgresSaver(conn=pool)
+        # 首次运行自动建表（langgraph 自管的 checkpoint 系列表）。
+        # 幂等：已存在时是空操作。
+        await saver.setup()
+        yield saver
+    finally:
+        await pool.close()
