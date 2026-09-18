@@ -102,8 +102,16 @@ async function copyToMine() {
   }
 }
 
+/**
+ * 活动的费用文案。
+ *
+ * cost 是整数、单位元，**0 表示免费**（后端与 ItineraryDetailView 都按此约定）。
+ * 原先写 `a.cost ? ... : ''`，0 是假值 → 免费活动返回空串，
+ * 模板里的 v-if 便整个不渲染，看起来像费用数据缺失。
+ * 现改为明确返回「免费」。
+ */
 function activityCost(a: ItineraryActivity): string {
-  return a.cost ? `约 ${a.cost} 元` : ''
+  return a.cost ? `约 ${a.cost} 元` : '免费'
 }
 
 onMounted(bootstrap)
@@ -160,7 +168,8 @@ onMounted(bootstrap)
             </p>
             <h1 class="share__title">{{ plan.destination }} · {{ plan.days }} 天行程</h1>
             <ul class="share__meta">
-              <li v-if="plan.budget">预算 {{ plan.budget }} 元</li>
+              <!-- 用 != null 而非真值判断：预算为 0 时也应展示，与列表页口径一致 -->
+              <li v-if="plan.budget != null">预算 {{ plan.budget }} 元</li>
               <li v-if="plan.transport">交通：{{ plan.transport }}</li>
               <li v-if="plan.preferences?.length">偏好：{{ plan.preferences.join('、') }}</li>
             </ul>

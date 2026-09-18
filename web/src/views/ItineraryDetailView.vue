@@ -321,7 +321,15 @@ function cancelEdit() {
                   <p>{{ act.description }}</p>
                   <div class="act__meta">
                     <span v-if="act.duration_hours">约 {{ act.duration_hours }} 小时</span>
-                    <span v-if="act.cost">¥{{ act.cost }}</span>
+                    <!--
+                      cost 是整数、单位元，0 表示免费。
+                      原先写 v-if="act.cost"，而 0 是假值，导致免费活动
+                      整个费用位不渲染 —— 看起来像数据缺失，实际是免费的。
+                      故改为始终渲染，0 显示「免费」。
+                    -->
+                    <span :class="{ 'act__free': !act.cost }">
+                      {{ act.cost ? `¥${act.cost}` : '免费' }}
+                    </span>
                     <span v-if="act.note" class="act__note">{{ act.note }}</span>
                   </div>
                 </div>
@@ -438,6 +446,8 @@ function cancelEdit() {
 
 .act__meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; font-size: 0.8rem; color: var(--ink-soft); }
 .act__note { font-style: italic; }
+/* 免费活动用成功色区分，让「0 元」看起来是有意为之而非缺数据 */
+.act__free { color: var(--success); }
 
 .day__summary { margin-top: 12px; color: var(--ink-soft); font-size: 0.9rem; border-top: 1px dashed var(--line); padding-top: 10px; }
 
