@@ -339,11 +339,14 @@ function handleThirdParty() {
     <!-- ==================== 右侧：表单 ==================== -->
     <section class="auth__panel">
       <div class="auth__panel-inner">
-        <!-- 顶部工具条 -->
+        <!-- 顶部工具条
+             登录页没有全局导航栏（独立两栏布局），所以这个返回入口是必要的，
+             不能删。原先是一行 0.86rem 的灰色纯文字，既不像可点的控件，
+             也与站内其它按钮不一致；改用统一的幽灵按钮。 -->
         <div class="auth__bar">
-          <RouterLink to="/" class="auth__back">
-            <TravelIcon name="arrow-left" :size="16" />
-            回到首页
+          <RouterLink to="/" class="btn btn-ghost btn--sm auth__back">
+            <TravelIcon name="arrow-left" :size="15" />
+            返回首页
           </RouterLink>
           <button
             class="auth__theme"
@@ -758,15 +761,9 @@ function handleThirdParty() {
   margin-bottom: 34px;
 }
 
-.auth__back {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.86rem;
-  color: var(--text2);
-  transition: 0.18s;
-}
-.auth__back:hover { color: var(--blue-700); }
+/* 返回按钮沿用全局 .btn .btn-ghost .btn--sm，这里只补图标间距，
+   不再单独定义字号与颜色——否则又会与站内按钮不一致 */
+.auth__back { gap: 6px; }
 
 .auth__theme {
   width: 38px;
