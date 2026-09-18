@@ -568,7 +568,17 @@ function startHref(): string {
         </div>
 
         <div class="showcase rv">
-          <div v-for="(d, di) in activeDemo.plan" :key="d.date" class="daycard">
+          <!--
+            key 里必须带 demoIdx：各城市的日期都是 10-01/10-02/10-03，
+            只用 date 作 key 时 Vue 会认为节点没变而复用 DOM，
+            切换城市就成了硬切、入场动画也不会重播。
+          -->
+          <div
+            v-for="(d, di) in activeDemo.plan"
+            :key="`${demoIdx}-${d.date}`"
+            class="daycard"
+            :style="{ animationDelay: `${di * 70}ms` }"
+          >
             <header class="daycard__head">
               <span class="daycard__no">Day {{ di + 1 }}</span>
               <span class="daycard__date">{{ d.date }}</span>
@@ -1288,7 +1298,24 @@ function startHref(): string {
   border-radius: 16px;
   padding: 20px 22px;
   box-shadow: var(--shadow-sm);
+  /* 切换城市时逐张入场（延迟由模板内的 animationDelay 错峰） */
+  animation: demoIn 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   transition: transform 0.26s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.26s;
+}
+@keyframes demoIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .daycard {
+    animation: none;
+  }
 }
 .daycard:hover {
   transform: translateY(-4px);
