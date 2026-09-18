@@ -149,8 +149,17 @@ async function openConversation(id: string) {
     const page = (await getMessagesPage(id, HISTORY_ROUNDS)) as MessagesPage
     messages.value = normalizeMessages(page)
     historyTruncated.value = page.truncated
+
+    // 顺手缓存摘要：这次已取到消息，可直接用首条用户消息，
+    // 不必再为同一个会话多发一次请求
+    const firstUser = messages.value.find((m) => m.role === 'user' && m.content.trim())
+    if (firstUser && !convSummary.value[id]) {
+      convSummary.value = { ...convSummary.value, [id]: summarize(firstUser.content) }
+    }
   } catch (e: any) {
     ui.toast(e?.message ?? '历史消息加载失败', 'error')
+    // 历史没取到，摘要也补一次（独立请求，失败静默）
+    void cacheSummary(id)
   }
   scrollToBottom()
 }
@@ -383,11 +392,74 @@ const convKeyword = ref('')
 /** 窄屏抽屉开关：侧栏在手机上收起，需要能主动唤出 */
 const sideOpen = ref(false)
 
-/** 按标题过滤会话；空关键词返回全部 */
+/**
+ * 桌面端侧栏折叠。
+ *
+ * 与 sideOpen 分开的原因：两者语义不同——
+ *   sideOpen   窄屏抽屉是否唤出（移动端）
+ *   sideFolded 桌面端是否收起侧栏（宽屏，给对话区让宽度）
+ * 合成一个状态会导致宽屏抽屉化、窄屏收不起来。
+ */
+const sideFolded = ref(false)
+
+/** 侧栏宽度由 CSS 变量控制，折叠时主区自动铺满，无需 JS 参与布局 */
+function toggleFold() {
+  sideFolded.value = !sideFolded.value
+}
+
+/**
+ * 会话摘要缓存：{ 会话 id -> 首条用户消息的截断 }。
+ *
+ * Conversation 类型只有 id/title/created_at，后端不返回摘要，
+ * 所以只能按需补取。这里取「首条用户消息」而不是标题：
+ * 标题是模型概括的，首条消息才看得出用户当时想干什么。
+ *
+ * 只对**当前打开的会话**补取（见 openConversation），
+ * 不在列表加载时批量拉取——那会随会话数线性增长地打接口。
+ */
+const convSummary = ref<Record<string, string>>({})
+
+/** 最多缓存的摘要条数，防止长会话列表把内存堆满 */
+const SUMMARY_CACHE_MAX = 60
+
+function summarize(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, 34)
+}
+
+async function cacheSummary(id: string) {
+  if (convSummary.value[id]) return
+  try {
+    const page = (await getMessagesPage(id, 1)) as MessagesPage
+    /*
+     * content 的类型是 string | unknown[]（多模态消息的内容是数组）。
+     * 摘要只对纯文本有意义，所以这里显式判类型，
+     * 不能直接 .trim()——类型检查会挡，运行时数组也没有 trim。
+     */
+    const first = (page.messages ?? []).find(
+      (m) => m.role === 'user' && typeof m.content === 'string' && m.content.trim()
+    )
+    if (!first || typeof first.content !== 'string') return
+    const next = { ...convSummary.value, [id]: summarize(first.content) }
+    // 超限时丢掉最早的一批，避免无限增长
+    const keys = Object.keys(next)
+    if (keys.length > SUMMARY_CACHE_MAX) {
+      for (const k of keys.slice(0, keys.length - SUMMARY_CACHE_MAX)) delete next[k]
+    }
+    convSummary.value = next
+  } catch {
+    // 摘要属于增强信息，取不到就不显示，不打扰用户
+  }
+}
+
+/** 按标题或已缓存摘要过滤会话；空关键词返回全部 */
 const filteredConversations = computed(() => {
   const kw = convKeyword.value.trim().toLowerCase()
   if (!kw) return conversations.value
-  return conversations.value.filter((c) => (c.title ?? '').toLowerCase().includes(kw))
+  return conversations.value.filter((c) => {
+    const title = (c.title ?? '').toLowerCase()
+    const sum = (convSummary.value[c.id] ?? '').toLowerCase()
+    return title.includes(kw) || sum.includes(kw)
+  })
 })
 
 /** 会话项显示的时间：今天显示时刻，更早显示日期，避免一长串相同日期 */
@@ -514,18 +586,43 @@ watch(streaming, (v) => {
       <!-- ==================== 侧边栏 ==================== -->
       <!-- 窄屏为抽屉，遮罩点击关闭 -->
       <div v-if="sideOpen" class="side-backdrop" @click="sideOpen = false"></div>
-      <aside class="chat-side" :class="{ 'chat-side--open': sideOpen }" aria-label="会话列表">
+      <aside
+        class="chat-side"
+        :class="{ 'chat-side--open': sideOpen, 'chat-side--folded': sideFolded }"
+        aria-label="会话列表"
+      >
         <div class="chat-side__head">
-          <span class="chat-side__title">会话</span>
-          <button class="btn btn-primary btn--sm" :disabled="streaming" @click="newConversation">
-            ＋ 新建
+          <span class="chat-side__title">我的会话</span>
+          <span v-if="conversations.length" class="chat-side__count">{{ conversations.length }}</span>
+          <!-- 折叠：会话多时把侧栏收起，给对话区让出宽度 -->
+          <button
+            class="side-fold"
+            type="button"
+            :aria-label="sideFolded ? '展开会话列表' : '收起会话列表'"
+            :title="sideFolded ? '展开' : '收起'"
+            @click="toggleFold"
+          >
+            <TravelIcon :name="sideFolded ? 'arrow-right' : 'arrow-left'" :size="15" />
           </button>
         </div>
+
+        <!-- 新建：主操作，占满整行比挤在标题旁更好点 -->
+        <button class="side-new" type="button" :disabled="streaming" @click="newConversation">
+          <span class="side-new__icon" aria-hidden="true">
+            <TravelIcon name="plane" :size="15" />
+          </span>
+          开始新会话
+        </button>
 
         <!-- 会话搜索：会话一多就必须能找回来 -->
         <div v-if="conversations.length" class="chat-side__search">
           <TravelIcon name="compass" :size="14" />
-          <input v-model="convKeyword" type="search" placeholder="搜索会话…" aria-label="搜索会话" />
+          <input
+            v-model="convKeyword"
+            type="search"
+            placeholder="搜索标题或内容…"
+            aria-label="搜索会话"
+          />
           <button v-if="convKeyword" class="chat-side__clear" aria-label="清除搜索" @click="convKeyword = ''">
             ✕
           </button>
@@ -542,8 +639,8 @@ watch(streaming, (v) => {
           <span class="chat-side__empty-icon" aria-hidden="true">
             <TravelIcon name="luggage" :size="26" />
           </span>
-          <p>还没有行程对话</p>
-          <span>点上方「新建」，说说你想去哪</span>
+          <p>还没有出行计划</p>
+          <span>点上方「开始新会话」，说说你想去哪</span>
         </div>
 
         <!-- 空状态：搜索无结果 -->
@@ -566,6 +663,10 @@ watch(streaming, (v) => {
             <span class="conv-item__pin" aria-hidden="true"></span>
             <span class="conv-item__main">
               <span class="conv-item__title">{{ conv.title || '新会话' }}</span>
+              <!-- 摘要取该会话首条用户消息，比标题更能说明聊了什么 -->
+              <span v-if="convSummary[conv.id]" class="conv-item__sum">
+                {{ convSummary[conv.id] }}
+              </span>
               <span class="conv-item__meta">
                 <span class="conv-item__time">{{ convTime(conv.created_at) }}</span>
                 <span v-if="!conv.title" class="conv-item__wip">待命名</span>
@@ -802,11 +903,22 @@ watch(streaming, (v) => {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 272px 1fr;
+  /* 侧栏宽度用变量控制：折叠时只改变量，主区自动铺满，
+     不必让 JS 参与布局计算 */
+  grid-template-columns: var(--side-w, 272px) 1fr;
   margin: 0 16px 16px;
   gap: 16px;
   position: relative;
   z-index: 1;
+  transition: grid-template-columns 0.26s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+/* 折叠态：侧栏让位，间隔也收掉，否则会留一条空缝 */
+.chat-main:has(.chat-side--folded) {
+  grid-template-columns: 0 1fr;
+  gap: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-main { transition: none; }
 }
 
 /* ==================== 侧边栏 ==================== */
@@ -819,16 +931,98 @@ watch(streaming, (v) => {
   min-height: 0;
   overflow: hidden;
 }
+/* 折叠时整栏淡出并收窄；不给 width 是因为宽度已由网格控制 */
+.chat-side--folded {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+.chat-side--folded * {
+  pointer-events: none;
+}
 
 .chat-side__head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--hairline);
+  gap: 8px;
+  padding: 14px 14px 12px;
 }
 
 .chat-side__title { font-family: var(--font-display); font-size: 1rem; font-weight: 700; }
+
+/* 会话条数：让用户对「攒了多少」有概念 */
+.chat-side__count {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text3);
+  background: var(--panel2);
+  border-radius: 20px;
+  padding: 1px 7px;
+}
+
+/* 折叠按钮：靠右，悬停才明显，避免与标题抢注意力 */
+.side-fold {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text3);
+  transition: background-color 0.18s, color 0.18s, border-color 0.18s;
+}
+.side-fold:hover {
+  background: var(--panel2);
+  border-color: var(--border);
+  color: var(--prim);
+}
+
+/* ---- 新建会话：主操作占满整行 ---- */
+.side-new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0 10px 10px;
+  padding: 10px 14px;
+  border-radius: 11px;
+  background: var(--grad);
+  color: #fff;
+  font-size: 0.88rem;
+  font-weight: 650;
+  box-shadow: 0 6px 16px var(--glow);
+  transition: transform 0.2s, filter 0.2s, box-shadow 0.2s;
+}
+.side-new:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: saturate(1.08);
+  box-shadow: 0 10px 22px var(--glow);
+}
+.side-new:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.side-new__icon {
+  display: grid;
+  place-items: center;
+}
+
+/* ---- 会话摘要 ----
+   两行截断：一行放不下多少信息，三行又会让每项太高、列表变长 */
+.conv-item__sum {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--text3);
+  margin-top: 1px;
+}
 
 .chat-side__hint { padding: 18px 16px; color: var(--text3); font-size: 0.82rem; line-height: 1.6; }
 
