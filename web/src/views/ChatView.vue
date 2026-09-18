@@ -230,12 +230,36 @@ async function handleDelete(conv: Conversation) {
  */
 function lastAiMessage(): RdMsg | null {
   for (let i = messages.value.length - 1; i >= 0; i--) {
-    if (messages.value[i].role === 'assistant' && messages.value[i].content.trim()) {
-      return messages.value[i]
+    const m = messages.value[i]
+    if (m.role === 'assistant' && typeof m.content === 'string' && m.content.trim()) {
+      return m
     }
   }
   return null
 }
+
+/**
+ * 对话轮数（一问一答算一轮）。
+ *
+ * 用助手回复条数而非用户消息条数：用户可能连发几条才得到一次回答，
+ * 按用户消息数会高估进度。
+ */
+const rounds = computed(
+  () =>
+    messages.value.filter(
+      (m) => m.role === 'assistant' && typeof m.content === 'string' && m.content.trim()
+    ).length
+)
+
+/**
+ * 是否具备提取条件（存在 AI 回复）。
+ *
+ * 只判断「有没有可提取的文本」，不判断「像不像行程」——
+ * 内容预判已被证明两个方向都会出错（见 handleExtract 里的说明），
+ * 真正的判定器在后端。这里仅用于把按钮置灰并给出提示，
+ * 让用户在点之前就知道为什么不能点。
+ */
+const canExtract = computed(() => lastAiMessage() !== null)
 
 async function handleExtract() {
   if (!activeId.value || streaming.value) return
@@ -720,6 +744,7 @@ watch(streaming, (v) => {
         <template v-else>
           <!-- 工具栏 -->
           <div class="chat-toolbar">
+            <!-- 窄屏唤出侧栏；宽屏用侧栏自身的折叠按钮，此处隐藏 -->
             <button
               class="side-toggle"
               type="button"
@@ -728,9 +753,30 @@ watch(streaming, (v) => {
             >
               <TravelIcon name="map" :size="17" />
             </button>
-            <span class="chat-toolbar__title">{{ activeConversation?.title || '新会话' }}</span>
+
+            <div class="chat-toolbar__id">
+              <span class="chat-toolbar__title">{{ activeConversation?.title || '新会话' }}</span>
+              <!-- 会话状态提示：让用户知道这段对话进行到哪、能不能提取 -->
+              <span class="chat-toolbar__status">
+                <span v-if="streaming" class="tstatus tstatus--busy">
+                  <i class="tstatus__dot"></i>{{ streamPhase }}
+                </span>
+                <span v-else-if="canExtract" class="tstatus tstatus--ready">
+                  <i class="tstatus__dot"></i>{{ rounds }} 轮对话 · 可提取行程
+                </span>
+                <span v-else class="tstatus">{{
+                  rounds ? `${rounds} 轮对话` : '还没有对话，说说你的计划'
+                }}</span>
+              </span>
+            </div>
+
             <div class="chat-toolbar__ops">
-              <button class="tool-btn tool-btn--accent" :disabled="streaming" @click="handleExtract">
+              <button
+                class="tool-btn tool-btn--accent"
+                :disabled="streaming || !canExtract"
+                :title="canExtract ? '把最后一条回答整理成行程' : '先让 AI 给出一份行程安排'"
+                @click="handleExtract"
+              >
                 <TravelIcon name="luggage" :size="15" />
                 提取行程
               </button>
@@ -1270,9 +1316,18 @@ watch(streaming, (v) => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 18px;
+  padding: 11px 18px;
   border-bottom: 1px solid var(--hairline);
   flex-shrink: 0;
+}
+
+/* 标题与状态竖排：标题是「在哪」，状态是「到哪一步了」 */
+.chat-toolbar__id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
 }
 
 .chat-toolbar__title {
@@ -1282,6 +1337,45 @@ watch(streaming, (v) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ---- 会话状态提示 ---- */
+.tstatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.73rem;
+  color: var(--text3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tstatus__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+/* 可提取：成功色，暗示「现在可以操作了」 */
+.tstatus--ready {
+  color: var(--success);
+}
+/* 生成中：主题色 + 呼吸，与消息区的流式提示呼应 */
+.tstatus--busy {
+  color: var(--prim);
+}
+.tstatus--busy .tstatus__dot {
+  animation: tstatusPulse 1.4s ease-in-out infinite;
+}
+/* 本文件自带关键帧：HomeView 里的 pulse 是 scoped 的，
+   这边引用不到，靠全局同名定义会形成隐式依赖 */
+@keyframes tstatusPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.7); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tstatus--busy .tstatus__dot { animation: none; }
 }
 
 .chat-toolbar__ops { display: flex; gap: 8px; flex-shrink: 0; }
