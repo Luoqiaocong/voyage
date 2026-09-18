@@ -19,12 +19,22 @@ const props = withDefaults(defineProps<Props>(), { streaming: false })
 const emit = defineEmits<{ (e: 'extract'): void }>()
 
 /**
- * 流式输出时不结构化：末块可能只写了一半，中途解析会让内容在
- * 「段落 ↔ 列表」之间反复跳变，比不做还乱。
+ * 流式期间**同样做结构化解析**，不要退化成纯文本。
+ *
+ * 曾经的做法是流式时整段当纯文本渲染，理由是「末块可能只写了一半，
+ * 中途解析会让内容在段落与列表间跳变」。实测这个取舍是错的，代价远大于收益：
+ *
+ *   1. 生成过程可能持续 20~100 秒，这段时间用户看到的是一整团糊在一起的
+ *      原始 markdown —— 既没有小标题层次，也没有列表缩进，因为纯文本
+ *      容器不保留换行（见 .mb__p 的 white-space 说明）。
+ *   2. `**粗体**` 在流式期被当作行内粗体渲染成蓝色，而流结束后同一段文字
+ *      变成小节标题（黑色）——用户看到「蓝字闪一下又没了」。
+ *   3. 结构化本身就是「正在生成」的最好提示，比一个光标更有信息量。
+ *
+ * 跳变问题实际很轻微：解析器把未写完的行当作普通段落，等换行符到达再
+ * 归入列表。真正会变的只有最后一行，用户注意力本就在新增内容上。
  */
-const blocks = computed<Block[]>(() =>
-  props.streaming ? [{ kind: 'para', text: props.text }] : parseMessage(props.text)
-)
+const blocks = computed<Block[]>(() => parseMessage(props.text))
 </script>
 
 <template>
@@ -86,16 +96,19 @@ const blocks = computed<Block[]>(() =>
           <b v-if="s.bold">{{ s.text }}</b>
           <template v-else>{{ s.text }}</template>
         </template>
-        <!--
-          流式光标：ChatView 里原先单独渲染一个，集成到本组件后由这里接管。
-          只在最后一块后面画，否则中间每个段落都会挂一个光标。
-        -->
-        <span
-          v-if="streaming && i === blocks.length - 1"
-          class="mb__caret"
-          aria-hidden="true"
-        ></span>
       </p>
+
+      <!--
+        流式光标只在末块是**段落**时显示。
+        末块是列表/行程/标题时不画——那些块无法自然地容纳一个行内光标，
+        硬塞进去会让布局变形；而「正在生成」的信号并不依赖它：
+        工具条有状态文字、首字等待区有三点动画，光标只是锦上添花。
+      -->
+      <span
+        v-if="streaming && i === blocks.length - 1 && b.kind === 'para'"
+        class="mb__caret"
+        aria-hidden="true"
+      ></span>
     </template>
   </div>
 </template>
@@ -132,8 +145,14 @@ const blocks = computed<Block[]>(() =>
 }
 
 /* ---------- 段落 ---------- */
+/*
+ * pre-wrap 是必需的：解析器把同一段落内的多行用空格拼接，
+ * 但模型偶尔会在段内换行（例如「交通：…\n住宿：…」这种不成列表的写法）。
+ * 不留住换行，这些内容会被挤成一整行，看起来就是「乱」。
+ */
 .mb__p {
   margin: 0;
+  white-space: pre-wrap;
 }
 .mb__p b {
   font-weight: 700;
