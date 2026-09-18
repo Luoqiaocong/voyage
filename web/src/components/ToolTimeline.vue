@@ -2,17 +2,42 @@
 /**
  * 工具调用时间线：把一轮回答中的多次工具调用渲染成带状态的可视化步骤。
  * 状态：running（正在调用）/ done（已返回）/ error（失败）
+ *
+ * 只展示面向用户的中文名（label），不展示内部函数名——
+ * get_today / weather_forecast_cached 这类标识是给开发看的，
+ * 对用户没有任何意义，还会让界面像调试面板。
  */
+import { computed } from 'vue'
 import ToolIcon from './ToolIcon.vue'
 import type { ToolStep } from '@/types/tool'
 
-defineProps<{ steps: ToolStep[]; collapsed?: boolean }>()
+const props = defineProps<{ steps: ToolStep[]; collapsed?: boolean }>()
 
 function fmtDuration(ms?: number): string {
   if (ms == null) return ''
   if (ms < 1000) return `${ms}ms`
   return `${(ms / 1000).toFixed(1)}s`
 }
+
+/**
+ * 给重复出现的同一工具标注序号。
+ *
+ * 去掉内部函数名后，同一个工具被调用两次就会出现两个一模一样的
+ * 「查询天气」条目，用户无法分辨，看起来像重复渲染的 bug。
+ * 因此只在**确实重复**时补「· 第 N 次」，单次调用保持干净。
+ */
+const seqLabel = computed(() => {
+  const total = new Map<string, number>()
+  for (const s of props.steps) {
+    total.set(s.name, (total.get(s.name) ?? 0) + 1)
+  }
+  const seen = new Map<string, number>()
+  return props.steps.map((s) => {
+    const n = (seen.get(s.name) ?? 0) + 1
+    seen.set(s.name, n)
+    return (total.get(s.name) ?? 0) > 1 ? `第 ${n} 次` : ''
+  })
+})
 </script>
 
 <template>
@@ -37,7 +62,7 @@ function fmtDuration(ms?: number): string {
         <span class="tstep__body">
           <span class="tstep__title">
             {{ s.label }}
-            <span class="tstep__fn">{{ s.name }}</span>
+            <span v-if="seqLabel[i]" class="tstep__seq">{{ seqLabel[i] }}</span>
           </span>
           <span v-if="s.result" class="tstep__result">{{ s.result }}</span>
           <span v-else-if="s.status === 'running'" class="tstep__shimmer" aria-label="调用中">
@@ -199,15 +224,16 @@ function fmtDuration(ms?: number): string {
 }
 .tstep--running .tstep__title { color: var(--prim); }
 
-.tstep__fn {
-  font-family: var(--mono);
-  font-size: 0.7rem;
+/* 重复调用时的序号标记：弱化处理，只是为了让两条同名步骤可区分 */
+.tstep__seq {
+  font-size: 0.68rem;
   color: var(--text3);
   background: var(--panel);
   border: 1px solid var(--border);
   padding: 0 6px;
   border-radius: 5px;
   font-weight: 400;
+  margin-left: 2px;
 }
 
 .tstep__result {
