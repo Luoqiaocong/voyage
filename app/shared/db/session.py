@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from .config import ASYNC_DATABASE_URL, DB_POOL_CONFIG
+from .config import ASYNC_DATABASE_URL, DB_POOL_CONFIG, IS_SQLITE
 
 # 异步引擎（连接管理器）
 engine = create_async_engine(ASYNC_DATABASE_URL, **DB_POOL_CONFIG)
@@ -14,7 +14,8 @@ engine = create_async_engine(ASYNC_DATABASE_URL, **DB_POOL_CONFIG)
 
 # SQLite 默认不启用外键约束，需要在每次连接时显式打开，
 # 否则模型里声明的 ON DELETE CASCADE / SET NULL 不会真正生效。
-if ASYNC_DATABASE_URL.startswith("sqlite"):
+# PostgreSQL 天然强制外键，无需此步。
+if IS_SQLITE:
     @event.listens_for(engine.sync_engine, "connect")
     def _enable_sqlite_foreign_keys(dbapi_connection, _):  # noqa: ANN001
         cursor = dbapi_connection.cursor()

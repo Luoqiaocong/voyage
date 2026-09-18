@@ -1,8 +1,9 @@
 """Token 用量落库（Redis 增量 → token_usage 表）。
 
 为什么不在 LLM 回调里直接写库：
-    langgraph checkpointer 占用同一个 SQLite 文件（data/exports/checkpoints.sqlite），
-    流式回复期间在回调中写库会与其抢锁，有触发 "database is locked" 的实际风险。
+    采集写在流式回复的热路径上。直接在回调里落库会把每次 token 统计
+    都变成一次数据库往返（SQLite 时代更是与其文件锁竞争，
+    有触发 "database is locked" 的实际风险）。
     因此采集只写 Redis（热路径），落库由后台任务按周期批量完成。
 
 幂等性：
@@ -12,9 +13,9 @@
 """
 from __future__ import annotations
 
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.shared.db.config import IS_POSTGRES
 from app.shared.db.models import TokenUsage, utc_now
 from app.shared.redis import redis_client
 from app.shared.usage_query import local_today, local_yesterday
@@ -66,6 +67,23 @@ async def drain_day_usage(day: str) -> dict[str, dict[str, int]]:
     return _parse_day_usage(list(flat or []))
 
 
+def _insert_for_dialect():
+    """按当前数据库后端返回对应的 insert 构造器。
+
+    upsert 的 INSERT 语句是方言相关的：
+      PostgreSQL 用 postgresql.insert（ON CONFLICT ... DO UPDATE）
+      SQLite     用 sqlite.insert（同样是 ON CONFLICT，但构造器不同）
+    两者生成的 SQL 语义一致，只是入口不同，故需分支。
+    """
+    if IS_POSTGRES:
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        return pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    return sqlite_insert
+
+
 def _accumulate(stmt, values: dict) -> object:
     """把 INSERT 改写成「冲突时累加」，而非覆盖。"""
     return stmt.on_conflict_do_update(
@@ -101,7 +119,7 @@ async def flush_usage_to_db(session: AsyncSession, day: str | None = None) -> in
             "calls": metrics.get("calls", 0),
             "created_at": utc_now(),
         }
-        stmt = _accumulate(sqlite_insert(TokenUsage).values(**values), values)
+        stmt = _accumulate(_insert_for_dialect()(TokenUsage).values(**values), values)
         await session.execute(stmt)
         rows_written += 1
 

@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import config
+from app.shared.db.config import IS_POSTGRES
 from app.shared.db.models import Conversation, Itinerary, TokenUsage, User
 
 
@@ -108,6 +109,22 @@ async def get_token_trend(session: AsyncSession, days: int = 7) -> list[dict[str
     ]
 
 
+def _day_expr(column):
+    """取「日期」部分的 SQL 表达式，按数据库方言分支。
+
+    为什么必须分支：SQLite 允许对时间戳用 substr 取前 10 位当日期，
+    但 PostgreSQL 会直接报错：
+        function substr(timestamp with time zone, integer, integer) does not exist
+    故 PG 下改用 to_char 显式格式化。
+
+    两边的语义需保持一致——都取 UTC 存储值的日期前缀，
+    以便与 local_today() 的口径对齐。
+    """
+    if IS_POSTGRES:
+        return func.to_char(column, "YYYY-MM-DD")
+    return func.substr(column, 1, 10)
+
+
 async def get_user_growth_trend(session: AsyncSession, days: int = 7) -> list[dict[str, Any]]:
     """近 N 天的新增用户趋势（按日期升序，缺失日期补 0）。
 
@@ -115,7 +132,7 @@ async def get_user_growth_trend(session: AsyncSession, days: int = 7) -> list[di
     对「增长趋势」这类粗粒度展示可接受，精确的今日口径见 get_platform_counters。
     """
     dates = _date_range(days)
-    day_expr = func.substr(User.created_at, 1, 10)
+    day_expr = _day_expr(User.created_at)
     stmt = (
         select(day_expr.label("day"), func.count(User.id))
         .where(day_expr >= dates[0])
@@ -139,7 +156,7 @@ async def get_platform_counters(session: AsyncSession) -> dict[str, int]:
     today = local_today()
     new_users_today = (
         await session.execute(
-            select(func.count(User.id)).where(func.substr(User.created_at, 1, 10) == today)
+            select(func.count(User.id)).where(_day_expr(User.created_at) == today)
         )
     ).scalar_one()
 
@@ -147,7 +164,7 @@ async def get_platform_counters(session: AsyncSession) -> dict[str, int]:
     active_users_today = (
         await session.execute(
             select(func.count(func.distinct(Conversation.user_id))).where(
-                func.substr(Conversation.created_at, 1, 10) == today
+                _day_expr(Conversation.created_at) == today
             )
         )
     ).scalar_one()

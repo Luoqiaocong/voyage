@@ -122,7 +122,10 @@ class AdminService(TransactionMixin):
 
             await self.db.execute(text("select 1"))
             db_ok = True
-            db_detail = "SQLite 连接正常"
+            # 从引擎实际连接的方言取名，而不是写死。
+            # 写死过 "SQLite 连接正常"，切到 PostgreSQL 后仍在报 SQLite，
+            # 属于会误导运维的错误信息。
+            db_detail = f"{self.db.bind.dialect.name} 连接正常"
         except Exception as exc:  # noqa: BLE001
             db_detail = f"{type(exc).__name__}: {str(exc)[:120]}"
 

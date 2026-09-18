@@ -230,12 +230,45 @@ voyage/
 ## 🚀 快速开始
 
 1. 安装依赖（Python ≥ 3.12 + uv）
-2. 配置环境变量（密钥与模型 API Key）
-3. 初始化数据库
-4. 启动服务
+2. 配置环境变量（数据库、密钥与模型 API Key）
+3. 初始化数据库（`alembic upgrade head`）
+4. 启动服务：`python run.py`
 5. 访问接口文档（`/docs`）
 
 > 详细步骤见项目文档；AI 对话功能需配置大模型 API Key。
+
+### 数据库
+
+主用 **PostgreSQL**，通过 `DATABASE_URL` 配置：
+
+```
+DATABASE_URL=postgresql+asyncpg://user:password@host:5432/dbname?ssl=require
+```
+
+**留空则回退到 SQLite**（`data/exports/app.db`），本地开发与单元测试不必先装 PG。
+
+两个存储都指向同一个库：
+
+| 存储 | 内容 | 驱动 |
+|---|---|---|
+| 业务表 | 用户、会话、行程、Token 用量、审计、记忆 | asyncpg（经 SQLAlchemy） |
+| 会话消息状态 | langgraph checkpointer（历史消息的实体） | psycopg |
+
+> ⚠️ **Windows 上必须用 `python run.py` 启动**，不要直接 `uvicorn app.main:app`。
+> psycopg 的异步模式不接受 Windows 默认的 `ProactorEventLoop`，而 uvicorn 在
+> Windows 上会硬编码返回它（连 `--loop asyncio` 都不理会）。
+> `run.py` 显式指定了 `SelectorEventLoop`；Linux/macOS 无此问题。
+
+### 创建管理员
+
+系统不提供「第一个注册用户自动成为管理员」——那是真实的提权漏洞。
+管理员必须由掌握服务器权限的人显式执行：
+
+```bash
+# 密码走环境变量，不进 shell 历史
+ADMIN_PASSWORD='你的强密码' python app/scripts/create_admin.py \
+  --email you@example.com --username 你的昵称 --password-env ADMIN_PASSWORD
+```
 
 ---
 
@@ -244,9 +277,15 @@ voyage/
 已提供完整容器化配置，一条命令拉起 Redis + 后端 + 前端：
 
 ```bash
-cp .env.example .env      # 填入真实密钥（模型 API Key、JWT、邮件等）
+cp .env.example .env      # 填入真实密钥（数据库、模型 API Key、JWT、邮件等）
 docker compose up -d --build
 ```
+
+> **数据库不在 compose 里**：默认连 `DATABASE_URL` 指向的外部 PostgreSQL
+> （如 Neon / 自建实例）。若要用容器内 PG，自行在 compose 中加一个
+> `postgres:16-alpine` 服务并把 `DATABASE_URL` 指向它。
+> 不配 `DATABASE_URL` 时后端会回退到容器内 SQLite（`/app/data` 卷），
+> 适合单机演示，但不适合多人使用。
 
 启动后访问 `http://<服务器地址>/`（默认 80 端口，可用 `WEB_PORT=8080` 覆盖）。
 

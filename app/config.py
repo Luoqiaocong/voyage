@@ -81,6 +81,15 @@ class VoyageConfig(BaseSettings):
     REDIS_HOST:str
     REDIS_PORT:int=6379
     REDIS_DB:int=7
+
+    # ---------- 数据库 ----------
+    # 主用 PostgreSQL：postgresql+asyncpg://user:pwd@host:5432/dbname
+    # 留空则回退到 SQLite（data/exports/app.db），便于本地开发与单元测试。
+    # 部署时建议用环境变量注入，而不是写进 .env 文件。
+    DATABASE_URL: str = ""
+    # langgraph checkpointer 用的连接串（psycopg 驱动，非 asyncpg）。
+    # 留空则由 DATABASE_URL 推导；两者驱动不同，故允许单独覆盖。
+    CHECKPOINT_DATABASE_URL: str = ""
     
 
     model_config = SettingsConfigDict(

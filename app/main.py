@@ -1,3 +1,16 @@
+"""应用入口。
+
+注意开头的 Windows 事件循环处理：从 SQLite 切到 PostgreSQL 后，
+会话状态由 langgraph 的 psycopg checkpointer 持久化，而 psycopg 的异步模式
+**拒绝 ProactorEventLoop**（Windows 上 asyncio 的默认实现）。
+这里的设置是对启动方式的兜底——推荐仍用仓库根目录的 run.py 启动。
+"""
+import asyncio
+import sys
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from contextlib import asynccontextmanager
 from fastapi.responses import RedirectResponse
 from fastapi import FastAPI
@@ -5,15 +18,14 @@ from app.core.ai import AgentFactory
 from app.core.ai.llm import close_http_client
 from app.core.business import register_exception
 from app.api import api_router
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from app.shared.utils import init_log, close_log
 from app.config import config
+from app.shared.db.checkpoint import open_checkpointer
 from app.shared.redis import redis_client
 from app.shared.flush_task import usage_flush_task
 from app.shared.memory_task import memory_extract_task
-SQLITE_PATH = Path(__file__).resolve().parent.parent / "data" / "exports" / "checkpoints.sqlite"
 
 
 @asynccontextmanager
@@ -21,7 +33,8 @@ async def lifespan(app: FastAPI):
     init_log()
     try:
         await redis_client.init_redis()
-        async with AsyncSqliteSaver.from_conn_string(str(SQLITE_PATH)) as checkpointer:
+        # checkpointer 按数据库后端自动选择 PG / SQLite（见 shared/db/checkpoint.py）
+        async with open_checkpointer() as checkpointer:
             AgentFactory.initialize(checkpointer)
             usage_flush_task.start()   # 周期性把 Token 增量落库
             try:
