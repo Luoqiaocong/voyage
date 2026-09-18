@@ -59,37 +59,53 @@ const prompts = [
  * 故卡片标注「示例」而非「实时」——标成实时会让人以为这是此刻查到的
  * 真实数据，属于误导。真实查询发生在对话中，由 MCP 工具完成。
  */
+/**
+ * Hero 卡片展示的是**生成过程中查到的东西**（车次比选、天气、预算），
+ * 而不是成品行程。
+ *
+ * 为什么这样分工：下方「生成结果」区展示的是最终排出的行程（按天 + 时段）。
+ * 若 Hero 也放一份成品行程，两处内容必然重复（原先就是同一份北京 3 天，
+ * 用户滚下去会觉得「刚才看过了」）。改为各回答一个问题：
+ *   Hero    -> 它替我查到了什么、依据什么定的
+ *   示例区  -> 最后排出来长什么样
+ * 车次比选还顺带证明了「数据是实时查的、不是模型编的」，这正是 Hero 要传达的价值。
+ */
 const heroPlan = {
   from: '广州南',
   to: '北京西',
   days: 3,
   budget: '¥3000',
-  train: 'G77 · 二等座',
-  price: '¥553'
+  season: '10-01 ~ 10-03'
 }
 
-type Slot = 'morning' | 'afternoon' | 'evening'
+/** 车次比选：体现「货比三家」，而不只是给一个答案 */
+const heroTrains = [
+  { code: 'G77', time: '08:00 → 13:24', price: 553, seat: '二等座', best: true },
+  { code: 'G79', time: '10:05 → 15:38', price: 553, seat: '二等座', best: false },
+  { code: 'G81', time: '13:20 → 19:02', price: 553, seat: '二等座', best: false }
+]
 
-interface HeroDay {
-  no: number
-  theme: string
-  time: string
-  place: string
-  cost: string
-  slot: Slot
-}
+/** 逐日天气：对应行程里每一天的安排 */
+const heroWeather = [
+  { day: 1, date: '10-01', text: '晴', temp: '12~22°C', icon: 'sun' },
+  { day: 2, date: '10-02', text: '多云', temp: '10~19°C', icon: 'sun' },
+  { day: 3, date: '10-03', text: '阴', temp: '11~18°C', icon: 'wave' }
+]
 
-const heroDays: HeroDay[] = [
-  { no: 1, theme: '抵达 · 中轴线', time: '14:00', place: '天安门广场 · 故宫', cost: '¥60', slot: 'afternoon' },
-  { no: 1, theme: '抵达 · 中轴线', time: '19:30', place: '前门大街 · 老字号', cost: '¥80', slot: 'evening' },
-  { no: 2, theme: '长城一日', time: '07:30', place: '八达岭长城', cost: '¥40', slot: 'morning' },
-  { no: 2, theme: '长城一日', time: '15:00', place: '鸟巢 · 水立方', cost: '免费', slot: 'afternoon' },
-  { no: 3, theme: '园林收尾', time: '09:00', place: '颐和园 · 昆明湖', cost: '¥30', slot: 'morning' },
-  { no: 3, theme: '园林收尾', time: '16:00', place: '返程 · 北京西', cost: '¥553', slot: 'evening' }
+/** 预算明细：让「¥3000」这个数字有出处 */
+const heroBudget = [
+  { label: '往返车票', value: 1106 },
+  { label: '住宿 2 晚', value: 1160 },
+  { label: '门票', value: 155 },
+  { label: '餐饮', value: 579 }
 ]
 
 /** 生成阶段文案：让「正在发生什么」可见，而不是干等 */
 const buildStages = ['正在解析出行需求', '已核对应季天气', '车次与票价已确认', '行程已生成']
+
+/* ==================== 2. 示例行程（结果优先） ==================== */
+/** 时段：示例区的行程与 Hero 的时段标签共用 */
+type Slot = 'morning' | 'afternoon' | 'evening'
 
 const SLOT_META: Record<Slot, { label: string; icon: string }> = {
   morning: { label: '上午', icon: 'sun' },
@@ -97,7 +113,6 @@ const SLOT_META: Record<Slot, { label: string; icon: string }> = {
   evening: { label: '晚上', icon: 'moon' }
 }
 
-/* ==================== 2. 示例行程（结果优先） ==================== */
 interface DemoActivity {
   slot: Slot
   name: string
@@ -323,7 +338,15 @@ function stopStepTimer() {
 
 /* ==================== 入场与滚动揭示 ==================== */
 const entered = ref(false)
-/** 行程逐条构建的进度（已渲染行数） */
+
+/**
+ * Hero 卡片的构建进度：已揭示的区块数（车次 → 天气 → 预算）。
+ *
+ * 改成区块计数而非逐行计数，是因为卡片内容从「成品行程的每一行」
+ * 换成了「查到的东西」。三个区块恰好对应 buildStages 的四段文案
+ * （解析需求 → 核对天气 → 确认车次 → 生成完成）。
+ */
+const BUILD_TOTAL = 3
 const builtRows = ref(0)
 
 let buildTimer: number | null = null
@@ -335,7 +358,7 @@ onMounted(() => {
 
   if (reduce) {
     entered.value = true
-    builtRows.value = heroDays.length
+    builtRows.value = BUILD_TOTAL
     document.querySelectorAll('.rv').forEach((el) => el.classList.add('in'))
     return
   }
@@ -343,14 +366,14 @@ onMounted(() => {
   // 等两帧再置位，确保过渡有起点可播
   revealTimer = window.setTimeout(() => {
     entered.value = true
-    // 入场后开始逐条构建行程单：每 260ms 多一行
+    // 入场后逐块揭示：每 420ms 一块（比逐行慢，让每块有时间被看清）
     buildTimer = window.setInterval(() => {
       builtRows.value += 1
-      if (builtRows.value >= heroDays.length && buildTimer !== null) {
+      if (builtRows.value >= BUILD_TOTAL && buildTimer !== null) {
         window.clearInterval(buildTimer)
         buildTimer = null
       }
-    }, 260)
+    }, 420)
   }, 60)
 
   io = new IntersectionObserver(
@@ -380,26 +403,14 @@ onUnmounted(() => {
 
 /** 当前生成阶段，按已构建进度推进 */
 const buildStage = computed(() => {
-  const ratio = builtRows.value / heroDays.length
+  const ratio = builtRows.value / BUILD_TOTAL
   if (ratio <= 0.15) return buildStages[0]
-  if (ratio <= 0.4) return buildStages[1]
-  if (ratio < 0.95) return buildStages[2]
+  if (ratio <= 0.5) return buildStages[1]
+  if (ratio < 0.99) return buildStages[2]
   return buildStages[3]
 })
 
-/** 已构建的行按天分组，用于渲染时间线 */
-const builtGroups = computed(() => {
-  const rows = heroDays.slice(0, builtRows.value)
-  const grouped: { no: number; theme: string; items: HeroDay[] }[] = []
-  for (const r of rows) {
-    const last = grouped[grouped.length - 1]
-    if (last && last.no === r.no) last.items.push(r)
-    else grouped.push({ no: r.no, theme: r.theme, items: [r] })
-  }
-  return grouped
-})
-
-const done = computed(() => builtRows.value >= heroDays.length)
+const done = computed(() => builtRows.value >= BUILD_TOTAL)
 
 function startHref(): string {
   return user.isLoggedIn ? '/chat' : '/login'
@@ -468,11 +479,17 @@ function startHref(): string {
           </div>
         </div>
 
-        <!-- 右：得（行程单逐条构建） -->
+        <!--
+          右：得（生成过程中查到的东西）
+          刻意不放成品行程——下方「生成结果」区已有三份按天排布的行程，
+          这里若再放一份就会重复。此处展示车次比选、逐日天气与预算构成，
+          回答的是「它替我查了什么、依据什么定的」。
+        -->
         <div class="hero__get">
           <article class="plan">
             <header class="plan__head">
               <div class="plan__route">
+                <TravelIcon name="route" :size="15" />
                 <span>{{ heroPlan.from }}</span>
                 <span class="plan__arrow" aria-hidden="true">
                   <i></i>
@@ -484,60 +501,79 @@ function startHref(): string {
               <span class="plan__badge">示例</span>
             </header>
 
-            <dl class="plan__facts">
-              <div>
-                <dt>天数</dt>
-                <dd>{{ heroPlan.days }} 天</dd>
-              </div>
-              <div>
-                <dt>车次</dt>
-                <dd>{{ heroPlan.train }}</dd>
-              </div>
-              <div>
-                <dt>票价</dt>
-                <dd>{{ heroPlan.price }}</dd>
-              </div>
-              <div>
-                <dt>预算</dt>
-                <dd>{{ heroPlan.budget }}</dd>
-              </div>
-            </dl>
+            <p class="plan__meta">
+              {{ heroPlan.season }} · {{ heroPlan.days }} 天 · 预算 {{ heroPlan.budget }}
+            </p>
 
-            <!-- 时间线：行程真正的样子 -->
             <div class="plan__body">
-              <div
-                v-for="g in builtGroups"
-                :key="`${g.no}-${g.theme}`"
-                class="plan__group"
-              >
-                <p class="plan__day">
-                  <span class="plan__day-no">Day {{ g.no }}</span>
-                  <span class="plan__day-theme">{{ g.theme }}</span>
+              <!-- 车次比选：给出备选而非单一答案，也证明数据是查来的 -->
+              <section v-show="builtRows >= 1" class="blk blk--in">
+                <p class="blk__title">
+                  <TravelIcon name="train" :size="14" />
+                  高铁车次
+                  <span class="blk__hint">3 趟可选</span>
                 </p>
-                <ul class="tl">
-                  <li v-for="(it, i) in g.items" :key="i" class="tl__row">
-                    <span class="tl__time">{{ it.time }}</span>
-                    <span class="tl__slot" :class="`tl__slot--${it.slot}`">
-                      <TravelIcon :name="SLOT_META[it.slot].icon" :size="12" />
-                      {{ SLOT_META[it.slot].label }}
-                    </span>
-                    <span class="tl__place">{{ it.place }}</span>
-                    <span class="tl__cost">{{ it.cost }}</span>
+                <ul class="trains">
+                  <li
+                    v-for="t in heroTrains"
+                    :key="t.code"
+                    class="trains__row"
+                    :class="{ 'is-best': t.best }"
+                  >
+                    <span class="trains__code">{{ t.code }}</span>
+                    <span class="trains__time">{{ t.time }}</span>
+                    <span class="trains__seat">{{ t.seat }}</span>
+                    <span class="trains__price">¥{{ t.price }}</span>
+                    <span v-if="t.best" class="trains__tag">推荐</span>
                   </li>
                 </ul>
-              </div>
+              </section>
+
+              <!-- 逐日天气：对应行程里每一天 -->
+              <section v-show="builtRows >= 2" class="blk blk--in">
+                <p class="blk__title">
+                  <TravelIcon name="sun" :size="14" />
+                  出行天气
+                </p>
+                <ul class="weather">
+                  <li v-for="w in heroWeather" :key="w.day" class="weather__item">
+                    <span class="weather__day">Day {{ w.day }}</span>
+                    <TravelIcon :name="w.icon" :size="15" />
+                    <span class="weather__text">{{ w.text }}</span>
+                    <span class="weather__temp">{{ w.temp }}</span>
+                  </li>
+                </ul>
+              </section>
+
+              <!-- 预算构成：让「¥3000」有出处 -->
+              <section v-show="builtRows >= 3" class="blk blk--in">
+                <p class="blk__title">
+                  <TravelIcon name="luggage" :size="14" />
+                  预算构成
+                  <span class="blk__hint">合计 {{ heroPlan.budget }}</span>
+                </p>
+                <ul class="budget">
+                  <li v-for="b in heroBudget" :key="b.label" class="budget__row">
+                    <span class="budget__label">{{ b.label }}</span>
+                    <span class="budget__bar" aria-hidden="true">
+                      <i :style="{ width: `${Math.round((b.value / 3000) * 100)}%` }"></i>
+                    </span>
+                    <span class="budget__value">¥{{ b.value }}</span>
+                  </li>
+                </ul>
+              </section>
             </div>
 
             <footer class="plan__foot" :class="{ 'is-done': done }">
               <span class="plan__pulse" aria-hidden="true"></span>
               <span class="plan__stage">{{ buildStage }}</span>
               <span v-if="done" class="plan__done">
-                <TravelIcon name="check" :size="13" /> 可保存
+                <TravelIcon name="check" :size="13" /> 可保存为行程
               </span>
             </footer>
           </article>
 
-          <p class="hero__note">示例数据 · 实际车次与票价以对话中查询结果为准</p>
+          <p class="hero__note">示例数据 · 实际车次、天气与票价以对话中查询结果为准</p>
         </div>
       </div>
     </section>
@@ -1042,29 +1078,29 @@ function startHref(): string {
   border-radius: 6px;
 }
 
-.plan__facts {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin: 14px 0 4px;
-}
-.plan__facts dt {
-  font-size: 0.68rem;
+/* 路线下方的轻量概要行 */
+.plan__meta {
+  margin: 12px 0 2px;
+  font-size: 0.78rem;
   color: var(--text3);
-  margin-bottom: 3px;
-}
-.plan__facts dd {
-  font-size: 0.82rem;
-  font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
 
-/* 逐条构建：新出现的分组从下方淡入 */
+/* ---------- 三个信息区块（车次 / 天气 / 预算） ---------- */
+/* 固定最小高度：三块逐一揭示时卡片不会跳高把下方内容顶来顶去 */
 .plan__body {
-  min-height: 232px;
+  min-height: 268px;
 }
-.plan__group {
-  animation: rowIn 0.42s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+.blk {
+  padding: 12px 0;
+  border-bottom: 1px dashed var(--hairline);
+}
+.blk:last-child {
+  border-bottom: none;
+}
+/* 区块被揭示时淡入上移，与 builtRows 的推进同步 */
+.blk--in {
+  animation: rowIn 0.44s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 @keyframes rowIn {
   from {
@@ -1077,86 +1113,145 @@ function startHref(): string {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .plan__group {
+  .blk--in {
     animation: none;
   }
 }
-
-.plan__day {
+.blk__title {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin: 12px 0 6px;
-}
-.plan__day-no {
-  font-family: var(--mono);
-  font-size: 0.68rem;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
   font-weight: 700;
-  color: var(--prim);
-  background: var(--primary-soft);
-  padding: 2px 7px;
-  border-radius: 5px;
-}
-.plan__day-theme {
-  font-size: 0.82rem;
-  font-weight: 650;
   color: var(--text2);
+  margin-bottom: 9px;
+}
+.blk__title :deep(svg) {
+  color: var(--prim);
+}
+.blk__hint {
+  margin-left: auto;
+  font-weight: 500;
+  font-size: 0.72rem;
+  color: var(--text3);
 }
 
-.tl {
+/* ---------- 车次比选 ---------- */
+.trains {
   list-style: none;
   margin: 0;
   padding: 0;
 }
-.tl__row {
+.trains__row {
   display: grid;
-  grid-template-columns: 46px 54px 1fr auto;
+  grid-template-columns: 46px 1fr 46px 50px auto;
   align-items: center;
   gap: 8px;
-  padding: 7px 0;
-  border-bottom: 1px dashed var(--hairline);
-  font-size: 0.82rem;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 0.79rem;
 }
-.tl__row:last-child {
-  border-bottom: none;
+.trains__row.is-best {
+  background: var(--primary-soft);
 }
-.tl__time {
+.trains__code {
   font-family: var(--mono);
-  font-size: 0.74rem;
-  color: var(--text3);
+  font-weight: 700;
+  font-size: 0.76rem;
 }
-.tl__slot {
-  display: inline-flex;
+.trains__time {
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+}
+.trains__seat,
+.trains__price {
+  color: var(--text3);
+  font-size: 0.74rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.trains__tag {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--prim);
+  background: var(--panel);
+  border-radius: 5px;
+  padding: 2px 6px;
+}
+
+/* ---------- 逐日天气 ---------- */
+.weather {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 8px;
+}
+.weather__item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 3px;
-  font-size: 0.68rem;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 5px;
+  padding: 10px 4px;
+  border-radius: 10px;
+  background: var(--panel2);
+  border: 1px solid var(--hairline);
 }
-.tl__slot--morning {
-  background: var(--blue-50);
-  color: var(--blue-700);
-}
-.tl__slot--afternoon {
-  background: var(--gold-soft);
+.weather__item :deep(svg) {
   color: var(--gold-600);
 }
-.tl__slot--evening {
-  background: var(--blue-900);
-  color: #fff;
+.weather__day {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--text3);
 }
-.tl__place {
-  color: var(--text);
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.tl__cost {
+.weather__text {
   font-size: 0.76rem;
+  font-weight: 650;
+}
+.weather__temp {
+  font-size: 0.7rem;
   color: var(--text3);
   font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 预算构成 ---------- */
+.budget {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.budget__row {
+  display: grid;
+  grid-template-columns: 68px 1fr 56px;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 0.76rem;
+}
+.budget__label {
+  color: var(--text3);
+}
+/* 条形图比纯数字更直观地看出钱花在哪 */
+.budget__bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--panel2);
+  overflow: hidden;
+}
+.budget__bar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--grad);
+  transition: width 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.budget__value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text2);
+  font-weight: 600;
 }
 
 .plan__foot {
@@ -1836,10 +1931,6 @@ function startHref(): string {
   .showcase {
     grid-template-columns: 1fr;
   }
-  .plan__facts {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-  }
   .closing__box {
     padding: 46px 22px 40px;
   }
@@ -1873,18 +1964,31 @@ function startHref(): string {
   .prompt {
     text-align: left;
   }
-  /* 窄屏把「时段」换到第二行，避免挤压地点文字 */
-  .tl__row {
-    grid-template-columns: 42px 1fr auto;
-    row-gap: 3px;
+  /* 车次比选在窄屏改为两行：车次+时刻一行，座位+票价另起一行 */
+  .trains__row {
+    grid-template-columns: 46px 1fr auto;
+    row-gap: 2px;
   }
-  .tl__slot {
+  .trains__seat {
     grid-column: 2 / 3;
     grid-row: 2;
-    justify-self: start;
+    text-align: left;
   }
-  .tl__place {
-    grid-column: 2 / 4;
+  .trains__price {
+    grid-column: 3 / 4;
+    grid-row: 2;
+  }
+  .trains__tag {
+    grid-column: 3 / 4;
+    grid-row: 1;
+  }
+  /* 天气三格在窄屏压缩内边距，避免文字换行 */
+  .weather__item {
+    padding: 9px 2px;
+  }
+  .budget__row {
+    grid-template-columns: 58px 1fr 50px;
+    gap: 8px;
   }
   .preview {
     padding: 22px 18px;
