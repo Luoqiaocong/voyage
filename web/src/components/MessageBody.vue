@@ -111,24 +111,14 @@ const blocks = computed<Block[]>(() =>
 }
 
 /* ---------- 小节标题 ---------- */
-/* 左侧一道短竖线，像文档的小节，比加粗整行更轻盈 */
+/* 纯文字加粗即可。
+   原设计在标题左侧画了一道渐变竖线，实测显得杂乱——一段回答里
+   往往有三四个小标题，每条都挂一道竖线，视觉噪音盖过了层次本身。 */
 .mb__h {
-  position: relative;
-  margin: 4px 0 0;
-  padding-left: 11px;
+  margin: 6px 0 0;
   font-size: 0.95rem;
   font-weight: 700;
   line-height: 1.6;
-}
-.mb__h::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0.42em;
-  bottom: 0.42em;
-  width: 3px;
-  border-radius: 2px;
-  background: var(--grad);
 }
 .mb__h--1,
 .mb__h--2 {

@@ -186,11 +186,42 @@ async function newConversation() {
   }
 }
 
-async function handleRename(conv: Conversation) {
-  const title = window.prompt('请输入新标题（1-64 个字符）', conv.title ?? '')
-  if (title === null || !title.trim()) return
-  const trimmed = title.trim()
-  if (trimmed === conv.title) return
+/**
+ * 内联重命名状态：正在编辑哪个会话、草稿标题。
+ *
+ * 为什么不用 window.prompt：那是浏览器原生弹窗，无法套用站点样式，
+ * 移动端尤其突兀（会顶掉整个页面），且与页面的视觉体系完全脱节。
+ * 标题本来就短，直接就地改最自然——点铅笔，标题原地变成输入框。
+ */
+const editingId = ref<string | null>(null)
+const editingTitle = ref('')
+const renameInputEl = ref<HTMLInputElement | null>(null)
+
+/** 进入编辑态并聚焦（等 DOM 更新后再选，否则元素还不存在） */
+function startRename(conv: Conversation) {
+  editingId.value = conv.id
+  editingTitle.value = conv.title ?? ''
+  nextTick(() => {
+    renameInputEl.value?.focus()
+    renameInputEl.value?.select()
+  })
+}
+
+function cancelRename() {
+  editingId.value = null
+  editingTitle.value = ''
+}
+
+/** 提交重命名。失败时保留编辑态，让用户能直接改而不是重来一遍 */
+async function commitRename(conv: Conversation) {
+  if (editingId.value !== conv.id) return
+  const trimmed = editingTitle.value.trim()
+  const original = conv.title ?? ''
+
+  if (!trimmed || trimmed === original) {
+    cancelRename()
+    return
+  }
   if (trimmed.length > 64) {
     ui.toast('标题不能超过 64 个字符', 'error')
     return
@@ -198,10 +229,34 @@ async function handleRename(conv: Conversation) {
   try {
     await renameConversation(conv.id, trimmed)
     conv.title = trimmed
-    ui.toast('标题已更新', 'success')
+    cancelRename()
   } catch (e: any) {
     ui.toast(e?.message ?? '修改标题失败', 'error')
   }
+}
+
+/** 编辑框的键盘处理：回车保存、Esc 取消 */
+function onRenameKey(e: KeyboardEvent, conv: Conversation) {
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    void commitRename(conv)
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    cancelRename()
+  }
+}
+
+/**
+ * 工具条的「重命名」：重命名是就地编辑，输入框在侧栏里。
+ * 所以这里要先把侧栏备好——桌面端若已折叠就展开，
+ * 窄屏则唤出抽屉，否则用户点了按钮却看不到任何反应。
+ */
+function renameFromToolbar() {
+  const conv = activeConversation.value
+  if (!conv) return
+  if (window.matchMedia('(max-width: 860px)').matches) sideOpen.value = true
+  else sideFolded.value = false
+  startRename(conv)
 }
 
 async function handleDelete(conv: Conversation) {
@@ -698,9 +753,23 @@ watch(streaming, (v) => {
             >
               <span class="conv-item__pin" aria-hidden="true"></span>
               <span class="conv-item__main">
-                <span class="conv-item__title">{{ conv.title || '新会话' }}</span>
+                <!-- 编辑态：标题原地变成输入框，不弹窗 -->
+                <input
+                  v-if="editingId === conv.id"
+                  ref="renameInputEl"
+                  v-model="editingTitle"
+                  class="conv-item__edit"
+                  type="text"
+                  maxlength="64"
+                  aria-label="会话标题"
+                  @click.stop
+                  @keydown="onRenameKey($event, conv)"
+                  @blur="commitRename(conv)"
+                />
+                <span v-else class="conv-item__title">{{ conv.title || '新会话' }}</span>
+
                 <!-- 摘要取该会话首条用户消息，比标题更能说明聊了什么 -->
-                <span v-if="convSummary[conv.id]" class="conv-item__sum">
+                <span v-if="convSummary[conv.id] && editingId !== conv.id" class="conv-item__sum">
                   {{ convSummary[conv.id] }}
                 </span>
                 <span class="conv-item__meta">
@@ -715,9 +784,9 @@ watch(streaming, (v) => {
                   tabindex="0"
                   title="重命名"
                   aria-label="重命名会话"
-                  @click="handleRename(conv)"
-                  @keydown.enter.prevent="handleRename(conv)"
-                  @keydown.space.prevent="handleRename(conv)"
+                  @click="startRename(conv)"
+                  @keydown.enter.prevent="startRename(conv)"
+                  @keydown.space.prevent="startRename(conv)"
                 >✎</span>
                 <span
                   class="icon-btn icon-btn--danger"
@@ -811,7 +880,12 @@ watch(streaming, (v) => {
                 <TravelIcon name="luggage" :size="15" />
                 提取行程
               </button>
-              <button class="tool-btn" :disabled="streaming" @click="handleRename(activeConversation!)">
+              <button
+                class="tool-btn"
+                :disabled="streaming"
+                title="在左侧会话列表中就地修改标题"
+                @click="renameFromToolbar"
+              >
                 <TravelIcon name="edit" :size="15" />
                 重命名
               </button>
@@ -1143,6 +1217,24 @@ watch(streaming, (v) => {
   line-height: 1.5;
   color: var(--text3);
   margin-top: 1px;
+}
+
+/* ---- 内联重命名输入框 ----
+   外观与标题文字接近，只是多一圈边框，避免「突然换了个控件」的割裂感 */
+.conv-item__edit {
+  width: 100%;
+  padding: 2px 6px;
+  margin: -1px 0 0 -7px;
+  border: 1px solid var(--prim);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 650;
+  font-family: inherit;
+  line-height: 1.5;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
 .chat-side__hint { padding: 18px 16px; color: var(--text3); font-size: 0.82rem; line-height: 1.6; }
@@ -1629,20 +1721,15 @@ watch(streaming, (v) => {
 }
 
 /* ---- 助手消息卡片 ----
-   极淡的底 + 左侧一道细边，像顾问递过来的方案纸。
-   不用重阴影：大面积卡片叠阴影会让整屏显脏。 */
+   原先这里有一条左侧竖边（悬停时浮出蓝色），实测很干扰：
+   鼠标划过内容就冒出一道蓝线，像是选中状态，且与文内的小节标题
+   竖线叠在一起更显杂乱。现改为完全无装饰，让内容自己成立。 */
 .msg__card {
-  padding: 2px 2px 2px 0;
-  border-left: 2px solid transparent;
-  transition: border-color 0.24s;
-}
-.msg--assistant:hover .msg__card {
-  border-left-color: var(--blue-200);
+  padding: 2px 0;
 }
 
-/* 出错时整块转为错误色 */
+/* 出错时整块转为错误色——这个保留：它表达的是真实状态而非装饰 */
 .msg__card--err {
-  border-left-color: var(--danger) !important;
   background: rgba(229, 72, 77, 0.06);
   border-radius: 10px;
   padding: 10px 13px;
