@@ -7,10 +7,10 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from app.shared.utils import log
 
+from .date_context import inject_current_date
 from .llm import TaskKind, get_task_llm
 from .middleware import CUSTOM_MIDDLEWARE
 from .tools import (
-    get_today,
     ticket_schedule_cached,
     travel_recommend_cached,
     weather_forecast_cached,
@@ -18,12 +18,23 @@ from .tools import (
 
 # supervisor 的工具集：带缓存与埋点的版本（见 tools/__init__.py 说明）。
 # 抽成模块级常量，避免 initialize 与 apply_memory 两处各写一遍导致漏改。
+#
+# 这里**不再包含 get_today**：当前日期改由 date_context 中间件注入系统提示词。
+# 日期是服务端每次调用都确切知道的常量，让模型为此跑一次完整工具链路
+# （实测 3.2 秒）既不必要，界面上也会多出一条「获取当前日期」，
+# 用户看到会疑惑「这也要查」。安全性不变——日期仍由我们提供，
+# 而非取自模型的记忆。
 AGENT_TOOLS = [
     ticket_schedule_cached,
     weather_forecast_cached,
     travel_recommend_cached,
-    get_today,
 ]
+
+# 中间件清单 = 通用中间件 + 日期注入。
+# 日期注入放在最后：它在每轮模型调用前把原始 system message 重新组装
+# （原提示词 + 当前日期），若放在其它中间件之前，那些中间件看到的
+# system message 就会是带日期的版本，不利于各自独立判断。
+AGENT_MIDDLEWARE = [*CUSTOM_MIDDLEWARE, inject_current_date]
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
@@ -40,7 +51,10 @@ SUPERVISOR_PROMPT = """你是 Voyage 的旅行顾问，一位既专业又亲切�
 - 查车次/票价/路线 → ticket_schedule
 - 查某地某段时间的天气/穿衣/户外建议 → weather_forecast
 - 要一整套行程（酒店+景点+美食等综合推荐）→ 先取到天气/车次信息后，再调 travel_recommend
-- 涉及相对日期（今天/明天/后天/本周/下周等）需要换算成具体日期，或要填写具体出发日期 → get_today
+
+注意：**当前日期已经直接写在你的系统提示词末尾**，无需（也没有工具可以）查询。
+需要把「明天/后天/本周五」换算成具体日期时，直接使用那里的日期即可，
+自然地在回答里用具体日期，不要解释你是怎么知道今天日期的。
 
 ### 什么时候不调用工具，直接回答
 - 闲聊、寒暄（如「你好」「谢谢」「你是谁」）
@@ -89,7 +103,7 @@ class AgentFactory:
             model=get_task_llm(TaskKind.CHAT),
             tools=AGENT_TOOLS,
             checkpointer=checkpointer,
-            middleware=CUSTOM_MIDDLEWARE,
+            middleware=AGENT_MIDDLEWARE,
             system_prompt=cls._compose_prompt(),
         )
 
@@ -121,7 +135,7 @@ class AgentFactory:
                 model=get_task_llm(TaskKind.CHAT),
                 tools=AGENT_TOOLS,
                 checkpointer=cls._checkpointer,
-                middleware=CUSTOM_MIDDLEWARE,
+                middleware=AGENT_MIDDLEWARE,
                 system_prompt=cls._compose_prompt(),
             )
             log.info(f"[memory] agent 已按新记忆重建（长度 {len(new_context)}）")
