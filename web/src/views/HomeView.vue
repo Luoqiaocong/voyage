@@ -653,18 +653,24 @@ function startHref(): string {
 
         <div class="steps">
           <ol class="steps__list rv">
-            <li
-              v-for="(s, i) in steps"
-              :key="s.no"
-              class="step"
-              :class="{ 'step--on': i === activeStep }"
-              @click="pickStep(i)"
-            >
-              <span class="step__no">{{ s.no }}</span>
-              <span class="step__body">
-                <b>{{ s.title }}</b>
-                <i>{{ s.desc }}</i>
-              </span>
+            <!--
+              用 button 而非可点击的 li：原生支持键盘（Tab 聚焦、回车/空格触发）
+              与读屏器，无需手写 tabindex + keydown。li 本身仍由 ol 提供语义。
+            -->
+            <li v-for="(s, i) in steps" :key="s.no">
+              <button
+                type="button"
+                class="step"
+                :class="{ 'step--on': i === activeStep }"
+                :aria-current="i === activeStep ? 'step' : undefined"
+                @click="pickStep(i)"
+              >
+                <span class="step__no">{{ s.no }}</span>
+                <span class="step__body">
+                  <b>{{ s.title }}</b>
+                  <i>{{ s.desc }}</i>
+                </span>
+              </button>
             </li>
           </ol>
 
@@ -1560,9 +1566,21 @@ function startHref(): string {
   cursor: pointer;
   border-radius: 12px;
   transition: background-color 0.22s;
+  /* 按钮元素的重置：抹掉浏览器默认外观，让它与原先的 li 视觉一致 */
+  width: 100%;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
 }
 .step:hover {
   background: var(--panel);
+}
+/* 键盘聚焦要有可见指示，否则 Tab 过去看不出焦点在哪 */
+.step:focus-visible {
+  outline: 2px solid var(--prim);
+  outline-offset: 2px;
 }
 .step__no {
   display: grid;
