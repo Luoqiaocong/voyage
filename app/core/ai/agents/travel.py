@@ -3,6 +3,7 @@ from langchain.agents import create_agent
 
 from app.core.ai.llm import TaskKind, get_task_llm
 from app.core.ai.mcp import get_namespace_tools
+from app.core.ai.tools.wrap_cache import with_cache
 
 TRAVEL_AGENT_PROMPT = """你是一个目的地综合规划专家（Travel Agent）。
 结合到站信息、天气与用户预算约束，进行推荐。
@@ -35,10 +36,15 @@ _travel_agent_cache = None
 
 
 async def get_travel_agent():
-    """惰性获取 Travel 子 Agent：首次调用时异步构建并缓存。"""
+    """惰性获取 Travel 子 Agent：首次调用时异步构建并缓存。
+
+    工具经 with_cache 包装：这个子 Agent 内部要做多次网页搜索与抓取，
+    实测冷启动一轮 travel_recommend 约 120 秒，而结果在几十分钟内稳定。
+    不缓存的话，同一个目的地被反复询问就要反复重跑整套网络请求。
+    """
     global _travel_agent_cache
     if _travel_agent_cache is None:
-        tools = await get_namespace_tools("travel")
+        tools = with_cache(await get_namespace_tools("travel"))
         _travel_agent_cache = create_agent(
             name="travel_agent",
             model=get_task_llm(TaskKind.PLAN),

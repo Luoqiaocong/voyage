@@ -7,6 +7,7 @@
 """
 import asyncio
 import sys
+import time
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -20,7 +21,7 @@ from app.core.business import register_exception
 from app.api import api_router
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
-from app.shared.utils import init_log, close_log
+from app.shared.utils import close_log, init_log, log
 from app.config import config
 from app.shared.db.checkpoint import open_checkpointer
 from app.shared.redis import redis_client
@@ -37,9 +38,14 @@ async def lifespan(app: FastAPI):
         async with open_checkpointer() as checkpointer:
             AgentFactory.initialize(checkpointer)
             usage_flush_task.start()   # 周期性把 Token 增量落库
+            # 后台预热：把首次调用的建连开销从「用户等待」挪到「启动时」。
+            # 不 await —— 预热失败或慢都不该拖住服务就绪，
+            # 真正需要时仍会按需惰性构建（见 agents/travel.py）。
+            prewarm_task = asyncio.create_task(_prewarm())
             try:
                 yield
             finally:
+                prewarm_task.cancel()
                 AgentFactory.reset()   # 异常也兜底，且仍在连接关闭前
     finally:
         # 退出前收尾：先等记忆提炼（它用的是独立 DB 会话），再落库、关连接
@@ -48,7 +54,36 @@ async def lifespan(app: FastAPI):
         await close_http_client()   # 释放共享 LLM 连接池
         await redis_client.close()
         close_log()
-    
+
+
+async def _prewarm() -> None:
+    """预热重资源，缩短用户第一次提问的等待。
+
+    为什么需要：实测首次调用 travel_recommend 耗时约 120 秒，
+    其中包含 MCP 建连与 8 个网络工具的准备。这段开销与用户的具体问题
+    无关，完全可以提前付掉——启动时多花几秒，换来用户侧少等。
+
+    刻意做成「尽力而为」：任一步失败只记日志，不影响服务可用性，
+    因为所有资源在真正用到时都会惰性重建。
+    """
+    try:
+        from app.core.ai.mcp import get_namespace_tools
+
+        t0 = time.perf_counter()
+        # 主 Agent 的工具本身就注册在启动路径上，这里补的是 travel 子 Agent。
+        # 只取工具（会建立 MCP 连接），不构建 agent —— 构建要等模型，
+        # 而模型调用无法复用，预热它没有意义。
+        tools = await get_namespace_tools("travel")
+        log.info(
+            f"[prewarm] travel 工具已就绪（{len(tools)} 个），"
+            f"耗时 {time.perf_counter() - t0:.2f}s"
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"[prewarm] 失败，将在首次调用时按需构建: {type(exc).__name__}: {exc}")
+
+
 app = FastAPI(title="voyage Plan Assistant",lifespan=lifespan)
 
 app.include_router(api_router)
