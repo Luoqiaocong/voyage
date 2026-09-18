@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppNavbar from '@/components/AppNavbar.vue'
+import MessageBody from '@/components/MessageBody.vue'
 import ToolTimeline from '@/components/ToolTimeline.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
 import type { ToolStep } from '@/types/tool'
@@ -20,7 +21,6 @@ import {
 import { extractItinerary } from '@/api/itinerary'
 import { useUiStore } from '@/stores/ui'
 import { useUserStore } from '@/stores/user'
-import { renderMarkdown } from '@/utils/md'
 import { PAGE_COPY } from '@/constants/copy'
 
 /** 会话消息：assistant 消息可携带本轮的工具调用与思考过程 */
@@ -692,21 +692,26 @@ watch(streaming, (v) => {
                   <!-- 工具调用：鲜明的时间线 -->
                   <ToolTimeline v-if="msg.tools && msg.tools.length" :steps="msg.tools" />
 
-                  <!-- 正文：助手走 Markdown，用户走纯文本 -->
-                  <div
+                  <!--
+                    正文：助手走结构化渲染，用户走纯文本。
+                    助手不再用气泡装 markdown —— 那会让用户看到满屏 ** 与 -，
+                    像在读源码。MessageBody 把它解析成小节标题、条目列表、
+                    行程片段与提示块，读起来像顾问给的方案。
+                  -->
+                  <MessageBody
                     v-if="msg.content && msg.role === 'assistant'"
-                    class="msg__bubble md-body"
-                    :class="{ 'msg__bubble--err': !!streamError && i === renderedMessages.length - 1 && streaming }"
-                    v-html="renderMarkdown(msg.content)"
-                  ></div>
+                    class="msg__card"
+                    :class="{ 'msg__card--err': !!streamError && i === renderedMessages.length - 1 && streaming }"
+                    :text="msg.content"
+                    :streaming="streaming && i === renderedMessages.length - 1"
+                    @extract="handleExtract"
+                  />
                   <div v-else-if="msg.content" class="msg__bubble">{{ msg.content }}</div>
 
-                  <!-- 流式光标 -->
-                  <span
-                    v-if="streaming && i === renderedMessages.length - 1 && msg.content"
-                    class="stream-caret"
-                    aria-hidden="true"
-                  ></span>
+                  <!--
+                    流式光标已由 MessageBody 内部处理（末块不结构化），
+                    这里不再单独渲染，避免出现两个光标。
+                  -->
 
                   <!-- 消息操作条：悬停浮现，避免常驻占用视线 -->
                   <div v-if="msg.content && !streaming" class="msg__ops">
@@ -1208,7 +1213,11 @@ watch(streaming, (v) => {
 .msg__col { display: flex; flex-direction: column; gap: 8px; min-width: 0; max-width: min(680px, 88%); }
 .msg--user .msg__col { align-items: flex-end; max-width: min(600px, 84%); }
 
-/* ---- 气泡 ---- */
+/* ---- 气泡（仅用户消息）----
+   助手消息不再用气泡包裹：结构化内容自己就是排版，
+   再套一层圆角底色只会让小节标题、列表、提示块挤在一个框里，
+   既不像文档也不像对话。改成无底色直接铺开，
+   靠 MessageBody 内部的标题竖线与列表缩进建立层次。 */
 .msg__bubble {
   padding: 12px 16px;
   border-radius: 14px;
@@ -1225,30 +1234,26 @@ watch(streaming, (v) => {
   box-shadow: 0 6px 18px var(--glow);
 }
 
-.msg--assistant .msg__bubble {
-  background: var(--bubble-ai);
-  border: 1px solid var(--border);
-  border-radius: 5px 16px 16px 16px;
-  color: var(--text);
+/* ---- 助手消息卡片 ----
+   极淡的底 + 左侧一道细边，像顾问递过来的方案纸。
+   不用重阴影：大面积卡片叠阴影会让整屏显脏。 */
+.msg__card {
+  padding: 2px 2px 2px 0;
+  border-left: 2px solid transparent;
+  transition: border-color 0.24s;
+}
+.msg--assistant:hover .msg__card {
+  border-left-color: var(--blue-200);
 }
 
-.msg__bubble--err {
-  background: rgba(229, 72, 77, 0.08) !important;
-  border-color: rgba(229, 72, 77, 0.3) !important;
-  color: var(--danger) !important;
+/* 出错时整块转为错误色 */
+.msg__card--err {
+  border-left-color: var(--danger) !important;
+  background: rgba(229, 72, 77, 0.06);
+  border-radius: 10px;
+  padding: 10px 13px;
+  color: var(--danger);
 }
-
-/* ---- 流式光标 ---- */
-.stream-caret {
-  display: inline-block;
-  width: 7px;
-  height: 15px;
-  border-radius: 2px;
-  background: var(--prim);
-  animation: caret 1.05s steps(2) infinite;
-  vertical-align: -2px;
-}
-@keyframes caret { 50% { opacity: 0; } }
 
 /* ---- 消息操作条 ----
    默认隐藏、悬停浮现，并轻微下移淡入——常驻会持续占用视线，
@@ -1318,50 +1323,11 @@ watch(streaming, (v) => {
 .reason__len { margin-left: auto; font-size: 0.7rem; color: var(--text3); font-weight: 400; }
 .reason p { margin-top: 8px; white-space: pre-wrap; line-height: 1.7; }
 
-/* ---- Markdown ---- */
-.md-body :deep(p) { margin: 0 0 9px; }
-.md-body :deep(p:last-child) { margin-bottom: 0; }
-.md-body :deep(.md-inline) {
-  background: var(--panel2);
-  border: 1px solid var(--border);
-  padding: 1px 6px;
-  border-radius: 5px;
-  font-family: var(--mono);
-  font-size: 0.85em;
-}
-.md-body :deep(.md-code) {
-  background: var(--ink-deep);
-  color: #d8e6ee;
-  padding: 12px 14px;
-  border-radius: 10px;
-  font-size: 0.85em;
-  overflow-x: auto;
-  margin: 9px 0;
-}
-:root[data-theme='dark'] .md-body :deep(.md-code) { background: #060a14; }
-.md-body :deep(.md-h) { margin: 14px 0 7px; font-size: 1.02em; font-weight: 700; }
-.md-body :deep(.md-h:first-child) { margin-top: 0; }
-.md-body :deep(.md-list) { margin: 6px 0; padding-left: 1.25em; }
-.md-body :deep(.md-list li) { margin: 3px 0; }
-.md-body :deep(.md-quote) {
-  margin: 9px 0;
-  padding: 6px 12px;
-  border-left: 3px solid var(--primary);
-  background: var(--primary-soft);
-  border-radius: 0 8px 8px 0;
-  color: var(--text2);
-}
-.md-body :deep(.md-hr) { border: none; border-top: 1px solid var(--hairline); margin: 14px 0; }
-.md-body :deep(.md-a) { color: var(--prim); text-decoration: underline; }
-.md-body :deep(.md-table-wrap) { overflow-x: auto; margin: 10px 0; }
-.md-body :deep(.md-table) { border-collapse: collapse; width: 100%; font-size: 0.86em; }
-.md-body :deep(.md-table th),
-.md-body :deep(.md-table td) {
-  border: 1px solid var(--border);
-  padding: 7px 11px;
-  text-align: left;
-}
-.md-body :deep(.md-table th) { background: var(--panel2); font-weight: 680; }
+/*
+ * Markdown 相关样式已随 v-html 渲染一并移除。
+ * 助手消息改由 MessageBody 组件渲染，其样式封装在该组件内（scoped），
+ * 这里再留一份 .md-body 规则只会成为永远不会命中的死代码。
+ */
 
 /* ---- 打字点 ---- */
 .typing { display: flex; gap: 6px; padding: 14px 16px; background: var(--bubble-ai); border: 1px solid var(--border); border-radius: 5px 16px 16px 16px; width: fit-content; }
