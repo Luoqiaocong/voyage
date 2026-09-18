@@ -756,7 +756,7 @@ function startHref(): string {
               class="ask__input"
               type="text"
               placeholder="你想去哪里？"
-              aria-label="描述你的旅行计划"
+              aria-label="输入目的地，开启第一次规划"
             />
             <button class="ask__go" type="submit">
               开启第一次规划
