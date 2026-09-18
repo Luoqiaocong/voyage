@@ -684,29 +684,53 @@ watch(streaming, (v) => {
         </div>
 
         <ul v-else class="chat-side__list">
-          <li
-            v-for="conv in filteredConversations"
-            :key="conv.id"
-            class="conv-item"
-            :class="{ 'conv-item--active': conv.id === activeId }"
-            @click="openConversation(conv.id); sideOpen = false"
-          >
-            <span class="conv-item__pin" aria-hidden="true"></span>
-            <span class="conv-item__main">
-              <span class="conv-item__title">{{ conv.title || '新会话' }}</span>
-              <!-- 摘要取该会话首条用户消息，比标题更能说明聊了什么 -->
-              <span v-if="convSummary[conv.id]" class="conv-item__sum">
-                {{ convSummary[conv.id] }}
+          <li v-for="conv in filteredConversations" :key="conv.id">
+            <!--
+              用 button 而非可点击的 li：原生支持 Tab 聚焦与回车/空格触发，
+              读屏器也能正确播报为可操作项。li 保留在外层维持列表语义。
+            -->
+            <button
+              type="button"
+              class="conv-item"
+              :class="{ 'conv-item--active': conv.id === activeId }"
+              :aria-current="conv.id === activeId ? 'true' : undefined"
+              @click="openConversation(conv.id); sideOpen = false"
+            >
+              <span class="conv-item__pin" aria-hidden="true"></span>
+              <span class="conv-item__main">
+                <span class="conv-item__title">{{ conv.title || '新会话' }}</span>
+                <!-- 摘要取该会话首条用户消息，比标题更能说明聊了什么 -->
+                <span v-if="convSummary[conv.id]" class="conv-item__sum">
+                  {{ convSummary[conv.id] }}
+                </span>
+                <span class="conv-item__meta">
+                  <span class="conv-item__time">{{ convTime(conv.created_at) }}</span>
+                  <span v-if="!conv.title" class="conv-item__wip">待命名</span>
+                </span>
               </span>
-              <span class="conv-item__meta">
-                <span class="conv-item__time">{{ convTime(conv.created_at) }}</span>
-                <span v-if="!conv.title" class="conv-item__wip">待命名</span>
+              <span class="conv-item__ops" @click.stop>
+                <span
+                  class="icon-btn"
+                  role="button"
+                  tabindex="0"
+                  title="重命名"
+                  aria-label="重命名会话"
+                  @click="handleRename(conv)"
+                  @keydown.enter.prevent="handleRename(conv)"
+                  @keydown.space.prevent="handleRename(conv)"
+                >✎</span>
+                <span
+                  class="icon-btn icon-btn--danger"
+                  role="button"
+                  tabindex="0"
+                  title="删除"
+                  aria-label="删除会话"
+                  @click="handleDelete(conv)"
+                  @keydown.enter.prevent="handleDelete(conv)"
+                  @keydown.space.prevent="handleDelete(conv)"
+                >✕</span>
               </span>
-            </span>
-            <span class="conv-item__ops" @click.stop>
-              <button class="icon-btn" title="重命名" aria-label="重命名会话" @click="handleRename(conv)">✎</button>
-              <button class="icon-btn icon-btn--danger" title="删除" aria-label="删除会话" @click="handleDelete(conv)">✕</button>
-            </span>
+            </button>
           </li>
         </ul>
       </aside>
@@ -1001,7 +1025,8 @@ watch(streaming, (v) => {
   display: grid;
   /* 侧栏宽度用变量控制：折叠时只改变量，主区自动铺满，
      不必让 JS 参与布局计算 */
-  grid-template-columns: var(--side-w, 272px) 1fr;
+  --side-w: 272px;
+  grid-template-columns: var(--side-w) 1fr;
   margin: 0 16px 16px;
   gap: 16px;
   position: relative;
@@ -1224,8 +1249,19 @@ watch(streaming, (v) => {
   cursor: pointer;
   border: 1px solid transparent;
   transition: background-color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+  /* 按钮元素的重置：抹掉浏览器默认外观，与原先的 li 视觉保持一致 */
+  width: 100%;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
 }
 .conv-item:hover { background: var(--panel2); transform: translateX(2px); }
+/* 键盘聚焦要有可见指示，否则 Tab 过去看不出焦点在哪 */
+.conv-item:focus-visible {
+  outline: 2px solid var(--prim);
+  outline-offset: -2px;
+}
 .conv-item--active {
   background: var(--grad-soft);
   border-color: var(--blue-200);
