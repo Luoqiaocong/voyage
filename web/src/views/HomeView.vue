@@ -1,206 +1,224 @@
 <script setup lang="ts">
 /**
- * HomeView · 首页
+ * HomeView · 官网首页
  *
- * 结构：左文右景 Hero → 数据条 → 能力区(6 卡) → 产品演示 → 示例行程 → 三步流程 → CTA
+ * 设计概念：**把行程单本身当作主视觉**。
  *
- * 视觉方向：清爽浅色系 + 沉浸式旅行科技感。
- * - 底色为极浅冷灰白（--bg #f7f9fc / --bg2 #f0f4f8）
- * - 主色为旅行蓝（--blue-600 #2563EB，配白字 5.17:1 达 WCAG AA）
- * - 暖金仅作极少量点缀（评分、徽标）
+ * 多数旅行/AI 产品靠抽象图形（地图纹理、光晕、渐变曲线）营造氛围，
+ * 再用一排平均用力的功能卡片介绍能力。但用户真正想看的是
+ * 「这东西生成出来长什么样」。所以这里反过来：直接渲染一份真实的行程单，
+ * 让它逐条构建出来，把「生成过程」当作英雄元素。
  *
- * 旅行氛围的做法：全部使用内联 SVG（地图纹理、航线、时段图标）而非位图——
- * 高分屏不糊、不增加请求体积、深浅主题自动适配，也无需维护两套图。
+ * 信息架构：
+ *   1. Hero      可输入的规划框 + 正在生成的行程单（左「说」右「得」）
+ *   2. 示例行程   3 座城市，先让用户看到完整结果
+ *   3. 三个场景   对话片段 → 结果卡片，替代原来 6 张平均卡片
+ *   4. 三步流程   大数字时间线 + 随步骤切换的实时预览
+ *   5. 收尾 CTA   仪式感
+ *
+ * 动效原则：一次性编排（整页入场 → 行程逐条构建），不做无意义循环动画。
+ * 全部尊重 prefers-reduced-motion。
  */
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import AppNavbar from '@/components/AppNavbar.vue'
 import AppFooter from '@/components/AppFooter.vue'
-import FeatureIcon from '@/components/FeatureIcon.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
 
 const user = useUserStore()
 const router = useRouter()
 
-function startHref(): string {
-  return user.isLoggedIn ? '/chat' : '/login'
+/* ==================== 1. Hero：一句话规划 ==================== */
+const draft = ref('')
+const inputEl = ref<HTMLInputElement | null>(null)
+
+/** 带着这句话进对话；未登录先去登录（沿用既有 example 参数约定） */
+function submitPlan() {
+  const text = draft.value.trim()
+  const target = user.isLoggedIn ? '/chat' : '/login'
+  router.push(text ? { path: target, query: { example: text } } : { path: target })
 }
+
+/** 想不到问题就点示例，填进输入框并聚焦，用户可再改 */
+function usePrompt(text: string) {
+  draft.value = text
+  inputEl.value?.focus()
+}
+
+const prompts = [
+  '广州 → 北京 3 天，预算 3000',
+  '成都周末两日游，帮我看看天气',
+  '西安 4 天，想拍古建筑'
+]
 
 /**
- * 点击示例胶囊：带着这句话进入对话。
+ * Hero 行程单数据。
  *
- * 用 query 传递而非路由 state——state 刷新即丢，query 能在登录页读取，
- * 并在登录成功后继续生效（登录页会把 example 暂存后在跳转时消费）。
+ * 全部为**静态示例**：车次、票价、天气都是写死的示范值。
+ * 故卡片标注「示例」而非「实时」——标成实时会让人以为这是此刻查到的
+ * 真实数据，属于误导。真实查询发生在对话中，由 MCP 工具完成。
  */
-function useExample(text: string) {
-  const target = user.isLoggedIn ? '/chat' : '/login'
-  router.push({ path: target, query: { example: text } })
+const heroPlan = {
+  from: '广州南',
+  to: '北京西',
+  days: 3,
+  budget: '¥3000',
+  train: 'G77 · 二等座',
+  price: '¥553'
 }
 
-/* ---------------- 数据 ---------------- */
-const features = [
-  {
-    icon: 'spark' as const,
-    tag: '生成',
-    title: 'AI 智能规划',
-    desc: '说出目的地、天数与预算，一句话得到完整可执行的行程方案。',
-    more: '无需填表，自然语言即可'
-  },
-  {
-    icon: 'train' as const,
-    tag: '实时',
-    title: '车次票价查询',
-    desc: '车次、票价与余票即时可查，交通信息真实可核验。',
-    more: '接入实时车次数据源'
-  },
-  {
-    icon: 'sun' as const,
-    tag: '天气',
-    title: '天气穿衣建议',
-    desc: '出发前自动查询目的地天气，按天气推荐穿着与安排。',
-    more: '按出行日期区间查询'
-  },
-  {
-    icon: 'edit' as const,
-    tag: '可编辑',
-    title: '行程一键调整',
-    desc: '按天按时段展示，景点、住宿与美食随时增删并保存。',
-    more: '改完即存，下次接着看'
-  },
-  {
-    icon: 'layers' as const,
-    tag: '稳定',
-    title: '多模型保障',
-    desc: '接入多个大模型，调用失败自动重试与降级，对话始终稳定。',
-    more: '失败自动重试不中断'
-  },
-  {
-    icon: 'chat' as const,
-    tag: '流式',
-    title: '实时对话体验',
-    desc: '思考过程、工具调用与正文实时呈现，等待不再漫长。',
-    more: '逐字输出，所见即所得'
-  }
+type Slot = 'morning' | 'afternoon' | 'evening'
+
+interface HeroDay {
+  no: number
+  theme: string
+  time: string
+  place: string
+  cost: string
+  slot: Slot
+}
+
+const heroDays: HeroDay[] = [
+  { no: 1, theme: '抵达 · 中轴线', time: '14:00', place: '天安门广场 · 故宫', cost: '¥60', slot: 'afternoon' },
+  { no: 1, theme: '抵达 · 中轴线', time: '19:30', place: '前门大街 · 老字号', cost: '¥80', slot: 'evening' },
+  { no: 2, theme: '长城一日', time: '07:30', place: '八达岭长城', cost: '¥40', slot: 'morning' },
+  { no: 2, theme: '长城一日', time: '15:00', place: '鸟巢 · 水立方', cost: '免费', slot: 'afternoon' },
+  { no: 3, theme: '园林收尾', time: '09:00', place: '颐和园 · 昆明湖', cost: '¥30', slot: 'morning' },
+  { no: 3, theme: '园林收尾', time: '16:00', place: '返程 · 北京西', cost: '¥553', slot: 'evening' }
 ]
 
-/** 信任数据条 */
-const stats = [
-  { num: '3 步', label: '从需求到成稿' },
-  { num: '2 类', label: '实时数据源' },
-  { num: '多人', label: 'Agent 协作规划' },
-  { num: '随时', label: '可编辑可保存' }
-]
+/** 生成阶段文案：让「正在发生什么」可见，而不是干等 */
+const buildStages = ['正在解析出行需求', '已核对应季天气', '车次与票价已确认', '行程已生成']
 
-/** Hero 示例提问：可点击，点了直接带着问题进对话 */
-const heroExamples = [
-  { icon: 'train', text: '广州到北京 3 天，预算 3000，坐高铁' },
-  { icon: 'sun', text: '成都周末两日游，帮我看看天气' },
-  { icon: 'camera', text: '西安 4 天，想拍古建筑和吃小吃' }
-]
+const SLOT_META: Record<Slot, { label: string; icon: string }> = {
+  morning: { label: '上午', icon: 'sun' },
+  afternoon: { label: '下午', icon: 'camera' },
+  evening: { label: '晚上', icon: 'moon' }
+}
 
+/* ==================== 2. 示例行程（结果优先） ==================== */
+interface DemoActivity {
+  slot: Slot
+  name: string
+  desc: string
+  cost: string
+}
 interface DemoDay {
   theme: string
+  date: string
   summary: string
-  acts: { slot: string; name: string; desc: string }[]
+  acts: DemoActivity[]
 }
 interface Demo {
-  dest: string
-  days: number
+  city: string
   tag: string
+  days: number
+  budget: string
   plan: DemoDay[]
 }
 
 const demos: Demo[] = [
   {
-    dest: '北京',
-    days: 3,
+    city: '北京',
     tag: '文化古都',
+    days: 3,
+    budget: '¥2800',
     plan: [
       {
         theme: '城市初探',
+        date: '10-01',
         summary: '天安门、胡同与小吃',
         acts: [
-          { slot: '上午', name: '天安门广场 · 故宫', desc: '门票 60 元，需提前预约，游览约 4 小时' },
-          { slot: '下午', name: '南锣鼓巷 · 胡同漫步', desc: '免费，感受老北京胡同文化' },
-          { slot: '晚上', name: '王府井小吃街', desc: '人均 80 元，推荐卤煮与炸酱面' }
+          { slot: 'morning', name: '天安门广场 · 故宫', desc: '门票 60 元，需提前预约，游览约 4 小时', cost: '¥60' },
+          { slot: 'afternoon', name: '南锣鼓巷 · 胡同漫步', desc: '免费，感受老北京胡同文化', cost: '免费' },
+          { slot: 'evening', name: '王府井小吃街', desc: '人均 80 元，推荐卤煮与炸酱面', cost: '¥80' }
         ]
       },
       {
         theme: '长城壮阔',
+        date: '10-02',
         summary: '八达岭与奥体之夜',
         acts: [
-          { slot: '上午', name: '八达岭长城', desc: '门票 40 元，建议早出发避开人流' },
-          { slot: '下午', name: '鸟巢 · 水立方外观', desc: '免费外观，拍照打卡' },
-          { slot: '晚上', name: '簋街夜市', desc: '人均 100 元，麻辣小龙虾' }
+          { slot: 'morning', name: '八达岭长城', desc: '门票 40 元，建议早出发避开人流', cost: '¥40' },
+          { slot: 'afternoon', name: '鸟巢 · 水立方外观', desc: '免费外观，拍照打卡', cost: '免费' },
+          { slot: 'evening', name: '簋街夜市', desc: '人均 100 元，麻辣小龙虾', cost: '¥100' }
         ]
       },
       {
         theme: '皇家园林',
+        date: '10-03',
         summary: '颐和园与前门收官',
         acts: [
-          { slot: '上午', name: '颐和园', desc: '门票 30 元，游昆明湖' },
-          { slot: '下午', name: '圆明园遗址', desc: '门票 25 元，历史参观' },
-          { slot: '晚上', name: '前门大街', desc: '免费，夜景与老字号' }
+          { slot: 'morning', name: '颐和园', desc: '门票 30 元，游昆明湖', cost: '¥30' },
+          { slot: 'afternoon', name: '圆明园遗址', desc: '门票 25 元，历史参观', cost: '¥25' },
+          { slot: 'evening', name: '前门大街', desc: '免费，夜景与老字号', cost: '免费' }
         ]
       }
     ]
   },
   {
-    dest: '成都',
-    days: 3,
+    city: '成都',
     tag: '慢生活',
+    days: 3,
+    budget: '¥2200',
     plan: [
       {
         theme: '熊猫与锦里',
+        date: '10-01',
         summary: '熊猫基地与古街火锅',
         acts: [
-          { slot: '上午', name: '成都大熊猫繁育研究基地', desc: '门票 55 元，建议 8 点前到' },
-          { slot: '下午', name: '宽窄巷子', desc: '免费，成都城市名片' },
-          { slot: '晚上', name: '锦里古街 · 火锅', desc: '人均 120 元，地道牛油火锅' }
+          { slot: 'morning', name: '大熊猫繁育研究基地', desc: '门票 55 元，建议 8 点前到', cost: '¥55' },
+          { slot: 'afternoon', name: '宽窄巷子', desc: '免费，成都城市名片', cost: '免费' },
+          { slot: 'evening', name: '锦里古街 · 火锅', desc: '人均 120 元，地道牛油火锅', cost: '¥120' }
         ]
       },
       {
         theme: '文化漫游',
+        date: '10-02',
         summary: '武侯祠与鹤鸣茶社',
         acts: [
-          { slot: '上午', name: '武侯祠', desc: '门票 50 元，三国文化' },
-          { slot: '下午', name: '人民公园 · 鹤鸣茶社', desc: '一杯盖碗茶，体验慢生活' },
-          { slot: '晚上', name: '玉林路小酒馆', desc: '人均 60 元，市井夜生活' }
+          { slot: 'morning', name: '武侯祠', desc: '门票 50 元，三国文化', cost: '¥50' },
+          { slot: 'afternoon', name: '人民公园 · 鹤鸣茶社', desc: '一杯盖碗茶，体验慢生活', cost: '¥40' },
+          { slot: 'evening', name: '玉林路小酒馆', desc: '人均 60 元，市井夜生活', cost: '¥60' }
         ]
       },
       {
         theme: '自然与街区',
+        date: '10-03',
         summary: '青城山与建设路',
         acts: [
-          { slot: '上午', name: '青城山（前山）', desc: '门票 80 元，道教名山' },
-          { slot: '下午', name: '都江堰景区', desc: '门票 80 元，世界文化遗产' },
-          { slot: '晚上', name: '建设路小吃街', desc: '人均 50 元，甜水面与兔头' }
+          { slot: 'morning', name: '青城山（前山）', desc: '门票 80 元，道教名山', cost: '¥80' },
+          { slot: 'afternoon', name: '都江堰景区', desc: '门票 80 元，世界文化遗产', cost: '¥80' },
+          { slot: 'evening', name: '建设路小吃街', desc: '人均 50 元，甜水面与兔头', cost: '¥50' }
         ]
       }
     ]
   },
   {
-    dest: '上海',
-    days: 2,
+    city: '上海',
     tag: '都市摩登',
+    days: 2,
+    budget: '¥1800',
     plan: [
       {
-        theme: '外滩与历史',
+        theme: '外滩与天际线',
+        date: '10-01',
         summary: '万国建筑与陆家嘴夜景',
         acts: [
-          { slot: '上午', name: '外滩万国建筑群', desc: '免费，欣赏百年建筑' },
-          { slot: '下午', name: '南京东路步行街', desc: '免费，购物与老字号' },
-          { slot: '晚上', name: '陆家嘴 · 三件套夜景', desc: '免费，登中心可选 180 元' }
+          { slot: 'morning', name: '外滩万国建筑群', desc: '免费，欣赏百年建筑', cost: '免费' },
+          { slot: 'afternoon', name: '南京东路步行街', desc: '免费，购物与老字号', cost: '免费' },
+          { slot: 'evening', name: '陆家嘴 · 三件套夜景', desc: '登中心可选 180 元', cost: '¥180' }
         ]
       },
       {
         theme: '文艺漫步',
+        date: '10-02',
         summary: '武康路与黄浦江游船',
         acts: [
-          { slot: '上午', name: '武康路 · 老洋房', desc: '免费，网红梧桐街道' },
-          { slot: '下午', name: '田子坊', desc: '免费，弄堂创意街区' },
-          { slot: '晚上', name: '黄浦江游船', desc: '船票 120 元，两岸夜景' }
+          { slot: 'morning', name: '武康路 · 老洋房', desc: '免费，梧桐街道', cost: '免费' },
+          { slot: 'afternoon', name: '田子坊', desc: '免费，弄堂创意街区', cost: '免费' },
+          { slot: 'evening', name: '黄浦江游船', desc: '船票 120 元，两岸夜景', cost: '¥120' }
         ]
       }
     ]
@@ -208,115 +226,132 @@ const demos: Demo[] = [
 ]
 
 const demoIdx = ref(0)
-const dayIdx = ref(0)
-const currentDemo = ref<Demo>(demos[0])
-const currentDay = ref<DemoDay>(demos[0].plan[0])
+const activeDemo = computed(() => demos[demoIdx.value])
 
-function pickDemo(i: number) {
-  demoIdx.value = i
-  dayIdx.value = 0
-  currentDemo.value = demos[i]
-  currentDay.value = demos[i].plan[0]
+/* ==================== 3. 三个场景 ==================== */
+interface Scenario {
+  key: string
+  eyebrow: string
+  title: string
+  value: string
+  ask: string
+  reply: string
+  resultTitle: string
+  rows: { k: string; v: string; tone?: 'ok' | 'warn' }[]
 }
 
-function prevDay() {
-  if (dayIdx.value > 0) {
-    dayIdx.value--
-    currentDay.value = currentDemo.value.plan[dayIdx.value]
+const scenarios: Scenario[] = [
+  {
+    key: 'weather',
+    eyebrow: '出行前',
+    title: '天气不只告知，还替你改安排',
+    value: '按天气给出穿着建议，并把户外项目挪到合适的时段。',
+    ask: '成都这周末穿什么？行程要改吗',
+    reply: '查到周六有阵雨，已把青城山挪到周日，周六换成室内的川博。',
+    resultTitle: '调整后的周末',
+    rows: [
+      { k: '周六', v: '阵雨 18~24°C · 四川博物院 + 太古里', tone: 'warn' },
+      { k: '周日', v: '多云 17~26°C · 青城山（前山）', tone: 'ok' },
+      { k: '携带', v: '折叠伞、薄外套' }
+    ]
+  },
+  {
+    key: 'ticket',
+    eyebrow: '定交通',
+    title: '车次、票价、余票，一次问清',
+    value: '数据来自实时车次接口，不是模型推测出来的数字。',
+    ask: '明天广州南到北京西的高铁',
+    reply: '按早班优先列出 4 趟，二等座余票充足。',
+    resultTitle: '可选车次',
+    rows: [
+      { k: 'G77', v: '08:00 → 13:24 · 二等座 ¥553', tone: 'ok' },
+      { k: 'G79', v: '10:05 → 15:38 · 二等座 ¥553' },
+      { k: 'G81', v: '13:20 → 19:02 · 二等座 ¥553' },
+      { k: '历时', v: '约 5 小时 24 分' }
+    ]
+  },
+  {
+    key: 'extract',
+    eyebrow: '成稿后',
+    title: '聊完的攻略，一键变成可编辑行程',
+    value: '按天与时段整理成结构化行程，之后随时增删改。',
+    ask: '把刚才这份攻略存下来',
+    reply: '已提取为 3 天行程，含 9 个活动与预算。',
+    resultTitle: '已保存的行程',
+    rows: [
+      { k: 'Day 1', v: '故宫 · 南锣鼓巷 · 王府井' },
+      { k: 'Day 2', v: '八达岭长城 · 奥体 · 簋街' },
+      { k: 'Day 3', v: '颐和园 · 圆明园 · 前门' },
+      { k: '状态', v: '可编辑、可分享、可导出日历', tone: 'ok' }
+    ]
   }
-}
-function nextDay() {
-  if (dayIdx.value < currentDemo.value.plan.length - 1) {
-    dayIdx.value++
-    currentDay.value = currentDemo.value.plan[dayIdx.value]
-  }
-}
+]
 
-/**
- * 时段 → 视觉标识。
- *
- * 行程单的可读性主要靠「一眼看出这是上午还是晚上」，
- * 所以给每个时段配图标与语义色，而不是只写两个字。
- */
-const SLOT_META: Record<string, { icon: string; tone: string }> = {
-  上午: { icon: 'sun', tone: 'am' },
-  下午: { icon: 'camera', tone: 'pm' },
-  晚上: { icon: 'moon', tone: 'night' }
-}
-function slotMeta(slot: string) {
-  return SLOT_META[slot] ?? { icon: 'clock', tone: 'am' }
-}
-
-/**
- * 从活动名称与描述里识别类型（景点 / 美食 / 交通）。
- *
- * 示例数据是静态文案、没有结构化字段，故用关键词判断；
- * 识别不到就不显示标签——宁缺毋滥，不为了凑标签而误标。
- */
-function actKind(name: string, desc: string): { label: string; tone: string } | null {
-  const text = name + desc
-  if (/火锅|小吃|美食|餐厅|茶社|酒馆|面|菜/.test(text)) return { label: '美食', tone: 'food' }
-  if (/车|高铁|航班|机场|地铁|游船/.test(text)) return { label: '交通', tone: 'move' }
-  if (/长城|故宫|园林|景区|博物馆|遗址|街区|巷子|广场|外滩|基地|山|楼/.test(text)) {
-    return { label: '景点', tone: 'spot' }
-  }
-  return null
-}
-
-/* ---------------- 产品演示：进入视口后播放打字机 ---------------- */
-const demoEl = ref<HTMLElement | null>(null)
-const demoPlayed = ref(false)
-const demoOutro = '生成完毕，行程已保存到账户'
-const demoOutroShown = ref('')
-/** 演示区定时器：卸载时统一清理，避免离开首页后仍在空转 */
-const demoTimers: number[] = []
-
-function playDemo() {
-  if (demoPlayed.value) return
-  demoPlayed.value = true
-
-  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
-  if (reduce) {
-    demoOutroShown.value = demoOutro
-    return
-  }
-
-  let i = 0
-  const timer = window.setInterval(() => {
-    i += 1
-    demoOutroShown.value = demoOutro.slice(0, i)
-    if (i >= demoOutro.length) window.clearInterval(timer)
-  }, 55)
-  demoTimers.push(timer)
-}
-
-/* ---------------- 使用流程 ---------------- */
+/* ==================== 4. 三步流程 ==================== */
 const steps = [
-  { no: '01', title: '描述你的旅行', desc: '说出目的地、天数与预算，不必整理格式，AI 会听懂你的意思。' },
-  { no: '02', title: '实时数据准备', desc: '车票、天气与住宿在后台自动查询核对，数据真实可追溯。' },
-  { no: '03', title: '日程落地成稿', desc: '按天生成的行程卡片，随时增删调整，一键保存到账户。' }
+  {
+    no: '01',
+    title: '说出你的旅行',
+    desc: '一句话就行。目的地、天数、预算说到哪算哪，不用整理格式。'
+  },
+  {
+    no: '02',
+    title: '数据我来核对',
+    desc: '车次、天气、住宿在后台实时查询，不是模型编出来的数字。'
+  },
+  {
+    no: '03',
+    title: '行程落地成稿',
+    desc: '按天按时段排好，随时增删改，也能分享给同行的人。'
+  }
 ]
 
 const activeStep = ref(0)
-let flowTimer: number | null = null
+let stepTimer: number | null = null
 
 function pickStep(i: number) {
   activeStep.value = i
-  stopFlow()
+  stopStepTimer()
 }
-function stopFlow() {
-  if (flowTimer !== null) {
-    window.clearInterval(flowTimer)
-    flowTimer = null
+
+function stopStepTimer() {
+  if (stepTimer !== null) {
+    window.clearInterval(stepTimer)
+    stepTimer = null
   }
 }
 
-/* ---------------- 滚动入场 ---------------- */
+/* ==================== 入场与滚动揭示 ==================== */
+const entered = ref(false)
+/** 行程逐条构建的进度（已渲染行数） */
+const builtRows = ref(0)
+
+let buildTimer: number | null = null
+let revealTimer: number | null = null
 let io: IntersectionObserver | null = null
-let demoIo: IntersectionObserver | null = null
 
 onMounted(() => {
   const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+
+  if (reduce) {
+    entered.value = true
+    builtRows.value = heroDays.length
+    document.querySelectorAll('.rv').forEach((el) => el.classList.add('in'))
+    return
+  }
+
+  // 等两帧再置位，确保过渡有起点可播
+  revealTimer = window.setTimeout(() => {
+    entered.value = true
+    // 入场后开始逐条构建行程单：每 260ms 多一行
+    buildTimer = window.setInterval(() => {
+      builtRows.value += 1
+      if (builtRows.value >= heroDays.length && buildTimer !== null) {
+        window.clearInterval(buildTimer)
+        buildTimer = null
+      }
+    }, 260)
+  }, 60)
 
   io = new IntersectionObserver(
     (entries) => {
@@ -327,321 +362,229 @@ onMounted(() => {
         }
       }
     },
-    { threshold: 0.1 }
+    { threshold: 0.12 }
   )
   document.querySelectorAll('.rv').forEach((el) => io?.observe(el))
 
-  // 打字机只在演示区可见时播放——首屏外提前跑完就失去意义了
-  if (demoEl.value) {
-    demoIo = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          if (e.isIntersecting) {
-            playDemo()
-            demoIo?.disconnect()
-          }
-        }
-      },
-      { threshold: 0.25 }
-    )
-    demoIo.observe(demoEl.value)
-  }
-
-  if (!reduce) {
-    flowTimer = window.setInterval(() => {
-      activeStep.value = (activeStep.value + 1) % steps.length
-    }, 3000)
-  }
+  stepTimer = window.setInterval(() => {
+    activeStep.value = (activeStep.value + 1) % steps.length
+  }, 3600)
 })
 
 onUnmounted(() => {
   io?.disconnect()
-  demoIo?.disconnect()
-  stopFlow()
-  demoTimers.forEach((t) => window.clearInterval(t))
-  demoTimers.length = 0
+  stopStepTimer()
+  if (buildTimer !== null) window.clearInterval(buildTimer)
+  if (revealTimer !== null) window.clearTimeout(revealTimer)
 })
+
+/** 当前生成阶段，按已构建进度推进 */
+const buildStage = computed(() => {
+  const ratio = builtRows.value / heroDays.length
+  if (ratio <= 0.15) return buildStages[0]
+  if (ratio <= 0.4) return buildStages[1]
+  if (ratio < 0.95) return buildStages[2]
+  return buildStages[3]
+})
+
+/** 已构建的行按天分组，用于渲染时间线 */
+const builtGroups = computed(() => {
+  const rows = heroDays.slice(0, builtRows.value)
+  const grouped: { no: number; theme: string; items: HeroDay[] }[] = []
+  for (const r of rows) {
+    const last = grouped[grouped.length - 1]
+    if (last && last.no === r.no) last.items.push(r)
+    else grouped.push({ no: r.no, theme: r.theme, items: [r] })
+  }
+  return grouped
+})
+
+const done = computed(() => builtRows.value >= heroDays.length)
+
+function startHref(): string {
+  return user.isLoggedIn ? '/chat' : '/login'
+}
 </script>
 
 <template>
   <AppNavbar />
 
-  <main id="main" tabindex="-1" class="home">
-    <!-- ==================== Hero：左文右景 ==================== -->
+  <main id="main" tabindex="-1" class="home" :class="{ 'home--in': entered }">
+    <!-- ============================================================
+         1. HERO：可输入的规划框 + 正在生成的行程单
+         左「说」右「得」，让输入与结果的关系一眼可见
+         ============================================================ -->
     <section class="hero">
-      <div class="hero__bg" aria-hidden="true">
-        <span class="hero__glow hero__glow--a"></span>
-        <span class="hero__glow hero__glow--b"></span>
-      </div>
+      <div class="hero__aura" aria-hidden="true"></div>
 
       <div class="container hero__inner">
-        <div class="hero__copy">
-          <p class="hero__badge" style="--d: 0ms">
-            <span class="hero__badge-dot"></span>
-            准备好出发了吗？AI 正在等你的目的地
+        <!-- 左：说 -->
+        <div class="hero__say">
+          <p class="hero__kicker">
+            <span class="dot"></span>
+            多 Agent 协作 · 实时数据核对
           </p>
 
-          <h1 class="hero__title" style="--d: 90ms">
-            一句话，生成<br />
-            <span class="grad-text">可执行的旅行日程</span>
+          <h1 class="hero__title">
+            一句话，<br />
+            生成<span class="hero__title-em">可执行</span>的旅行日程
           </h1>
 
-          <p class="hero__lead" style="--d: 180ms">
-            说出目的地、天数与预算，车票与天气实时替你查好，
+          <p class="hero__sub">
+            说出目的地、天数与预算。车次与天气我们实时查好，
             最后落成一份按天排布、随时可改的行程。
           </p>
 
-          <div class="hero__cta" style="--d: 270ms">
-            <RouterLink :to="startHref()" class="btn btn-primary btn--lg">
-              开始规划旅程
-              <TravelIcon name="arrow-right" :size="17" />
-            </RouterLink>
-            <a href="#demo" class="btn btn-ghost btn--lg">
-              <TravelIcon name="compass" :size="17" />
-              看看行程长什么样
-            </a>
-          </div>
+          <!-- 可直接输入：这是 Hero 的主操作，不是装饰 -->
+          <form class="ask" @submit.prevent="submitPlan">
+            <span class="ask__icon" aria-hidden="true">
+              <TravelIcon name="compass" :size="18" />
+            </span>
+            <input
+              ref="inputEl"
+              v-model="draft"
+              class="ask__input"
+              type="text"
+              placeholder="例如：广州到北京 3 天，预算 3000，坐高铁"
+              aria-label="描述你的旅行计划"
+            />
+            <button class="ask__go" type="submit">
+              开始规划
+              <TravelIcon name="arrow-right" :size="16" />
+            </button>
+          </form>
 
-          <!-- 可点击示例：点了直接带着这句话进入对话，省掉自己组织语言的成本 -->
-          <div class="hero__example" style="--d: 360ms">
-            <span class="hero__example-label">试试这样说</span>
-            <div class="hero__chips">
-              <button
-                v-for="ex in heroExamples"
-                :key="ex.text"
-                type="button"
-                class="chip-say"
-                @click="useExample(ex.text)"
-              >
-                <TravelIcon :name="ex.icon" :size="14" />
-                <span>{{ ex.text }}</span>
-                <TravelIcon name="arrow-right" :size="13" class="chip-say__go" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- 右侧：示例行程卡片。
-             内容是静态示例（车次与票价均为写死的示范数据），
-             故这里必须标「示例」而不是「实时」——标成实时会让用户
-             以为这是此刻查到的真实车次，属于误导。 -->
-        <div class="hero__art" style="--d: 180ms">
-          <div class="hero__card">
-            <div class="hero__card-head">
-              <TravelIcon name="map" :size="16" />
-              <span>广州 → 北京</span>
-              <span class="hero__card-chip">示例</span>
-            </div>
-            <div class="hero__card-route">
-              <span class="hero__card-city">
-                <b>广州南</b>
-                <i>08:00</i>
-              </span>
-              <span class="hero__card-line">
-                <em></em>
-                <TravelIcon name="plane" :size="15" />
-                <em></em>
-              </span>
-              <span class="hero__card-city hero__card-city--end">
-                <b>北京西</b>
-                <i>13:24</i>
-              </span>
-            </div>
-            <div class="hero__card-rows">
-              <div class="hero__card-row">
-                <span><TravelIcon name="train" :size="14" />车次</span>
-                <strong>G77 · 二等座 ¥553</strong>
-              </div>
-              <div class="hero__card-row">
-                <span><TravelIcon name="sun" :size="14" />天气</span>
-                <strong>晴 · 12~22°C</strong>
-              </div>
-              <div class="hero__card-row">
-                <span><TravelIcon name="passport" :size="14" />预算</span>
-                <strong>¥2800 / ¥3000</strong>
-              </div>
-            </div>
-            <div class="hero__card-bar"><i></i></div>
-            <p class="hero__card-foot">示例行程 · 实际车次与票价以对话中查询结果为准</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- 信任数据条 -->
-      <div class="container">
-        <div class="stats rv">
-          <div v-for="s in stats" :key="s.label" class="stat">
-            <b>{{ s.num }}</b>
-            <span>{{ s.label }}</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ==================== 核心能力 ==================== -->
-    <section id="features" class="section">
-      <div class="container">
-        <div class="section-head rv">
-          <p class="eyebrow">核心能力</p>
-          <h2>让规划这件事，变得省心</h2>
-          <p>从一句需求到一份可落地的行程，每个环节都有对应的能力支撑。</p>
-        </div>
-
-        <div class="cards">
-          <article v-for="f in features" :key="f.title" class="card rv">
-            <span class="card__ic"><FeatureIcon :name="f.icon" /></span>
-            <h3>
-              {{ f.title }}
-              <span class="card__tag">{{ f.tag }}</span>
-            </h3>
-            <p>{{ f.desc }}</p>
-            <!-- 悬停时浮出的补充说明，替「了解更多」提供实际信息量 -->
-            <p class="card__more">
-              <TravelIcon name="arrow-right" :size="13" />
-              {{ f.more }}
-            </p>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- ==================== 产品演示 ==================== -->
-    <section id="demo" class="section section--alt">
-      <div class="container">
-        <div class="section-head rv">
-          <p class="eyebrow">产品演示</p>
-          <h2>真实对话长这样</h2>
-          <p>思考过程、工具调用与正文实时呈现，等待不再漫长。</p>
-        </div>
-
-        <div ref="demoEl" class="app-mock rv">
-          <div class="mock-bar">
-            <span class="d r"></span><span class="d y"></span><span class="d g"></span>
-            <span class="u">voyage.ai — 对话</span>
-          </div>
-
-          <div class="mock-frame">
-            <aside class="mock-side">
-              <div class="s-item on">北京三日游行程规划</div>
-              <div class="s-item">成都慢生活攻略</div>
-              <div class="s-item">周末上海两日游</div>
-              <div class="s-user"><span class="av"></span>旅行者</div>
-            </aside>
-
-            <div class="mock-chat">
-              <div class="mu">
-                <div class="b">帮我规划北京 3 日游，预算 3000，坐高铁出发</div>
-              </div>
-
-              <div class="ma">
-                <div class="mb reason">正在分析目的地要素：天气、交通、住宿偏好…</div>
-
-                <div class="mb tool">
-                  <span class="k">工具</span>
-                  已查询车次 <span class="g">G77</span> · 已查询 <span class="g">北京 3 天天气</span>
-                </div>
-
-                <div class="mb">
-                  <span class="k">北京 3 日游方案</span> — 预算 ¥2800，高铁往返，市中心酒店两晚，含故宫与长城。
-                </div>
-
-                <div class="mock-itin">
-                  <div class="mi">
-                    <span class="mi-d">Day 1</span><b>故宫 · 胡同</b><span>天安门广场与南锣鼓巷</span>
-                  </div>
-                  <div class="mi">
-                    <span class="mi-d">Day 2</span><b>八达岭长城</b><span>早出发避开人流</span>
-                  </div>
-                  <div class="mi">
-                    <span class="mi-d">Day 3</span><b>颐和园 · 圆明园</b><span>皇家园林收尾</span>
-                  </div>
-                </div>
-
-                <div class="mb mono">
-                  {{ demoOutroShown }}<span v-if="demoPlayed" class="caret"></span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ==================== 示例行程 ==================== -->
-    <section id="itinerary" class="section">
-      <div class="container">
-        <div class="section-head rv">
-          <p class="eyebrow">示例行程</p>
-          <h2>看看 AI 安排的每一天</h2>
-          <p>按天与时段组织的行程，左右切换查看完整安排。</p>
-        </div>
-
-        <div class="timeline">
-          <!-- 城市 Tab：选中态用实心填充，比下划线更醒目；窄屏可横向滑动 -->
-          <div class="timeline__dests rv" role="tablist" aria-label="示例目的地">
+          <div class="prompts">
+            <span class="prompts__label">或试试</span>
             <button
-              v-for="(d, i) in demos"
-              :key="d.dest"
+              v-for="p in prompts"
+              :key="p"
               type="button"
-              role="tab"
-              :aria-selected="i === demoIdx"
-              :class="{ on: i === demoIdx }"
-              @click="pickDemo(i)"
+              class="prompt"
+              @click="usePrompt(p)"
             >
-              <b>{{ d.dest }}</b>
-              <i>{{ d.days }} 天</i>
+              {{ p }}
             </button>
           </div>
+        </div>
 
-          <div class="timeline__nav rv">
-            <div class="timeline__dest">
-              {{ currentDemo.dest }}
-              <span>{{ currentDemo.days }} 日游 · {{ currentDemo.tag }}</span>
-            </div>
-            <div class="timeline__arrows">
-              <button class="tl-arrow" type="button" aria-label="前一天" :disabled="dayIdx === 0" @click="prevDay">
-                <TravelIcon name="arrow-left" :size="17" />
-              </button>
-              <span class="tl-count">Day {{ dayIdx + 1 }} / {{ currentDemo.plan.length }}</span>
-              <button
-                class="tl-arrow"
-                type="button"
-                aria-label="后一天"
-                :disabled="dayIdx === currentDemo.plan.length - 1"
-                @click="nextDay"
-              >
-                <TravelIcon name="arrow-right" :size="17" />
-              </button>
-            </div>
-          </div>
-
-          <div class="timeline__card rv">
-            <div class="timeline__head">
-              <div>
-                <div class="timeline__day">Day {{ dayIdx + 1 }}</div>
-                <div class="timeline__theme">{{ currentDay.theme }} · {{ currentDay.summary }}</div>
-              </div>
-              <div class="timeline__ind">
-                <i v-for="(_, i) in currentDemo.plan" :key="i" :class="{ on: i === dayIdx }"></i>
-              </div>
-            </div>
-
-            <ul class="timeline__list">
-              <li v-for="(a, i) in currentDay.acts" :key="i">
-                <!-- 时段：图标 + 中文标签，让行程单更像真实的时刻表 -->
-                <span class="timeline__slot" :class="`slot--${slotMeta(a.slot).tone}`">
-                  <TravelIcon :name="slotMeta(a.slot).icon" :size="13" />
-                  {{ a.slot }}
+        <!-- 右：得（行程单逐条构建） -->
+        <div class="hero__get">
+          <article class="plan">
+            <header class="plan__head">
+              <div class="plan__route">
+                <span>{{ heroPlan.from }}</span>
+                <span class="plan__arrow" aria-hidden="true">
+                  <i></i>
+                  <TravelIcon name="plane" :size="13" />
+                  <i></i>
                 </span>
-                <div class="timeline__act">
-                  <p class="act-name">
-                    <b>{{ a.name }}</b>
-                    <span v-if="actKind(a.name, a.desc)" class="act-kind" :class="`kind--${actKind(a.name, a.desc)!.tone}`">
-                      {{ actKind(a.name, a.desc)!.label }}
+                <span>{{ heroPlan.to }}</span>
+              </div>
+              <span class="plan__badge">示例</span>
+            </header>
+
+            <dl class="plan__facts">
+              <div>
+                <dt>天数</dt>
+                <dd>{{ heroPlan.days }} 天</dd>
+              </div>
+              <div>
+                <dt>车次</dt>
+                <dd>{{ heroPlan.train }}</dd>
+              </div>
+              <div>
+                <dt>票价</dt>
+                <dd>{{ heroPlan.price }}</dd>
+              </div>
+              <div>
+                <dt>预算</dt>
+                <dd>{{ heroPlan.budget }}</dd>
+              </div>
+            </dl>
+
+            <!-- 时间线：行程真正的样子 -->
+            <div class="plan__body">
+              <div
+                v-for="g in builtGroups"
+                :key="`${g.no}-${g.theme}`"
+                class="plan__group"
+              >
+                <p class="plan__day">
+                  <span class="plan__day-no">Day {{ g.no }}</span>
+                  <span class="plan__day-theme">{{ g.theme }}</span>
+                </p>
+                <ul class="tl">
+                  <li v-for="(it, i) in g.items" :key="i" class="tl__row">
+                    <span class="tl__time">{{ it.time }}</span>
+                    <span class="tl__slot" :class="`tl__slot--${it.slot}`">
+                      <TravelIcon :name="SLOT_META[it.slot].icon" :size="12" />
+                      {{ SLOT_META[it.slot].label }}
                     </span>
-                  </p>
-                  <span>{{ a.desc }}</span>
-                </div>
+                    <span class="tl__place">{{ it.place }}</span>
+                    <span class="tl__cost">{{ it.cost }}</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <footer class="plan__foot" :class="{ 'is-done': done }">
+              <span class="plan__pulse" aria-hidden="true"></span>
+              <span class="plan__stage">{{ buildStage }}</span>
+              <span v-if="done" class="plan__done">
+                <TravelIcon name="check" :size="13" /> 可保存
+              </span>
+            </footer>
+          </article>
+
+          <p class="hero__note">示例数据 · 实际车次与票价以对话中查询结果为准</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         2. 示例行程：结果优先，先看成品
+         ============================================================ -->
+    <section class="section">
+      <div class="container">
+        <header class="sec-head rv">
+          <p class="eyebrow">生成结果</p>
+          <h2>先看看它排出来的行程</h2>
+          <p>三座城市，每天按时段拆开，费用写清楚。</p>
+        </header>
+
+        <div class="tabs rv">
+          <button
+            v-for="(d, i) in demos"
+            :key="d.city"
+            type="button"
+            class="tab"
+            :class="{ 'tab--on': i === demoIdx }"
+            @click="demoIdx = i"
+          >
+            <b>{{ d.city }}</b>
+            <i>{{ d.days }} 天 · {{ d.budget }}</i>
+          </button>
+        </div>
+
+        <div class="showcase rv">
+          <div v-for="(d, di) in activeDemo.plan" :key="d.date" class="daycard">
+            <header class="daycard__head">
+              <span class="daycard__no">Day {{ di + 1 }}</span>
+              <span class="daycard__date">{{ d.date }}</span>
+              <span class="daycard__theme">{{ d.theme }}</span>
+            </header>
+            <p class="daycard__sum">{{ d.summary }}</p>
+            <ul class="acts">
+              <li v-for="(a, i) in d.acts" :key="i" class="acts__row">
+                <span class="acts__slot" :class="`acts__slot--${a.slot}`">
+                  {{ SLOT_META[a.slot].label }}
+                </span>
+                <span class="acts__body">
+                  <b>{{ a.name }}</b>
+                  <i>{{ a.desc }}</i>
+                </span>
+                <span class="acts__cost">{{ a.cost }}</span>
               </li>
             </ul>
           </div>
@@ -649,106 +592,164 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <!-- ==================== 使用流程 ==================== -->
-    <section id="flow" class="section section--alt">
+    <!-- ============================================================
+         3. 三个场景：对话片段 → 结果卡片
+         用具体场景替代「6 张平均卡片」
+         ============================================================ -->
+    <section class="section section--tint">
       <div class="container">
-        <div class="section-head rv">
-          <p class="eyebrow">使用流程</p>
-          <h2>三步，从想法到可执行</h2>
-          <p>没有复杂的表单，也没有需要背诵的指令格式。</p>
-        </div>
+        <header class="sec-head rv">
+          <p class="eyebrow">它到底能做什么</p>
+          <h2>三个真实的场景</h2>
+          <p>不列功能清单，直接看问题与结果。</p>
+        </header>
 
-        <div class="flow">
-          <!-- 左侧步骤：带连接线的纵向时间线 -->
-          <div class="flow__side rv">
-            <button
+        <div class="scenes">
+          <article v-for="s in scenarios" :key="s.key" class="scene rv">
+            <div class="scene__say">
+              <p class="scene__eyebrow">{{ s.eyebrow }}</p>
+              <h3 class="scene__title">{{ s.title }}</h3>
+              <p class="scene__value">{{ s.value }}</p>
+
+              <div class="chat">
+                <p class="chat__me">{{ s.ask }}</p>
+                <p class="chat__ai">{{ s.reply }}</p>
+              </div>
+            </div>
+
+            <div class="scene__get">
+              <p class="res__title">{{ s.resultTitle }}</p>
+              <dl class="res">
+                <div v-for="(r, i) in s.rows" :key="i" class="res__row">
+                  <dt>{{ r.k }}</dt>
+                  <dd :class="r.tone ? `res__v--${r.tone}` : ''">{{ r.v }}</dd>
+                </div>
+              </dl>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         4. 三步流程：大数字 + 随步骤切换的预览
+         ============================================================ -->
+    <section class="section">
+      <div class="container">
+        <header class="sec-head rv">
+          <p class="eyebrow">怎么用</p>
+          <h2>三步，从想法到可执行</h2>
+        </header>
+
+        <div class="steps">
+          <ol class="steps__list rv">
+            <li
               v-for="(s, i) in steps"
               :key="s.no"
-              type="button"
-              class="fs-item"
-              :class="{ on: i === activeStep }"
+              class="step"
+              :class="{ 'step--on': i === activeStep }"
               @click="pickStep(i)"
             >
-              <span class="fs-no">{{ s.no }}</span>
-              <span class="fs-body">
+              <span class="step__no">{{ s.no }}</span>
+              <span class="step__body">
                 <b>{{ s.title }}</b>
-                <span>{{ s.desc }}</span>
+                <i>{{ s.desc }}</i>
               </span>
-            </button>
-          </div>
+            </li>
+          </ol>
 
-          <!-- 右侧预览：静态示意，随选中步骤切换内容，避免大片留白 -->
-          <div class="flow__preview rv">
-            <!-- 步骤 1：用户输入 -->
+          <div class="preview rv">
+            <!-- 步骤 1：你说 -->
             <div v-if="activeStep === 0" class="pv">
-              <p class="pv-label">Step 01 · 你说</p>
-              <div class="pv-inp">
-                <TravelIcon name="chat" :size="15" />
-                <span>帮我规划北京 3 日游，预算 3000</span>
-                <span class="pv-send"><TravelIcon name="arrow-right" :size="14" /></span>
+              <p class="pv__label">你说</p>
+              <div class="pv__ask">
+                <TravelIcon name="chat" :size="16" />
+                <span>帮我规划北京 3 日游，预算 3000，坐高铁</span>
               </div>
-              <div class="pv-chat">
-                <div class="pv-hint">不必写得工整，地名、天数、预算说到就行</div>
-              </div>
+              <p class="pv__hint">不用写得工整，地名、天数、预算说到就行</p>
             </div>
 
-            <!-- 步骤 2：数据核对（静态示意） -->
+            <!-- 步骤 2：我查 -->
             <div v-else-if="activeStep === 1" class="pv">
-              <p class="pv-label">Step 02 · 我查</p>
-              <ul class="pv-checks">
+              <p class="pv__label">我查</p>
+              <ul class="check">
                 <li>
-                  <span class="pv-dot ok"></span>
-                  <b>车次</b><span>G77 二等座 ¥553 · 余票充足</span>
+                  <span class="check__dot"></span>
+                  <b>车次</b>
+                  <span>G77 二等座 ¥553 · 余票充足</span>
                 </li>
                 <li>
-                  <span class="pv-dot ok"></span>
-                  <b>天气</b><span>北京 3 天晴，12~22°C</span>
+                  <span class="check__dot"></span>
+                  <b>天气</b>
+                  <span>北京 3 天晴，12~22°C</span>
                 </li>
                 <li>
-                  <span class="pv-dot ok"></span>
-                  <b>住宿</b><span>市中心两晚，含早 ¥1160</span>
+                  <span class="check__dot"></span>
+                  <b>住宿</b>
+                  <span>市中心两晚，含早 ¥1160</span>
                 </li>
               </ul>
-              <!-- 这里说的是「产品在对话中会怎么做」，不是指上方卡片本身是实时数据。
-                   卡片是静态示意，故用「对话中」限定范围，避免读成「此刻查到的结果」。 -->
-              <p class="pv-foot">对话中的车次与天气均来自实时查询，不是模型编造</p>
+              <p class="pv__hint">这些是实时查询结果，不是模型编造的数字</p>
             </div>
 
-            <!-- 步骤 3：行程成稿 -->
+            <!-- 步骤 3：成稿 -->
             <div v-else class="pv">
-              <p class="pv-label">Step 03 · 成稿</p>
-              <div class="plan-mock">
-                <div class="plan-head">
-                  <span>北京 · 3 日游</span>
-                  <span class="plan-edit"><TravelIcon name="edit" :size="13" />编辑</span>
+              <p class="pv__label">成稿</p>
+              <div class="mini">
+                <div class="mini__day">
+                  <span>DAY 1</span>
+                  <b>城市初探</b>
+                  <i>上午 天安门 · 故宫 / 下午 南锣鼓巷</i>
                 </div>
-                <div class="plan-day open">
-                  <div class="pd-head"><span class="pd-no">DAY 1</span><span class="pd-t">城市初探</span></div>
-                  <div class="pd-slots"><i>上午</i>天安门广场 · 故宫<br /><i>下午</i>南锣鼓巷 · 胡同漫步</div>
+                <div class="mini__day">
+                  <span>DAY 2</span>
+                  <b>长城壮阔</b>
+                  <i>上午 八达岭 / 晚上 簋街</i>
                 </div>
-                <div class="plan-day">
-                  <div class="pd-head"><span class="pd-no">DAY 2</span><span class="pd-t">长城壮阔</span></div>
-                </div>
-                <div class="plan-day">
-                  <div class="pd-head"><span class="pd-no">DAY 3</span><span class="pd-t">皇家园林</span></div>
+                <div class="mini__day">
+                  <span>DAY 3</span>
+                  <b>皇家园林</b>
+                  <i>上午 颐和园 / 下午 圆明园</i>
                 </div>
               </div>
+              <p class="pv__hint">可编辑、可分享，也能导出到手机日历</p>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ==================== CTA ==================== -->
-    <section class="cta-wrap">
+    <!-- ============================================================
+         5. 收尾 CTA：仪式感
+         ============================================================ -->
+    <section class="closing">
       <div class="container">
-        <div class="cta rv">
-          <p class="eyebrow eyebrow--plain cta__eyebrow">Get Started</p>
-          <h2>下一站，交给我们规划</h2>
-          <p>登录后即可与 Voyage AI 对话，生成你的第一份结构化行程。</p>
-          <RouterLink :to="startHref()" class="btn btn-primary btn--lg cta__btn">
-            开启旅程
-            <TravelIcon name="arrow-right" :size="17" />
+        <div class="closing__box rv">
+          <p class="closing__eyebrow">准备好出发了吗</p>
+          <h2 class="closing__title">下一站，交给我们规划</h2>
+          <p class="closing__sub">
+            说出目的地就行。第一份行程通常在十几秒内生成。
+          </p>
+
+          <form class="ask ask--closing" @submit.prevent="submitPlan">
+            <span class="ask__icon" aria-hidden="true">
+              <TravelIcon name="plane" :size="18" />
+            </span>
+            <input
+              v-model="draft"
+              class="ask__input"
+              type="text"
+              placeholder="你想去哪里？"
+              aria-label="描述你的旅行计划"
+            />
+            <button class="ask__go" type="submit">
+              开启第一次规划
+              <TravelIcon name="arrow-right" :size="16" />
+            </button>
+          </form>
+
+          <RouterLink :to="startHref()" class="closing__alt">
+            或用账号登录后再规划
           </RouterLink>
         </div>
       </div>
@@ -759,62 +760,87 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.home { position: relative; z-index: 1; }
+/* ============================================================
+   基础：整页入场 + 滚动揭示
+   ============================================================ */
+.home {
+  position: relative;
+  z-index: 1;
+  background: var(--bg);
+}
 
-/* ==================== Hero ==================== */
+.home .hero,
+.home .section,
+.home .closing {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.65s ease, transform 0.65s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.home--in .hero,
+.home--in .section,
+.home--in .closing {
+  opacity: 1;
+  transform: none;
+}
+
+.rv {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.7s cubic-bezier(0.2, 0.7, 0.2, 1),
+    transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.rv.in {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home .hero,
+  .home .section,
+  .home .closing,
+  .rv {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* ============================================================
+   1. HERO
+   ============================================================ */
 .hero {
   position: relative;
-  padding: 64px 0 0;
+  padding: 72px 0 48px;
   overflow: hidden;
 }
 
-.hero__bg { position: absolute; inset: 0; pointer-events: none; }
-
-.hero__glow {
+/* 一层极淡的蓝晕：提供纵深，不构成可辨认的图形 */
+.hero__aura {
   position: absolute;
-  border-radius: 50%;
-  filter: blur(80px);
-}
-.hero__glow--a {
-  width: 620px; height: 460px;
-  top: -180px; left: -120px;
-  background: radial-gradient(circle, rgba(37, 99, 235, 0.15), transparent 68%);
-}
-.hero__glow--b {
-  width: 560px; height: 420px;
-  top: -140px; right: -100px;
-  background: radial-gradient(circle, rgba(14, 165, 233, 0.13), transparent 68%);
+  inset: -30% 20% auto -10%;
+  height: 720px;
+  background: radial-gradient(
+    ellipse 60% 55% at 35% 40%,
+    rgba(37, 99, 235, 0.13),
+    transparent 70%
+  );
+  pointer-events: none;
 }
 
 .hero__inner {
   position: relative;
   display: grid;
-  grid-template-columns: 1.06fr 0.94fr;
-  gap: 56px;
+  grid-template-columns: minmax(0, 1fr) 460px;
+  gap: 64px;
   align-items: center;
-  padding-bottom: 40px;
 }
 
-/* 首屏错峰入场：一次性编排好的序列比零散的微动效更有仪式感 */
-.hero__copy > *,
-.hero__art {
-  opacity: 0;
-  transform: translateY(16px);
-  animation: heroIn 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
-  animation-delay: var(--d, 0ms);
-}
-@keyframes heroIn {
-  to { opacity: 1; transform: none; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .hero__copy > *, .hero__art { opacity: 1; transform: none; animation: none; }
-}
-
-.hero__badge {
+/* ---------- 左：说 ---------- */
+.hero__kicker {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   color: var(--text2);
   background: var(--panel);
   border: 1px solid var(--border);
@@ -822,854 +848,1005 @@ onUnmounted(() => {
   padding: 6px 14px;
   box-shadow: var(--shadow-sm);
 }
-.hero__badge-dot {
-  width: 6px; height: 6px; border-radius: 50%;
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
   background: var(--success);
-  box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.18);
+  box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.16);
 }
 
 .hero__title {
   margin-top: 22px;
-  font-size: clamp(2.1rem, 4.4vw, 3.25rem);
+  font-size: clamp(2.3rem, 4.6vw, 3.5rem);
   font-weight: 800;
-  line-height: 1.14;
-  letter-spacing: -0.03em;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
 }
-
-.hero__lead {
-  margin-top: 18px;
-  font-size: 1.02rem;
-  line-height: 1.75;
-  color: var(--text2);
-  max-width: 33em;
-  font-weight: 400;
-}
-
-.hero__cta { display: flex; gap: 12px; margin-top: 30px; flex-wrap: wrap; }
-
-/* ---------- 示例胶囊 ---------- */
-.hero__example { margin-top: 30px; }
-.hero__example-label {
-  display: block;
-  font-size: 0.76rem;
-  color: var(--text3);
-  margin-bottom: 10px;
-  letter-spacing: 0.02em;
-}
-.hero__chips { display: flex; flex-wrap: wrap; gap: 9px; }
-
-.chip-say {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  color: var(--text2);
-  font-size: 0.83rem;
-  box-shadow: var(--shadow-sm);
-  transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1),
-              border-color 0.22s, color 0.22s, box-shadow 0.22s;
-}
-.chip-say :deep(svg) { color: var(--prim); flex-shrink: 0; }
-.chip-say__go {
-  opacity: 0;
-  transform: translateX(-4px);
-  transition: opacity 0.22s, transform 0.22s;
-}
-.chip-say:hover {
-  transform: translateY(-2px);
-  border-color: var(--blue-300);
-  color: var(--text);
-  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.13);
-}
-.chip-say:hover .chip-say__go { opacity: 1; transform: none; }
-.chip-say:active { transform: translateY(0); }
-
-/* ---------- 右侧示例卡片 ---------- */
-.hero__art { position: relative; }
-.hero__card {
+.hero__title-em {
   position: relative;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-l);
-  padding: 22px;
-  box-shadow: 0 24px 60px rgba(37, 99, 235, 0.13);
-  animation: cardFloat 6s ease-in-out infinite;
+  color: var(--prim);
 }
-@keyframes cardFloat {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-8px); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .hero__card { animation: none; }
+/* 重点词下的柔和下划线：比渐变文字克制，也不影响可读性 */
+.hero__title-em::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0.06em;
+  height: 0.15em;
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.24), rgba(14, 165, 233, 0.08));
+  border-radius: 3px;
+  z-index: -1;
 }
 
-.hero__card-head {
+.hero__sub {
+  margin-top: 20px;
+  max-width: 32em;
+  font-size: 1.05rem;
+  line-height: 1.72;
+  color: var(--text2);
+}
+
+/* ---------- 规划输入框（Hero 的主操作） ---------- */
+.ask {
   display: flex;
   align-items: center;
-  gap: 9px;
-  font-size: 0.9rem;
-  font-weight: 650;
+  gap: 10px;
+  margin-top: 30px;
+  padding: 8px 8px 8px 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 14px 34px rgba(16, 24, 40, 0.08);
+  transition: border-color 0.22s, box-shadow 0.22s;
+}
+.ask:focus-within {
+  border-color: var(--blue-300);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 18px 42px rgba(37, 99, 235, 0.16);
+}
+.ask__icon {
+  display: grid;
+  place-items: center;
+  color: var(--prim);
+  flex-shrink: 0;
+}
+.ask__input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 0.98rem;
   color: var(--text);
+  padding: 12px 0;
+}
+.ask__input::placeholder {
+  color: var(--text3);
+}
+.ask__go {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 13px 20px;
+  border-radius: 11px;
+  background: var(--grad);
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 650;
+  white-space: nowrap;
+  box-shadow: 0 8px 20px var(--glow);
+  transition: transform 0.2s, filter 0.2s, box-shadow 0.2s;
+}
+.ask__go:hover {
+  transform: translateY(-1px);
+  filter: saturate(1.08);
+  box-shadow: 0 12px 26px var(--glow);
+}
+.ask__go:active {
+  transform: translateY(0);
+}
+
+/* ---------- 示例提问 ---------- */
+.prompts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+.prompts__label {
+  font-size: 0.78rem;
+  color: var(--text3);
+}
+.prompt {
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text2);
+  font-size: 0.82rem;
+  transition: border-color 0.2s, color 0.2s, background-color 0.2s;
+}
+.prompt:hover {
+  border-color: var(--prim);
+  color: var(--prim);
+  background: var(--primary-soft);
+}
+
+/* ---------- 右：行程单 ---------- */
+.hero__get {
+  position: relative;
+}
+
+.plan {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 20px 22px 16px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 20px 46px rgba(16, 24, 40, 0.09);
+}
+
+.plan__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--hairline);
 }
-.hero__card-head :deep(svg) { color: var(--prim); }
-
-/* 「示例」徽标：用中性的暖金点缀而非绿色——
-   绿色传达「在线 / 正常」，用在「这是示例数据」上语义不对 */
-.hero__card-chip {
-  margin-left: auto;
-  display: inline-flex;
+.plan__route {
+  display: flex;
   align-items: center;
+  gap: 10px;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+.plan__arrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--prim);
+}
+.plan__arrow i {
+  width: 22px;
+  height: 1px;
+  background: repeating-linear-gradient(90deg, var(--blue-300) 0 3px, transparent 3px 6px);
+}
+.plan__arrow :deep(svg) {
+  transform: rotate(45deg);
+}
+.plan__badge {
   font-size: 0.7rem;
   font-weight: 600;
   color: var(--gold-600);
   background: var(--gold-soft);
   padding: 3px 9px;
-  border-radius: 999px;
+  border-radius: 6px;
 }
 
-.hero__card-route {
+.plan__facts {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 14px;
-  padding: 18px 0 16px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 14px 0 4px;
 }
-.hero__card-city { display: flex; flex-direction: column; gap: 3px; }
-.hero__card-city b { font-size: 0.94rem; font-weight: 700; }
-.hero__card-city i { font-style: normal; font-size: 0.74rem; color: var(--text3); font-family: var(--mono); }
-.hero__card-city--end { text-align: right; }
+.plan__facts dt {
+  font-size: 0.68rem;
+  color: var(--text3);
+  margin-bottom: 3px;
+}
+.plan__facts dd {
+  font-size: 0.82rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
 
-.hero__card-line { display: flex; align-items: center; gap: 8px; color: var(--prim); }
-.hero__card-line em {
-  flex: 1;
-  height: 1px;
-  background: repeating-linear-gradient(90deg, var(--blue-300) 0 4px, transparent 4px 8px);
+/* 逐条构建：新出现的分组从下方淡入 */
+.plan__body {
+  min-height: 232px;
 }
-.hero__card-line :deep(svg) { transform: rotate(45deg); }
-
-.hero__card-rows { display: flex; flex-direction: column; gap: 10px; }
-.hero__card-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 0.84rem;
+.plan__group {
+  animation: rowIn 0.42s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
-.hero__card-row span { display: inline-flex; align-items: center; gap: 7px; color: var(--text3); }
-.hero__card-row strong { font-weight: 650; color: var(--text); }
-
-.hero__card-bar {
-  margin-top: 16px;
-  height: 5px;
-  border-radius: 999px;
-  background: var(--surface-soft);
-  overflow: hidden;
-}
-.hero__card-bar i {
-  display: block;
-  height: 100%;
-  border-radius: 999px;
-  background: var(--grad);
-  /* 进度条来回推进：暗示「正在生成」，比固定长度更有生命感 */
-  animation: barAdvance 2.8s ease-in-out infinite;
-}
-@keyframes barAdvance {
-  0% { width: 24%; }
-  50% { width: 82%; }
-  100% { width: 24%; }
+@keyframes rowIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hero__card-bar i { animation: none; width: 68%; }
+  .plan__group {
+    animation: none;
+  }
 }
 
-.hero__card-foot {
-  margin-top: 10px;
+.plan__day {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 12px 0 6px;
+}
+.plan__day-no {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--prim);
+  background: var(--primary-soft);
+  padding: 2px 7px;
+  border-radius: 5px;
+}
+.plan__day-theme {
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: var(--text2);
+}
+
+.tl {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.tl__row {
+  display: grid;
+  grid-template-columns: 46px 54px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--hairline);
+  font-size: 0.82rem;
+}
+.tl__row:last-child {
+  border-bottom: none;
+}
+.tl__time {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--text3);
+}
+.tl__slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+.tl__slot--morning {
+  background: var(--blue-50);
+  color: var(--blue-700);
+}
+.tl__slot--afternoon {
+  background: var(--gold-soft);
+  color: var(--gold-600);
+}
+.tl__slot--evening {
+  background: var(--blue-900);
+  color: #fff;
+}
+.tl__place {
+  color: var(--text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tl__cost {
   font-size: 0.76rem;
+  color: var(--text3);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid var(--hairline);
+  font-size: 0.78rem;
+  color: var(--prim);
+  font-weight: 600;
+}
+.plan__pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--prim);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.plan__foot.is-done {
+  color: var(--success);
+}
+.plan__foot.is-done .plan__pulse {
+  background: var(--success);
+  animation: none;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .plan__pulse {
+    animation: none;
+  }
+}
+.plan__done {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hero__note {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 0.74rem;
   color: var(--text3);
 }
 
-/* ---------- 信任数据条 ---------- */
-.stats {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  padding: 22px 0;
-  border-top: 1px solid var(--hairline);
+/* ============================================================
+   通用区块
+   ============================================================ */
+.section {
+  padding: 88px 0;
 }
-.stat { display: flex; flex-direction: column; gap: 4px; }
-.stat b {
-  font-family: var(--font-display);
-  font-size: 1.28rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--text);
+.section--tint {
+  background: var(--bg2);
 }
-.stat span { font-size: 0.8rem; color: var(--text3); }
-
-/* ==================== 通用区块 ==================== */
-.section { padding: 88px 0; }
-.section--alt { background: var(--bg2); }
-
-.section-head { max-width: 44em; margin-bottom: 44px; }
+.sec-head {
+  max-width: 40em;
+  margin-bottom: 40px;
+}
 .eyebrow {
   display: inline-block;
-  font-size: 0.74rem;
+  font-size: 0.73rem;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--prim);
   margin-bottom: 12px;
 }
-.eyebrow--plain { color: var(--text3); }
-.section-head h2 {
-  font-size: clamp(1.55rem, 2.8vw, 2.15rem);
+.sec-head h2 {
+  font-size: clamp(1.6rem, 2.9vw, 2.25rem);
   font-weight: 800;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.028em;
 }
-.section-head > p:last-child {
-  margin-top: 14px;
+.sec-head > p:last-child {
+  margin-top: 12px;
   font-size: 0.98rem;
-  color: var(--text2);
-  line-height: 1.75;
-  font-weight: 400;
-}
-
-/* ---------- 滚动入场 ---------- */
-.rv {
-  opacity: 0;
-  transform: translateY(22px);
-  transition: opacity 0.7s cubic-bezier(0.2, 0.7, 0.2, 1),
-              transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
-}
-.rv.in { opacity: 1; transform: none; }
-@media (prefers-reduced-motion: reduce) {
-  .rv { opacity: 1; transform: none; transition: none; }
-}
-
-/* ==================== 核心能力卡片 ==================== */
-.cards {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 18px;
-}
-.card {
-  position: relative;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-m);
-  padding: 24px 22px;
-  box-shadow: var(--shadow-sm);
-  transition: transform 0.24s cubic-bezier(0.2, 0.7, 0.2, 1),
-              box-shadow 0.24s, border-color 0.24s;
-  overflow: hidden;
-}
-.card::before {
-  /* 顶部渐变细线：悬停时展开，给卡片一个「被点亮」的信号 */
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 2px;
-  background: var(--grad);
-  transform: scaleX(0);
-  transform-origin: left;
-  transition: transform 0.32s cubic-bezier(0.2, 0.7, 0.2, 1);
-}
-.card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 18px 40px rgba(37, 99, 235, 0.13);
-  border-color: var(--blue-200);
-}
-.card:hover::before { transform: scaleX(1); }
-
-.card__ic {
-  display: grid;
-  place-items: center;
-  width: 42px; height: 42px;
-  border-radius: 12px;
-  background: var(--primary-soft);
-  color: var(--prim);
-  margin-bottom: 16px;
-  transition: background-color 0.24s, color 0.24s;
-}
-.card:hover .card__ic { background: var(--grad); color: #fff; }
-
-.card h3 {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-size: 1.02rem;
-  font-weight: 700;
-  margin-bottom: 9px;
-}
-.card__tag {
-  font-size: 0.68rem;
-  font-weight: 600;
-  color: var(--prim);
-  background: var(--primary-soft);
-  padding: 2px 8px;
-  border-radius: 6px;
-  letter-spacing: 0.02em;
-}
-.card > p {
-  font-size: 0.88rem;
-  line-height: 1.7;
+  line-height: 1.72;
   color: var(--text2);
 }
 
-/* 补充说明默认收起，悬停时展开——不占静态版面的空间 */
-.card__more {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 0;
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  font-size: 0.79rem;
-  color: var(--prim);
-  transition: max-height 0.3s ease, opacity 0.24s ease, margin-top 0.3s ease;
-}
-.card:hover .card__more { max-height: 40px; opacity: 1; margin-top: 12px; }
-
-/* ==================== 产品演示 ==================== */
-.app-mock {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-l);
-  overflow: hidden;
-  box-shadow: var(--shadow);
-}
-.mock-bar {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 11px 15px;
-  background: var(--panel2);
-  border-bottom: 1px solid var(--hairline);
-}
-.mock-bar .d { width: 10px; height: 10px; border-radius: 50%; }
-.mock-bar .r { background: #ff5f57; }
-.mock-bar .y { background: #febc2e; }
-.mock-bar .g { background: #28c840; }
-.mock-bar .u {
-  margin-left: 12px;
-  font-size: 0.76rem;
-  color: var(--text3);
-  font-family: var(--mono);
-}
-
-.mock-frame { display: grid; grid-template-columns: 208px 1fr; }
-
-.mock-side {
-  border-right: 1px solid var(--hairline);
-  padding: 14px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  background: var(--panel2);
-}
-.s-item {
-  padding: 9px 11px;
-  border-radius: 9px;
-  font-size: 0.83rem;
-  color: var(--text2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.s-item.on { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: var(--shadow-sm); }
-.s-user {
-  margin-top: auto;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 10px 11px;
-  font-size: 0.83rem;
-  color: var(--text2);
-  border-top: 1px solid var(--hairline);
-}
-.s-user .av {
-  width: 24px; height: 24px; border-radius: 50%;
-  background: var(--grad);
-}
-
-.mock-chat { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
-
-.mu { display: flex; justify-content: flex-end; }
-.mu .b {
-  background: var(--grad);
-  color: #fff;
-  padding: 11px 15px;
-  border-radius: 14px 14px 4px 14px;
-  font-size: 0.87rem;
-  max-width: 78%;
-  line-height: 1.6;
-  box-shadow: 0 6px 18px var(--glow);
-}
-
-.ma { display: flex; flex-direction: column; gap: 10px; }
-.mb {
-  background: var(--bubble-ai);
-  padding: 11px 15px;
-  border-radius: 14px 14px 14px 4px;
-  font-size: 0.87rem;
-  line-height: 1.7;
-  color: var(--text2);
-  max-width: 88%;
-}
-.mb .k {
-  font-weight: 700;
-  color: var(--text);
-  margin-right: 4px;
-}
-.mb .g { color: var(--prim); font-weight: 600; }
-.mb.reason { font-style: italic; color: var(--text3); font-size: 0.82rem; }
-.mb.tool {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-left: 2px solid var(--prim);
-  border-radius: 4px 12px 12px 4px;
-  background: var(--primary-soft);
-  font-size: 0.82rem;
-}
-.mb.mono { font-family: var(--mono); font-size: 0.8rem; color: var(--text3); }
-
-.caret {
-  display: inline-block;
-  width: 2px;
-  height: 1em;
-  background: var(--prim);
-  margin-left: 3px;
-  vertical-align: -2px;
-  animation: caretBlink 1s steps(1) infinite;
-}
-@keyframes caretBlink { 50% { opacity: 0; } }
-
-.mock-itin {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 12px;
-  border-radius: var(--r-s);
-  background: var(--panel2);
-  border: 1px solid var(--hairline);
-}
-.mi {
-  display: grid;
-  grid-template-columns: 52px auto 1fr;
-  align-items: baseline;
-  gap: 10px;
-  font-size: 0.82rem;
-}
-.mi-d {
-  font-family: var(--mono);
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: var(--prim);
-}
-.mi b { font-weight: 650; color: var(--text); }
-.mi span { color: var(--text3); }
-
-/* ==================== 示例行程 ==================== */
-.timeline { display: flex; flex-direction: column; gap: 18px; }
-
-/* 城市 Tab：实心选中态 + 横向可滑动（窄屏不换行、不挤压） */
-.timeline__dests {
+/* ============================================================
+   2. 示例行程
+   ============================================================ */
+.tabs {
   display: flex;
   gap: 10px;
   overflow-x: auto;
   padding-bottom: 4px;
-  scrollbar-width: thin;
+  margin-bottom: 22px;
 }
-.timeline__dests button {
+.tab {
   flex: 0 0 auto;
-  display: inline-flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 10px 18px;
-  border-radius: 999px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 11px 20px;
+  border-radius: 13px;
   border: 1px solid var(--border);
   background: var(--panel);
-  color: var(--text2);
-  transition: transform 0.22s, border-color 0.22s, color 0.22s, background-color 0.22s,
-              box-shadow 0.22s;
+  transition: border-color 0.22s, box-shadow 0.22s, transform 0.22s;
 }
-.timeline__dests button b { font-size: 0.93rem; font-weight: 700; }
-.timeline__dests button i {
+.tab b {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+.tab i {
   font-style: normal;
-  font-size: 0.72rem;
+  font-size: 0.73rem;
   color: var(--text3);
 }
-.timeline__dests button:hover {
+.tab:hover {
   transform: translateY(-2px);
   border-color: var(--blue-300);
-  color: var(--text);
 }
-.timeline__dests button.on {
+.tab--on {
   background: var(--grad);
   border-color: transparent;
-  color: #fff;
-  box-shadow: 0 10px 24px var(--glow);
+  box-shadow: 0 12px 28px var(--glow);
 }
-.timeline__dests button.on i { color: rgba(255, 255, 255, 0.82); }
+.tab--on b,
+.tab--on i {
+  color: #fff;
+}
 
-.timeline__nav {
+.showcase {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+}
+.daycard {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px 22px;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.26s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.26s;
+}
+.daycard:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 44px rgba(37, 99, 235, 0.13);
+}
+.daycard__head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
+  gap: 9px;
+  padding-bottom: 11px;
+  border-bottom: 2px solid var(--hairline);
 }
-.timeline__dest { font-size: 1.05rem; font-weight: 700; }
-.timeline__dest span {
-  margin-left: 10px;
-  font-size: 0.8rem;
-  font-weight: 400;
-  color: var(--text3);
-}
-.timeline__arrows { display: flex; align-items: center; gap: 10px; }
-.tl-count {
+.daycard__no {
   font-family: var(--mono);
-  font-size: 0.78rem;
-  color: var(--text3);
-  min-width: 74px;
-  text-align: center;
-}
-.tl-arrow {
-  width: 34px; height: 34px;
-  display: grid;
-  place-items: center;
-  border-radius: 9px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  color: var(--text2);
-  transition: transform 0.2s, border-color 0.2s, color 0.2s;
-}
-.tl-arrow:hover:not(:disabled) {
-  transform: translateY(-2px);
-  border-color: var(--blue-300);
+  font-size: 0.7rem;
+  font-weight: 700;
   color: var(--prim);
 }
-.tl-arrow:disabled { opacity: 0.4; cursor: not-allowed; }
+.daycard__date {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--text3);
+}
+.daycard__theme {
+  margin-left: auto;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+.daycard__sum {
+  margin-top: 10px;
+  font-size: 0.84rem;
+  color: var(--text2);
+}
 
-.timeline__card {
+.acts {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.acts__row {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  gap: 11px;
+  align-items: start;
+  padding: 11px 0;
+  border-bottom: 1px dashed var(--hairline);
+}
+.acts__row:last-child {
+  border-bottom: none;
+}
+.acts__slot {
+  font-size: 0.7rem;
+  font-weight: 650;
+  text-align: center;
+  padding: 3px 0;
+  border-radius: 6px;
+}
+.acts__slot--morning {
+  background: var(--blue-50);
+  color: var(--blue-700);
+}
+.acts__slot--afternoon {
+  background: var(--gold-soft);
+  color: var(--gold-600);
+}
+.acts__slot--evening {
+  background: var(--blue-900);
+  color: #fff;
+}
+.acts__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.acts__body b {
+  font-size: 0.87rem;
+  font-weight: 600;
+}
+.acts__body i {
+  font-style: normal;
+  font-size: 0.79rem;
+  color: var(--text3);
+  line-height: 1.5;
+}
+.acts__cost {
+  font-size: 0.76rem;
+  color: var(--text3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   3. 三个场景
+   ============================================================ */
+.scenes {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.scene {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 32px;
+  align-items: center;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: var(--r-l);
-  padding: 26px 28px;
+  border-radius: 18px;
+  padding: 30px 34px;
   box-shadow: var(--shadow-sm);
 }
-.timeline__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding-bottom: 16px;
-  border-bottom: 2px solid var(--hairline);
-  margin-bottom: 6px;
+/* 偶数行左右对调，形成阅读节奏 */
+.scene:nth-child(even) .scene__say {
+  order: 2;
 }
-.timeline__day {
-  font-family: var(--mono);
-  font-size: 0.74rem;
+
+.scene__eyebrow {
+  font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   color: var(--prim);
+  text-transform: uppercase;
 }
-.timeline__theme { font-size: 1.05rem; font-weight: 700; margin-top: 5px; }
-.timeline__ind { display: flex; gap: 5px; padding-top: 5px; }
-.timeline__ind i {
-  width: 20px; height: 4px;
-  border-radius: 999px;
-  background: var(--surface-soft);
-  transition: background-color 0.24s, width 0.24s;
+.scene__title {
+  margin-top: 8px;
+  font-size: 1.24rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
 }
-.timeline__ind i.on { background: var(--grad); width: 30px; }
-
-.timeline__list { list-style: none; margin: 0; padding: 0; }
-.timeline__list li {
-  display: grid;
-  grid-template-columns: 68px 1fr;
-  gap: 18px;
-  padding: 15px 0;
-  border-bottom: 1px dashed var(--hairline);
-}
-.timeline__list li:last-child { border-bottom: none; }
-
-/* 时段标签：图标 + 语义色，行程单要能一眼看出早晚 */
-.timeline__slot {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  height: fit-content;
-  padding: 6px 0;
-  border-radius: 8px;
-  font-size: 0.73rem;
-  font-weight: 650;
-  border: 1px solid transparent;
-}
-.slot--am { background: var(--blue-50); color: var(--blue-700); border-color: var(--blue-100); }
-.slot--pm { background: var(--gold-soft); color: var(--gold-600); border-color: rgba(214, 158, 46, 0.18); }
-.slot--night { background: var(--blue-900); color: #fff; border-color: transparent; }
-
-.timeline__act { min-width: 0; }
-.act-name { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 3px; }
-.act-name b { font-size: 0.93rem; font-weight: 650; }
-.act-kind {
-  font-size: 0.68rem;
-  font-weight: 600;
-  padding: 2px 7px;
-  border-radius: 5px;
-}
-.kind--spot { background: var(--primary-soft); color: var(--prim); }
-.kind--food { background: var(--gold-soft); color: var(--gold-600); }
-.kind--move { background: rgba(14, 165, 233, 0.12); color: var(--cyan-600); }
-.timeline__act > span { font-size: 0.84rem; color: var(--text2); line-height: 1.65; }
-
-/* ==================== 使用流程 ==================== */
-.flow { display: grid; grid-template-columns: 300px 1fr; gap: 48px; align-items: start; }
-
-.flow__side { position: relative; display: flex; flex-direction: column; }
-/* 连接线：把三步串成一条时间线，而不是三个孤立的按钮 */
-.flow__side::before {
-  content: '';
-  position: absolute;
-  left: 13px;
-  top: 28px;
-  bottom: 28px;
-  width: 1px;
-  background: linear-gradient(to bottom, var(--blue-200), var(--blue-100));
+.scene__value {
+  margin-top: 8px;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: var(--text2);
 }
 
-.fs-item {
-  position: relative;
-  display: grid;
-  grid-template-columns: 28px 1fr;
-  gap: 16px;
-  padding: 22px 4px;
-  text-align: left;
-  border-radius: var(--r-s);
-  transition: background-color 0.24s;
+.chat {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 30em;
 }
-.fs-item:hover { background: var(--panel); }
+.chat__me {
+  align-self: flex-end;
+  background: var(--grad);
+  color: #fff;
+  padding: 9px 14px;
+  border-radius: 13px 13px 4px 13px;
+  font-size: 0.85rem;
+  box-shadow: 0 6px 16px var(--glow);
+}
+.chat__ai {
+  background: var(--bubble-ai);
+  padding: 9px 14px;
+  border-radius: 13px 13px 13px 4px;
+  font-size: 0.85rem;
+  line-height: 1.65;
+  color: var(--text2);
+}
 
-.fs-no {
-  position: relative;
-  z-index: 1;
-  width: 28px; height: 28px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  font-family: var(--mono);
-  font-size: 0.68rem;
+.scene__get {
+  background: var(--panel2);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  padding: 18px 20px;
+}
+.res__title {
+  font-size: 0.8rem;
   font-weight: 700;
   color: var(--text3);
-  transition: background-color 0.24s, color 0.24s, border-color 0.24s, transform 0.24s;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
 }
-.fs-item.on .fs-no {
+.res {
+  margin: 0;
+}
+.res__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 0;
+  border-bottom: 1px dashed var(--hairline);
+}
+.res__row:last-child {
+  border-bottom: none;
+}
+.res dt {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  color: var(--text3);
+  font-family: var(--mono);
+}
+.res dd {
+  margin: 0;
+  font-size: 0.83rem;
+  font-weight: 550;
+  text-align: right;
+  line-height: 1.5;
+}
+.res__v--ok {
+  color: var(--success);
+}
+.res__v--warn {
+  color: var(--gold-600);
+}
+
+/* ============================================================
+   4. 三步流程
+   ============================================================ */
+.steps {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 44px;
+  align-items: start;
+}
+
+.steps__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+/* 串起三步的竖线 */
+.steps__list::before {
+  content: '';
+  position: absolute;
+  left: 21px;
+  top: 34px;
+  bottom: 34px;
+  width: 2px;
+  background: linear-gradient(to bottom, var(--blue-200), var(--blue-50));
+}
+.step {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 16px;
+  padding: 20px 4px;
+  cursor: pointer;
+  border-radius: 12px;
+  transition: background-color 0.22s;
+}
+.step:hover {
+  background: var(--panel);
+}
+.step__no {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 2px solid var(--border);
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text3);
+  transition: all 0.26s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.step--on .step__no {
   background: var(--grad);
   border-color: transparent;
   color: #fff;
-  transform: scale(1.1);
-  box-shadow: 0 6px 16px var(--glow);
+  transform: scale(1.08);
+  box-shadow: 0 8px 22px var(--glow);
 }
-
-.fs-body b {
+.step__body b {
   display: block;
-  font-size: 0.96rem;
+  font-size: 1.02rem;
   font-weight: 700;
-  margin-bottom: 6px;
-  opacity: 0.5;
+  margin-bottom: 5px;
+  opacity: 0.45;
   transition: opacity 0.24s;
 }
-.fs-body span {
-  display: block;
-  font-size: 0.83rem;
-  color: var(--text3);
+.step__body i {
+  font-style: normal;
+  font-size: 0.85rem;
   line-height: 1.65;
+  color: var(--text3);
   transition: color 0.24s;
 }
-.fs-item.on .fs-body b { opacity: 1; }
-.fs-item.on .fs-body span { color: var(--text2); }
+.step--on .step__body b {
+  opacity: 1;
+}
+.step--on .step__body i {
+  color: var(--text2);
+}
 
-.flow__preview {
+.preview {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: var(--r-l);
-  padding: 34px 32px;
-  min-height: 400px;
+  border-radius: 18px;
+  padding: 30px 32px;
+  min-height: 300px;
   display: flex;
   align-items: center;
   box-shadow: var(--shadow);
 }
-.pv { width: 100%; }
-.pv-label {
+.pv {
+  width: 100%;
+  animation: pvIn 0.34s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@keyframes pvIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pv {
+    animation: none;
+  }
+}
+.pv__label {
   font-family: var(--mono);
   font-size: 0.7rem;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text3);
-  margin-bottom: 22px;
+  margin-bottom: 18px;
 }
-
-.pv-inp {
+.pv__ask {
   display: flex;
   align-items: center;
   gap: 10px;
   background: var(--panel2);
   border: 1px solid var(--border);
-  border-radius: var(--r-m);
-  padding: 14px 16px;
-  font-size: 0.87rem;
-  color: var(--text);
+  border-radius: 13px;
+  padding: 15px 17px;
+  font-size: 0.9rem;
 }
-.pv-inp :deep(svg) { color: var(--prim); flex-shrink: 0; }
-.pv-send {
-  margin-left: auto;
-  width: 30px; height: 30px;
-  border-radius: 9px;
-  background: var(--grad);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.pv__ask :deep(svg) {
+  color: var(--prim);
   flex-shrink: 0;
 }
-.pv-chat { margin-top: 16px; }
-.pv-hint { font-size: 0.82rem; color: var(--text3); }
-
-.pv-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
-.pv-checks li {
-  display: grid;
-  grid-template-columns: 10px 52px 1fr;
-  align-items: baseline;
-  gap: 12px;
-  padding: 13px 15px;
-  border-radius: var(--r-s);
-  background: var(--panel2);
-  border: 1px solid var(--hairline);
-  font-size: 0.85rem;
+.pv__hint {
+  margin-top: 16px;
+  font-size: 0.79rem;
+  color: var(--text3);
 }
-.pv-checks b { font-weight: 650; color: var(--text); }
-.pv-checks span:last-child { color: var(--text2); }
-.pv-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text3); }
-.pv-dot.ok { background: var(--success); box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.16); }
-.pv-foot { margin-top: 16px; font-size: 0.78rem; color: var(--text3); }
 
-.plan-mock { display: flex; flex-direction: column; gap: 8px; }
-.plan-head {
+.check {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 0.9rem;
-  font-weight: 700;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--hairline);
-  margin-bottom: 4px;
+  flex-direction: column;
+  gap: 10px;
 }
-.plan-edit {
-  display: inline-flex;
+.check li {
+  display: grid;
+  grid-template-columns: 9px 46px 1fr;
   align-items: center;
-  gap: 5px;
-  font-size: 0.76rem;
-  font-weight: 500;
-  color: var(--prim);
-}
-.plan-day {
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-s);
-  padding: 12px 14px;
+  gap: 12px;
+  padding: 13px 16px;
+  border-radius: 12px;
   background: var(--panel2);
+  border: 1px solid var(--hairline);
+  font-size: 0.86rem;
 }
-.plan-day.open { background: var(--panel); border-color: var(--blue-200); }
-.pd-head { display: flex; align-items: center; gap: 10px; }
-.pd-no {
+.check__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.16);
+}
+.check b {
+  font-weight: 650;
+}
+.check span:last-child {
+  color: var(--text2);
+}
+
+.mini {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.mini__day {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  grid-template-rows: auto auto;
+  gap: 2px 14px;
+  padding: 13px 16px;
+  border-radius: 12px;
+  background: var(--panel2);
+  border: 1px solid var(--hairline);
+}
+.mini__day span {
+  grid-row: 1 / 3;
   font-family: var(--mono);
   font-size: 0.68rem;
   font-weight: 700;
   color: var(--prim);
+  align-self: center;
 }
-.pd-t { font-size: 0.86rem; font-weight: 650; }
-.pd-slots { margin-top: 8px; font-size: 0.81rem; color: var(--text2); line-height: 1.9; }
-.pd-slots i {
-  display: inline-block;
-  width: 34px;
+.mini__day b {
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+.mini__day i {
   font-style: normal;
-  font-size: 0.72rem;
+  font-size: 0.79rem;
   color: var(--text3);
 }
 
-/* ==================== CTA ====================
-   纯文字收尾，不套卡片。
-   原来是一张白底卡片（背景 + 边框 + 大圆角 + 阴影），
-   与上方「使用流程」区块的卡片堆在一起显得重复，也把收尾做得过重。
-   现在只留文字与按钮，靠留白分隔。 */
-.cta-wrap {
-  /* 上边距：原先为 0，导致与「使用流程」区块贴住（只靠该区块自身
-     88px 的下边距撑着，卡片边框一顶上来就显挤）。 */
-  padding: 96px 0 120px;
+/* ============================================================
+   5. 收尾
+   ============================================================ */
+.closing {
+  padding: 0 0 104px;
 }
-.cta {
+.closing__box {
+  position: relative;
+  overflow: hidden;
   text-align: center;
-  /* 无背景、无边框、无圆角、无阴影 —— 单纯文字 */
-  max-width: 640px;
-  margin: 0 auto;
+  background: linear-gradient(160deg, #eef4ff 0%, #f8fafc 52%, #eff9ff 100%);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 64px 40px 56px;
 }
-.cta__eyebrow { margin-bottom: 14px; }
-.cta h2 {
-  font-size: clamp(1.7rem, 3.2vw, 2.4rem);
+.closing__eyebrow {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--prim);
+}
+.closing__title {
+  margin-top: 12px;
+  font-size: clamp(1.75rem, 3.3vw, 2.5rem);
   font-weight: 800;
-  letter-spacing: -0.028em;
+  letter-spacing: -0.03em;
 }
-.cta > p {
-  margin: 16px auto 0;
-  max-width: 34em;
+.closing__sub {
+  margin: 14px auto 0;
+  max-width: 32em;
   font-size: 0.98rem;
+  line-height: 1.7;
   color: var(--text2);
-  line-height: 1.75;
 }
-.cta__btn { margin-top: 30px; }
-
-/* ==================== 响应式 ==================== */
-@media (max-width: 1024px) {
-  .cards { grid-template-columns: repeat(2, 1fr); }
-  .flow { grid-template-columns: 1fr; gap: 28px; }
-  .flow__side::before { display: none; }
-  .flow__side { flex-direction: row; overflow-x: auto; gap: 8px; }
-  .fs-item { flex: 0 0 auto; max-width: 260px; padding: 14px 12px; }
+.ask--closing {
+  max-width: 620px;
+  margin: 28px auto 0;
 }
-
-@media (max-width: 860px) {
-  /* Hero 在窄屏改为上下堆叠：文字在上，卡片在下 */
-  .hero__inner { grid-template-columns: 1fr; gap: 36px; padding-bottom: 28px; }
-  .hero__art { max-width: 460px; }
-  .stats { grid-template-columns: repeat(2, 1fr); gap: 20px; }
-  .mock-frame { grid-template-columns: 1fr; }
-  .mock-side { flex-direction: row; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--hairline); }
-  .s-user { display: none; }
-  .section { padding: 64px 0; }
+.closing__alt {
+  display: inline-block;
+  margin-top: 16px;
+  font-size: 0.83rem;
+  color: var(--text3);
+  transition: color 0.2s;
+}
+.closing__alt:hover {
+  color: var(--prim);
 }
 
-@media (max-width: 640px) {
-  .cards { grid-template-columns: 1fr; }
-  .hero__title { font-size: 1.95rem; }
-  .hero__cta .btn { width: 100%; }
-  .hero__chips { flex-direction: column; align-items: stretch; }
-  .chip-say { justify-content: flex-start; }
-  .timeline__card { padding: 20px 16px; }
-  .timeline__list li { grid-template-columns: 1fr; gap: 8px; }
-  .timeline__slot { width: fit-content; padding: 5px 12px; }
-  .timeline__nav { flex-direction: column; align-items: flex-start; }
-  .flow__preview { padding: 24px 18px; min-height: 340px; }
-  /* CTA 已无卡片，只需收紧上下留白（原先的 padding / border-radius 是给卡片用的） */
-  .cta-wrap { padding: 64px 0 80px; }
+/* ============================================================
+   响应式（移动端优先考量：Hero 堆叠、输入框换行、场景单列）
+   ============================================================ */
+@media (max-width: 1080px) {
+  .hero__inner {
+    grid-template-columns: 1fr;
+    gap: 42px;
+  }
+  .hero {
+    padding-top: 52px;
+  }
+  .hero__get {
+    max-width: 540px;
+  }
+  .scene {
+    grid-template-columns: 1fr;
+    gap: 22px;
+    padding: 26px 24px;
+  }
+  .scene:nth-child(even) .scene__say {
+    order: 0;
+  }
+  .steps {
+    grid-template-columns: 1fr;
+    gap: 26px;
+  }
+  .steps__list::before {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .section {
+    padding: 60px 0;
+  }
+  .showcase {
+    grid-template-columns: 1fr;
+  }
+  .plan__facts {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  .closing__box {
+    padding: 46px 22px 40px;
+  }
+  .closing {
+    padding-bottom: 72px;
+  }
+}
+
+@media (max-width: 620px) {
+  .hero__title {
+    font-size: 2.05rem;
+  }
+  /* 输入框在窄屏改为上下排列：一行放不下输入 + 按钮 */
+  .ask {
+    flex-wrap: wrap;
+    padding: 12px;
+  }
+  .ask__input {
+    flex: 1 1 auto;
+    order: 1;
+  }
+  .ask__go {
+    order: 2;
+    width: 100%;
+    justify-content: center;
+  }
+  .prompts {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .prompt {
+    text-align: left;
+  }
+  /* 窄屏把「时段」换到第二行，避免挤压地点文字 */
+  .tl__row {
+    grid-template-columns: 42px 1fr auto;
+    row-gap: 3px;
+  }
+  .tl__slot {
+    grid-column: 2 / 3;
+    grid-row: 2;
+    justify-self: start;
+  }
+  .tl__place {
+    grid-column: 2 / 4;
+  }
+  .preview {
+    padding: 22px 18px;
+    min-height: 260px;
+  }
+  .scene {
+    padding: 22px 18px;
+  }
 }
 </style>
