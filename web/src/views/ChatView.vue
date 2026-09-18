@@ -136,6 +136,40 @@ function normalizeMessages(payload: unknown): RdMsg[] {
       content: text
     })
   }
+  return mergeAssistantRuns(out)
+}
+
+/**
+ * 把连续的助手消息合并成一条，只保留最后一段文本。
+ *
+ * 为什么需要：工具调用型 Agent 一次回答会产生**多条** assistant 消息
+ * （「我先查一下车次」→ 工具调用 → 「查到了，结果如下…」）。
+ * 逐条渲染就会出现好几个人工头像，看起来像 AI 回了好几次，
+ * 实际上用户只问了一次。这是真实反馈的问题。
+ *
+ * 合并规则：连续的 assistant 消息视为同一次回答，只取最后一条的正文，
+ * 中间的过程性话语直接丢弃——它们是 Agent 的内部步骤，
+ * 不是给用户看的内容。工具调用与思考过程本就不该出现在对话流里。
+ *
+ * 用户消息是天然的分隔符，遇到即结束当前合并。
+ */
+function mergeAssistantRuns(list: RdMsg[]): RdMsg[] {
+  const out: RdMsg[] = []
+  let pending: RdMsg | null = null
+
+  for (const m of list) {
+    if (m.role === 'assistant') {
+      // 同一轮里的后续消息覆盖前一条，最终留下最后那段正文
+      pending = m
+      continue
+    }
+    if (pending) {
+      out.push(pending)
+      pending = null
+    }
+    out.push(m)
+  }
+  if (pending) out.push(pending)
   return out
 }
 
@@ -260,7 +294,14 @@ function renameFromToolbar() {
 }
 
 async function handleDelete(conv: Conversation) {
-  const sure = await ui.confirm(`确定删除会话「${conv.title ?? conv.id}」吗？历史与 AI 记忆将一并清除。`)
+  /*
+   * 不再把会话 id 显示给用户。原先标题为空时回退到 conv.id，
+   * 弹出一串随机字符（如「确定删除会话「483f5aa725c1」吗？」）——
+   * 用户既看不懂，也不需要知道内部标识。
+   * 没有标题就是「新会话」，与列表里的显示保持一致。
+   */
+  const label = conv.title?.trim() || '新会话'
+  const sure = await ui.confirm(`确定删除「${label}」吗？历史记录与 AI 记忆将一并清除。`)
   if (!sure) return
   try {
     await deleteConversations([conv.id])
