@@ -48,6 +48,12 @@ RUN useradd --create-home --shell /bin/bash --uid 10001 voyage
 WORKDIR /app
 
 COPY --from=builder /app/.venv /app/.venv
+
+# uvx 只在运行阶段需要：duckduckgo-mcp-server 是唯一走 stdio 传输的 MCP，
+# 需由应用启动子进程，命令是 `uvx duckduckgo-mcp-server==<版本>`。
+# 此前运行阶段没有 uvx，该 MCP 在容器里必然起不来（且是静默降级，不易发现）。
+# 直接从官方镜像取静态二进制，与构建期版本一致。
+COPY --from=ghcr.io/astral-sh/uv:0.9.9 /uvx /bin/
 # 应用代码、迁移脚本与配置
 COPY app/ ./app/
 COPY alembic/ ./alembic/
@@ -64,6 +70,26 @@ RUN mkdir -p /app/data/exports /app/data/output/logs \
     && chown -R voyage:voyage /app
 
 USER voyage
+
+# 预热 uvx 缓存：把 duckduckgo-mcp-server 及其依赖在**构建期**下载好。
+#
+# 为什么必须预热：
+#   该包不由 uv.lock 管理（它是 uvx 在运行时解析的），若不预热，
+#   容器每次重建后的首次工具调用都要联网下载整棵依赖树 ——
+#   既慢（数秒，正好卡在首个请求上），又让**无外网或网络受限的环境直接失败**，
+#   而失败会走静默降级，表现为「travel 少了一组搜索工具」而不报错。
+#
+# 版本由 DDG_MCP_PACKAGE 统一指定，应用侧（app/core/ai/mcp.py）读同一个
+# 环境变量 —— 避免「Dockerfile 装了 A 版、应用却拉起 B 版」这种不一致。
+#
+# 刻意不加 `|| true`：预热失败就该让构建失败。若放行，得到的正是本次要修的
+# 那种「镜像能启动但 MCP 起不来」的静默故障。
+ARG DDG_MCP_PACKAGE=duckduckgo-mcp-server==0.7.0
+ENV DDG_MCP_PACKAGE=${DDG_MCP_PACKAGE}
+# 放在 USER voyage 之后：缓存落在 /home/voyage/.cache，
+# 以 root 预热会让非 root 进程无法写入（需额外 chown，反而更绕）。
+# --help 只为触发解析与下载，不真正启动服务。
+RUN uvx "${DDG_MCP_PACKAGE}" --help > /dev/null
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
