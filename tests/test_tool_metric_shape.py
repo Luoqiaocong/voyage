@@ -5,15 +5,25 @@
   · 明细表里合计与明细并列，容易被误读成「有一个叫 total 的工具」
   · 前端「工具调用」卡片把明细相加时把合计也算了一次，
     数字看着对只是巧合（total 恰好等于工具之和）
+
+## 为什么同时查函数与 HTTP 两层
+
+修完后端代码后我曾忘记重启 uvicorn（--no-reload 模式下进程跑的是旧代码）。
+本地测试脚本是新进程、读到新代码，于是**测试全过但页面依旧显示 total**。
+只测函数层发现不了这种错位，故这里额外打一次真实 HTTP 接口 ——
+它能同时验证「代码正确」与「线上跑的是这份代码」。
 """
 import asyncio
 import selectors
 import sys
 
+import httpx
+
 sys.path.insert(0, ".")
 
 from app.config import config
 
+API = "http://127.0.0.1:8000/api/v1"
 ok_n = fail_n = 0
 
 
@@ -22,6 +32,65 @@ def check(label: str, ok: bool, detail: str = "") -> None:
     ok_n += 1 if ok else 0
     fail_n += 0 if ok else 1
     print(f"  [{'PASS' if ok else 'FAIL'}] {label}" + (f" — {detail}" if detail else ""))
+
+
+async def check_http_layer() -> None:
+    """打真实接口 —— 用于发现「代码改了但服务没重启」这类错位。"""
+    import redis.asyncio as aioredis
+    from sqlalchemy import delete, select
+
+    from app.modules.user.auth import PasswordManager
+    from app.shared.db import AsyncSessionLocal
+    from app.shared.db.models import User
+
+    r = aioredis.from_url(config.REDIS_URL, decode_responses=True)
+    keys = [k async for k in r.scan_iter(match="rate:*", count=200)]
+    if keys:
+        await r.delete(*keys)
+    await r.aclose()
+
+    EMAIL, PWD = "__t_shape__@voyage-test.example.com", "Voyage#2026test"
+    async with AsyncSessionLocal() as db:
+        old = (
+            await db.execute(select(User).where(User.email == EMAIL))
+        ).scalar_one_or_none()
+        if old:
+            await db.execute(delete(User).where(User.id == old.id))
+            await db.commit()
+        db.add(
+            User(email=EMAIL, username="t-shape", password=PasswordManager.hash(PWD),
+                 role="super_admin", is_active=True)
+        )
+        await db.commit()
+        uid = (await db.execute(select(User).where(User.email == EMAIL))).scalar_one().id
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as c:
+            rr = await c.post(f"{API}/users/login", json={"email": EMAIL, "password": PWD})
+            tok = ((rr.json() or {}).get("data") or {}).get("access_token")
+            if not tok:
+                check("HTTP 层可取到 token", False, rr.text[:120])
+                return
+            h = {"Authorization": f"Bearer {tok}"}
+            rr = await c.get(f"{API}/admin/metrics", headers=h)
+            data = (rr.json() or {}).get("data") or {}
+
+            tools = data.get("tools") or {}
+            print(f"\n=== HTTP 接口返回的 tools ===")
+            for name, m in sorted(tools.items()):
+                print(f"  {name:<30} calls={m.get('calls', 0)}")
+
+            check("HTTP: tools 里没有伪工具 total", "total" not in tools,
+                  f"keys={sorted(tools)}")
+            check(
+                "HTTP: 概览用的总计仍可读",
+                (data.get("counters") or {}).get("tool.total.calls", 0) >= 0,
+                str((data.get("counters") or {}).get("tool.total.calls")),
+            )
+    finally:
+        async with AsyncSessionLocal() as db:
+            await db.execute(delete(User).where(User.id == uid))
+            await db.commit()
 
 
 async def main() -> None:
@@ -54,7 +123,7 @@ async def main() -> None:
     print(f"\n  后端总计 tool.total.calls = {total}")
     print(f"  明细工具之和            = {detail_sum}")
 
-    print("\n=== 判定 ===")
+    print("\n=== 判定（函数层）===")
     check("tools 里没有伪工具 total", "total" not in tools,
           f"keys={sorted(tools)}")
     check("总计 > 0（说明统计在工作）", total > 0, str(total))
@@ -64,17 +133,30 @@ async def main() -> None:
           f"total={total} vs 明细和={detail_sum}")
 
     print("\n=== 其它工具（不应受影响）===")
-    for k in ("cache.hit_rate", "extraction.pass_rate", "chat.total"):
-        pass
     check("cache 仍可读", "cache" in snap and isinstance(snap["cache"], dict))
     check("extraction 仍可读", "extraction" in snap and isinstance(snap["extraction"], dict))
     check("chat 仍可读", "chat" in snap and isinstance(snap["chat"], dict))
+
+    print("\n=== 判定（HTTP 层，可发现「服务未重启」）===")
+    try:
+        await check_http_layer()
+    except Exception as e:  # noqa: BLE001
+        check("HTTP 层检查可执行", False, f"{type(e).__name__}: {e}")
 
     print(f"\n{'=' * 56}\n工具明细口径验证: {ok_n} 通过 / {fail_n} 失败\n{'=' * 56}")
     sys.exit(1 if fail_n else 0)
 
 
 if __name__ == "__main__":
+    import time
+
+    for _ in range(30):
+        try:
+            if httpx.get("http://127.0.0.1:8000/docs", timeout=4).status_code == 200:
+                break
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(2)
     if sys.platform == "win32":
         asyncio.run(
             main(),
@@ -82,3 +164,4 @@ if __name__ == "__main__":
         )
     else:
         asyncio.run(main())
+
