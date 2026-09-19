@@ -185,10 +185,15 @@ async def get_metrics(day: str | None = None) -> dict[str, Any]:
     latency_rows = {k: int(v) for k, v in latency_rows.items()}
 
     # 把扁平的 tool.x.cache_hit 还原成层级结构，便于前端直接渲染
+    #
+    # 注意排除 "total"：tool.total.calls 是所有工具的**合计**（供概览卡片与
+    # 趋势图使用），它不是一个工具。若不排除，它会被解析成一个名叫 total 的
+    # 「工具」混进明细表 —— 合计与明细并列，既重复又容易被误读成
+    # 「还有一个叫 total 的工具被调用了 N 次」。
     tools: dict[str, dict[str, Any]] = {}
     for key, value in counters.items():
         parts = key.split(".")
-        if len(parts) == 3 and parts[0] == "tool":
+        if len(parts) == 3 and parts[0] == "tool" and parts[1] != "total":
             tools.setdefault(parts[1], {})[parts[2]] = value
 
     for name, stat in tools.items():
