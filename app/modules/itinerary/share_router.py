@@ -112,14 +112,26 @@ class ShareOwnerRouter:
         clear_password: Annotated[bool, Query(description="设为 true 则清除访问密码")] = False,
         clear_expiry: Annotated[bool, Query(description="设为 true 则改为永不过期")] = False,
     ):
+        """修改分享设置，**只改请求里显式给出的字段**。
+
+        这里必须用 model_fields_set 过滤，不能直接把 req.allow_copy 传下去：
+        CreateShareRequest 的 allow_copy 有默认值 True，Pydantic 会把未传的
+        字段填成默认值，于是 service 里 `if allow_copy is not None` 恒为真，
+        「只改传入字段」的意图落空。
+
+        实测后果：用户先关掉「允许复制」，之后只想关「允许编辑」而只传
+        allow_edit 时，allow_copy 会被静默还原为默认的 True —— 用户会以为
+        权限设置不稳定。故未显式传入的一律按 None 传递，让 service 跳过。
+        """
+        given = req.model_fields_set
         share = await self.service.update_share(
             user_id=self.current_user.id,
             share_id=share_id,
-            allow_copy=req.allow_copy,
-            allow_edit=req.allow_edit,
-            password=req.password,
+            allow_copy=req.allow_copy if "allow_copy" in given else None,
+            allow_edit=req.allow_edit if "allow_edit" in given else None,
+            password=req.password if "password" in given else None,
             clear_password=clear_password,
-            expires_in_days=req.expires_in_days,
+            expires_in_days=req.expires_in_days if "expires_in_days" in given else None,
             clear_expiry=clear_expiry,
         )
         return _share_item(share)

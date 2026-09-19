@@ -72,8 +72,14 @@ onUnmounted(() => {
           <TravelIcon :name="l.icon" :size="15" />
           {{ l.label }}
         </RouterLink>
-        <RouterLink v-if="showAdmin" to="/admin" @click="close">
-          <TravelIcon name="compass" :size="15" />
+        <!--
+          管理台适度弱化：字号更小、颜色更淡、不做当前页高亮。
+          它不是面向普通用户的产品功能，而是管理入口；与「首页/助手/行程/我的」
+          同等呈现会让它看起来像主流程的一部分，也容易误点。
+          但仍保留在导航里且可点 —— 管理员的常用入口，藏进二级菜单反而麻烦。
+        -->
+        <RouterLink v-if="showAdmin" to="/admin" class="nav__admin" @click="close">
+          <TravelIcon name="compass" :size="14" />
           管理台
         </RouterLink>
       </nav>
@@ -124,7 +130,15 @@ onUnmounted(() => {
       </RouterLink>
       <div class="nav__mobile-actions">
         <template v-if="user.isLoggedIn">
-          <RouterLink v-if="showAdmin" to="/admin" class="btn btn-ghost btn--sm" @click="close">管理台</RouterLink>
+          <!-- 与桌面端一致：管理台弱化一档（它不属于产品主流程） -->
+          <RouterLink
+            v-if="showAdmin"
+            to="/admin"
+            class="btn btn-ghost btn--sm nav__mobile-admin"
+            @click="close"
+          >
+            管理台
+          </RouterLink>
           <RouterLink to="/profile" class="btn btn-ghost btn--sm" @click="close">个人资料</RouterLink>
           <RouterLink to="/chat" class="btn btn-primary btn--sm" @click="close">进入助手</RouterLink>
         </template>
@@ -295,6 +309,38 @@ onUnmounted(() => {
 }
 .nav__links a.router-link-active::after { opacity: 1; transform: scaleX(1); }
 
+/*
+ * 管理台：刻意比其它导航项轻一档。
+ * 字号 0.82rem（其余 0.88rem）、颜色 text3（其余 text2）、无当前页高亮。
+ * 仍保留悬停反馈 —— 否则会显得「不可点」，而不是「次要」。
+ *
+ * 选择器写成 .nav__links a.nav__admin 而不是 .nav__admin：
+ * 上面那些 .nav__links a.xxx 规则的特异性更高，若只用单类名就得靠
+ * !important 硬压，那是坏味道。提高特异性即可自然覆盖。
+ */
+.nav__links a.nav__admin {
+  margin-left: 4px;
+  font-size: 0.82rem;
+  gap: 5px;
+  color: var(--text3);
+}
+.nav__links a.nav__admin :deep(svg) { opacity: 0.55; }
+
+.nav__links a.nav__admin:hover {
+  color: var(--text2);
+  background: rgba(37, 99, 235, 0.05);
+}
+.nav__links a.nav__admin:hover :deep(svg) { opacity: 0.75; }
+
+/* 即使身处 /admin 也不给主色胶囊与指示线 —— 它不是同级导航 */
+.nav__links a.nav__admin.router-link-active {
+  color: var(--text2);
+  font-weight: 550;
+  background: rgba(37, 99, 235, 0.05);
+}
+.nav__links a.nav__admin.router-link-active :deep(svg) { opacity: 0.75; }
+.nav__links a.nav__admin.router-link-active::after { opacity: 0; }
+
 @media (prefers-reduced-motion: reduce) {
   .nav__links a,
   .nav__links a::after { transition: none; }
@@ -372,7 +418,18 @@ onUnmounted(() => {
   .nav__mobile-link :deep(svg) { transition: none; }
 }
 
-.nav__mobile-actions { display: flex; gap: 10px; margin-top: 14px; }
+.nav__mobile-actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+
+/* 移动端的「管理台」同样弱化：去掉边框，视觉上退为文字入口 */
+.nav__mobile-admin {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text3);
+  font-weight: 550;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.nav__mobile-admin:hover { color: var(--text2); background: rgba(37, 99, 235, 0.05); }
 
 @media (max-width: 860px) {
   .nav__links { display: none; }
