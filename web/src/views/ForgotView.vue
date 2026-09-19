@@ -22,6 +22,7 @@ import { resetPassword, resetToken, sendCode } from '@/api/user'
 import { useUiStore } from '@/stores/ui'
 import TravelIcon from '@/components/TravelIcon.vue'
 import MapTexture from '@/components/MapTexture.vue'
+import NavButton from '@/components/NavButton.vue'
 import { AUTH_COPY } from '@/constants/copy'
 
 const router = useRouter()
@@ -279,10 +280,9 @@ const pwdMismatch = computed(
             </button>
           </form>
 
-          <RouterLink to="/login" class="fg-back">
-            <TravelIcon name="arrow-left" :size="14" />
-            返回登录
-          </RouterLink>
+          <!-- 与表单平级的导航入口，用按钮形态；步骤 2 里那个「返回登录」
+               是与「换个邮箱」并排的内联链接，保持文字形态（表单惯用法） -->
+          <NavButton to="/login" label="返回登录" class="fg-back" />
         </template>
 
         <!-- ==================== 步骤 2 ==================== -->
@@ -567,16 +567,8 @@ const pwdMismatch = computed(
 .fg-strength__text { font-size: 0.73rem; color: var(--text3); }
 
 /* ---------- 底部 ---------- */
-.fg-back {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 20px;
-  font-size: 0.82rem;
-  color: var(--text3);
-  transition: color 0.18s;
-}
-.fg-back:hover { color: var(--prim); }
+/* 返回入口的按钮样式来自 components/NavButton.vue，这里只补间距 */
+.fg-back { margin-top: 20px; }
 
 .fg-foot {
   display: flex;

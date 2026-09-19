@@ -24,6 +24,7 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import AppNavbar from '@/components/AppNavbar.vue'
 import AppFooter from '@/components/AppFooter.vue'
+import NavButton from '@/components/NavButton.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
 
 const user = useUserStore()
@@ -779,9 +780,15 @@ function startHref(): string {
             </button>
           </form>
 
-          <RouterLink :to="startHref()" class="closing__alt">
-            或用账号登录后再规划
-          </RouterLink>
+          <!-- 与主输入框并列的次要入口。做成按钮而非一行灰字：
+               灰字在收尾区这种大面积留白里几乎不可见，也不像可点的控件。
+               这里语义是「另一种开始方式」而非「返回」，故不显示箭头。 -->
+          <NavButton
+            :to="startHref()"
+            label="或用账号登录后再规划"
+            :arrow="false"
+            class="closing__alt"
+          />
         </div>
       </div>
     </section>
@@ -1838,15 +1845,10 @@ function startHref(): string {
   max-width: 620px;
   margin: 28px auto 0;
 }
+/* 次要入口的按钮样式来自 components/NavButton.vue，这里只补间距。
+   注意 NavButton 是 inline-flex，居中需要靠外边距而非 text-align。 */
 .closing__alt {
-  display: inline-block;
-  margin-top: 16px;
-  font-size: 0.83rem;
-  color: var(--text3);
-  transition: color 0.2s;
-}
-.closing__alt:hover {
-  color: var(--prim);
+  margin-top: 18px;
 }
 
 /* ============================================================

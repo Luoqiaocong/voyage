@@ -171,7 +171,26 @@ onUnmounted(() => {
   gap: 32px;
 }
 
-.brand { display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0; }
+/*
+ * 品牌区：整体作为一个可点单元。
+ * 悬停只在图标上做轻微反馈（上浮 + 加深阴影），文字保持不动——
+ * 让整个标识一起动会显得晃。
+ */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 5px 9px 5px 5px;
+  margin-left: -5px;
+  border-radius: 12px;
+  transition: background-color 0.2s ease;
+}
+.brand:hover { background: rgba(37, 99, 235, 0.06); }
+.brand:focus-visible {
+  outline: 2px solid var(--prim);
+  outline-offset: 2px;
+}
 
 /* Logo 容器：白底圆角方块 + 细边框。
    图标本身是完整方形图（自带底色），容器再叠渐变会变成两层底色打架，
@@ -182,10 +201,22 @@ onUnmounted(() => {
   border-radius: 10px;
   background: var(--panel);
   border: 1px solid var(--border);
+  /* 极轻的投影：让白底图标从半透明导航栏背景上「浮」起来一点，
+     否则两者亮度接近会糊在一起 */
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
   display: grid;
   place-items: center;
   overflow: hidden;
   flex-shrink: 0;
+  transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.22s ease;
+}
+.brand:hover .brand__mark {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.16);
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand__mark { transition: none; }
+  .brand:hover .brand__mark { transform: none; }
 }
 .brand__mark img {
   width: 100%;
@@ -198,38 +229,76 @@ onUnmounted(() => {
   font-family: var(--font-display);
   font-size: 1.06rem;
   font-weight: 800;
-  letter-spacing: -0.01em;
+  /* 字距收紧一点，让「Voyage AI」读起来像一个整体标识而非两个词 */
+  letter-spacing: -0.022em;
+  color: var(--text);
 }
 .brand__text em { font-style: normal; color: var(--prim); }
 
-.nav__links { display: flex; gap: 28px; font-size: 0.88rem; }
+/*
+ * 导航项：胶囊背景 + 底部指示线，双重标记当前页。
+ *
+ * 为什么加胶囊而不只留底线：底线很细，扫视时容易漏掉；胶囊把「当前在哪」
+ * 变成一块可辨识的色块，一眼可定位。两者叠加而不取其一——胶囊给区域感，
+ * 底线给精确指向，且底线在胶囊底色上仍清晰（用主题色而非灰色）。
+ *
+ * 内边距由 4px 0 提到 7px 14px 是让胶囊有形状；同时间距由 28px 收到 6px：
+ * 视觉间隔改由内边距承担，整体占宽反而更紧凑，而每项的可点区域明显变大。
+ */
+.nav__links { display: flex; align-items: center; gap: 6px; font-size: 0.88rem; }
 
 .nav__links a {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  padding: 7px 14px;
+  border-radius: 10px;
   color: var(--text2);
-  padding: 4px 0;
-  transition: color 0.18s ease;
+  transition: color 0.18s ease, background-color 0.18s ease;
 }
-.nav__links a :deep(svg) { opacity: 0.7; transition: opacity 0.18s; }
-.nav__links a:hover :deep(svg), .nav__links a.router-link-active :deep(svg) { opacity: 1; }
+.nav__links a :deep(svg) { opacity: 0.68; transition: opacity 0.18s ease; }
+.nav__links a:hover :deep(svg),
+.nav__links a.router-link-active :deep(svg) { opacity: 1; }
+
+/* 指示线贴在胶囊下沿内侧，比贴到导航栏底边更克制 */
 .nav__links a::after {
   content: '';
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -2px;
+  left: 14px;
+  right: 14px;
+  bottom: 3px;
   height: 2px;
   border-radius: 2px;
   background: var(--grad);
   opacity: 0;
-  transition: opacity 0.18s ease;
+  transform: scaleX(0.4);
+  transition: opacity 0.22s ease, transform 0.22s ease;
 }
-.nav__links a:hover { color: var(--text); }
-.nav__links a.router-link-active { color: var(--text); font-weight: 600; }
-.nav__links a.router-link-active::after { opacity: 1; }
+
+/*
+ * 悬停用主题色淡染，而不是 --panel2。
+ * 原因：导航栏背景是半透明的 --nav-bg（rgba(247,249,252,0.82)），
+ * 而 --panel2 是 #f5f8fc —— 两者亮度几乎相同，用后者做悬停会看不出变化。
+ * 主题色淡染在深浅两个主题下都能与底色拉开差距，且暗示了「可点」。
+ */
+.nav__links a:hover {
+  color: var(--text);
+  background: rgba(37, 99, 235, 0.06);
+}
+.nav__links a:hover::after { opacity: 0.32; transform: scaleX(1); }
+
+.nav__links a.router-link-active {
+  color: var(--prim);
+  font-weight: 650;
+  background: var(--primary-soft);
+}
+.nav__links a.router-link-active::after { opacity: 1; transform: scaleX(1); }
+
+@media (prefers-reduced-motion: reduce) {
+  .nav__links a,
+  .nav__links a::after { transition: none; }
+}
 
 .nav__actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 
@@ -265,16 +334,43 @@ onUnmounted(() => {
   background: var(--bg);
 }
 
+/*
+ * 移动端抽屉里的导航项。
+ * 当前页同样要高亮——桌面端刚做了胶囊+底线，移动端若不做，
+ * 同一个站点的两套导航就会不一致（用户在不同宽度看到不同反馈）。
+ * 抽屉里是竖排列表，用左侧一条竖线 + 背景染色的方式，
+ * 比复用桌面的底部指示线更贴合这种版式。
+ */
 .nav__mobile-link {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 12px 2px;
+  padding: 12px 12px;
+  margin: 0 -12px;
+  border-radius: 10px;
   font-size: 0.95rem;
   font-weight: 500;
-  border-bottom: 1px dashed var(--hairline);
+  color: var(--text2);
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
-.nav__mobile-link :deep(svg) { color: var(--text3); }
+.nav__mobile-link :deep(svg) { color: var(--text3); transition: color 0.18s ease; }
+
+.nav__mobile-link:hover {
+  background: rgba(37, 99, 235, 0.06);
+  color: var(--text);
+}
+
+.nav__mobile-link.router-link-active {
+  background: var(--primary-soft);
+  color: var(--prim);
+  font-weight: 650;
+}
+.nav__mobile-link.router-link-active :deep(svg) { color: var(--prim); }
+
+@media (prefers-reduced-motion: reduce) {
+  .nav__mobile-link,
+  .nav__mobile-link :deep(svg) { transition: none; }
+}
 
 .nav__mobile-actions { display: flex; gap: 10px; margin-top: 14px; }
 
