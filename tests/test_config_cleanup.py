@@ -74,6 +74,18 @@ check("OPENCODE_GO_URL 仍是必填",
 check("已删字段不再存在",
       "DASHSCOPE_API_KEY" not in fields and "ALIYUN_BASE_URL" not in fields)
 
+print("\n=== 3c. 仅由 REDIS_URL 决定连接，分项不应必填 ===")
+# client.py 用 aioredis.from_url(config.REDIS_URL) 建连接，
+# REDIS_HOST / REDIS_PORT / REDIS_DB 从未被读取（那三行是注释掉的旧实现）。
+# 其中 REDIS_HOST 曾是必填项 —— 与 DEEPSEEK_API_KEY 同一类问题。
+check("REDIS_URL 仍是必填（连接真正依赖它）",
+      fields["REDIS_URL"].is_required() is True)
+check("REDIS_HOST 不再必填",
+      fields["REDIS_HOST"].is_required() is False,
+      f"is_required={fields['REDIS_HOST'].is_required()}")
+check("REDIS_PORT 有默认值", fields["REDIS_PORT"].default == 6379)
+check("REDIS_DB 有默认值", fields["REDIS_DB"].default == 7)
+
 print("\n=== 3b. 实际构造一次配置对象 ===")
 try:
     c = VoyageConfig()

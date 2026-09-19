@@ -86,10 +86,20 @@ class VoyageConfig(BaseSettings):
     SMTP_PORT: int = 587
     SMTP_USER: str = "resend"
     
-    REDIS_URL:str
-    REDIS_HOST:str
-    REDIS_PORT:int=6379
-    REDIS_DB:int=7
+    # ---------- Redis ----------
+    # 连接**只由 REDIS_URL 决定**（见 shared/redis/client.py 的 from_url）。
+    #
+    # 下面三项是早先按 host/port/db 分项配置时留下的，代码从未读取它们
+    # （client.py 里对应的三行是注释掉的旧实现）。其中 REDIS_HOST 还被声明为
+    # 必填 —— 又是一处「不填一把用不到的钥匙就无法启动」。
+    #
+    # 保留这三项是为了兼容既有 .env / docker-compose（那边仍在注入它们），
+    # 但全部给默认值、不再必填。它们**不影响实际连接**：
+    # 想换 Redis 实例请改 REDIS_URL。
+    REDIS_URL: str
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 7
 
     # ---------- 数据库 ----------
     # 主用 PostgreSQL：postgresql+asyncpg://user:pwd@host:5432/dbname

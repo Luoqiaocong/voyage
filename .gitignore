@@ -1,4 +1,4 @@
-# Python-generated files
+# Python 生成物
 __pycache__/
 *.py[oc]
 build/
@@ -6,21 +6,29 @@ dist/
 wheels/
 *.egg-info
 
-# Virtual environments
+# 虚拟环境与密钥
 .venv/
 .env
+# 密钥文件的备份（.env.bak-* 等）同样不能入库。
+# 只写 `.env` 是匹配不到它们的 —— 实测：生成 .env.bak-<时间戳> 后会出现在
+# git status 的未跟踪列表里，一次 `git add .` 就会把真实密钥提交上去。
+# 故用 `.env.*` 通配覆盖，再用取反规则把样例文件放回来。
+.env.*
+!.env.example
 .tests/
 data/
 process.md
 frontend/
 
-# Web frontend（源码入库，仅忽略依赖与构建产物）
+# Web 前端（源码入库，仅忽略依赖与构建产物）
 web/node_modules/
 web/dist/
 web/.env
+web/.env.*
+!web/.env.example
 
 # 会话中产生的临时脚本与文件（验证脚本、迁移消息等），不入库
 .dsh_*
 
-# ���������־������һ���������ı��ݣ�����⣩
+# 本地审计日志导出（一次性清理的备份，不入库）
 audit_orphans_backup.json
