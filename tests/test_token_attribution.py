@@ -211,6 +211,10 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    # 写真实数据前先确认不是生产实例（见 tests/guard.py 的说明）
+    from tests.guard import require_non_production
+
+    require_non_production()
     for _ in range(30):
         try:
             if httpx.get("http://127.0.0.1:8000/docs", timeout=4).status_code == 200:

@@ -169,6 +169,10 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    # 写真实数据前先确认不是生产实例（见 tests/guard.py 的说明）
+    from tests.guard import require_non_production
+
+    require_non_production()
     if sys.platform == "win32":
         asyncio.run(
             main(),
