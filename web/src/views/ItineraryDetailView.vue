@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppNavbar from '@/components/AppNavbar.vue'
 import NavButton from '@/components/NavButton.vue'
@@ -57,20 +57,55 @@ const kindLabel: Record<string, string> = {
 // 本文件不再需要自己维护一份映射，故删除以免两处不一致。
 
 /**
- * 导出/分享工具项。
+ * 导出下拉的选项。
  *
- * 图标从 TravelIcon 里挑语义最近的：站内只有固定一套 SVG 图标，
- * 没有日历/打印/文档这类通用图标。用「时钟」表示日历（两者都是时间维度）、
- * 「地图」表示打印（输出的是版面），比继续用 emoji 更统一 ——
- * emoji 跨平台字形差异大，且与站内图标风格完全脱节。
+ * 图标从 TravelIcon 里挑语义最近的：站内只有固定一套 SVG，没有日历/打印/
+ * 文档这类通用图标。用「时钟」表示日历（同为时间维度）、「地图」表示 PDF
+ * （输出的是版面），比继续用 emoji 统一得多 —— emoji 跨平台字形差异大，
+ * 且与站内图标风格脱节。
+ *
+ * 每项带一句说明：下拉展开后有一段空间，写清「导出成什么、能拿来做什么」
+ * 比只放一个词更有用。
  */
 const exportTools = [
-  { key: 'ics' as const, label: '日历', icon: 'clock', title: '导出为 .ics，可导入手机日历' },
-  { key: 'md' as const, label: 'Markdown', icon: 'edit', title: '导出为 Markdown 文本' },
-  { key: 'print' as const, label: '打印', icon: 'map', title: '打开打印视图，可另存为 PDF' }
+  { key: 'ics' as const, label: '日历文件', hint: '可导入手机日历，带时间提醒', icon: 'clock' },
+  { key: 'md' as const, label: 'Markdown', hint: '纯文本，方便复制到别处编辑', icon: 'edit' },
+  { key: 'print' as const, label: 'PDF / 打印', hint: '打开打印视图，可另存为 PDF', icon: 'map' }
 ]
 
+/** 导出下拉的开合状态 */
+const exportOpen = ref(false)
+const exportWrap = ref<HTMLElement | null>(null)
+
+/** 选中一项后关闭下拉再执行，避免导出期间菜单还挂在界面上 */
+async function pickExport(kind: 'ics' | 'md' | 'print') {
+  exportOpen.value = false
+  await doExport(kind)
+}
+
+/**
+ * 点击组件外部时收起下拉。
+ *
+ * 只在展开时挂监听：常驻监听会让每次页面点击都走一遍判断，
+ * 而下拉大部分时间是关闭的。用 pointerdown 而非 click —— 后者要等
+ * 鼠标抬起，期间用户可能已经点到别处，收起会显得迟钝。
+ */
+function onDocPointerDown(e: PointerEvent) {
+  if (!exportOpen.value) return
+  const el = exportWrap.value
+  if (el && !el.contains(e.target as Node)) exportOpen.value = false
+}
+
+/** Esc 关闭下拉：键盘用户需要一条退路，不能只靠点空白 */
+function onDocKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && exportOpen.value) exportOpen.value = false
+}
+
 onMounted(async () => {
+  // 下拉的「点击外部收起 / Esc 收起」监听
+  document.addEventListener('pointerdown', onDocPointerDown)
+  document.addEventListener('keydown', onDocKeydown)
+
   try {
     detail.value = await getItinerary(id)
     syncEdit()
@@ -79,6 +114,11 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', onDocPointerDown)
+  document.removeEventListener('keydown', onDocKeydown)
 })
 
 function syncEdit() {
@@ -221,41 +261,67 @@ function cancelEdit() {
               </div>
             </div>
             <!--
-              操作区分三组，按「用到它的频率」从右往左排：
-                主操作  编辑行程（实心）—— 进入这份行程后最常做的事
-                次要    分享 / 导出（日历、Markdown、打印）
-                弱化    删除 —— 破坏性操作，不做实心红底
-              原先六个按钮平铺、全用 emoji 当图标：
-                · emoji 跨平台渲染差异大（Windows 是彩色、macOS 是另一套字形），
-                  且与站内统一的 SVG 图标体系脱节，看起来像临时拼的
-                · 主次不分：编辑与导出同为幽灵按钮，而删除是实心红，最刺眼
-                · 无分组，六个按钮连成一排，扫视时找不到重点
+              操作区。配色按「功能语义」分配，而不是一片灰：
+                编辑行程  实心蓝 —— 主操作
+                分享      绿     —— 传播类
+                导出 ▾    金     —— 输出类，合并为下拉
+                删除      灰→红  —— 破坏性操作，不常亮
+              三色并存但不刺眼：都用淡色底 + 饱和文字，只有主操作是实心。
             -->
             <div class="it-actions">
               <template v-if="!editing">
-                <div class="it-actions__group it-actions__group--tools">
+                <div class="it-actions__group">
+                  <!-- 分享：独立按钮而非塞进下拉 —— 它是这页最常用的动作之一 -->
                   <button
-                    v-for="t in exportTools"
-                    :key="t.key"
-                    class="toolbtn"
+                    class="btn btn-tint btn-tint-green btn--sm"
                     type="button"
-                    :disabled="exporting !== null"
-                    :title="t.title"
-                    @click="doExport(t.key)"
-                  >
-                    <TravelIcon :name="t.icon" :size="15" />
-                    <span>{{ exporting === t.key ? '导出中…' : t.label }}</span>
-                  </button>
-                  <button
-                    class="toolbtn"
-                    type="button"
-                    :class="{ 'is-on': showShare }"
+                    :class="{ 'is-open': showShare }"
                     :title="showShare ? '收起分享面板' : '生成分享链接'"
                     @click="showShare = !showShare"
                   >
                     <TravelIcon name="spark" :size="15" />
-                    <span>{{ showShare ? '收起分享' : '分享' }}</span>
+                    {{ showShare ? '收起分享' : '分享' }}
                   </button>
+
+                  <!--
+                    导出：三个格式（日历 / Markdown / PDF）收进一个下拉。
+                    原先三个并列按钮占了操作区一半宽度，而导出是低频动作，
+                    不配占这么多位置；合并后主次更清楚。
+                  -->
+                  <div ref="exportWrap" class="exp">
+                    <button
+                      class="btn btn-tint btn-tint-gold btn--sm"
+                      type="button"
+                      :disabled="exporting !== null"
+                      :aria-expanded="exportOpen"
+                      aria-haspopup="menu"
+                      @click="exportOpen = !exportOpen"
+                    >
+                      <TravelIcon name="arrow-right" :size="15" class="exp__icon" />
+                      {{ exporting !== null ? '导出中…' : '导出' }}
+                      <span class="exp__caret" :class="{ 'is-open': exportOpen }" aria-hidden="true"></span>
+                    </button>
+
+                    <Transition name="exp">
+                      <div v-if="exportOpen" class="exp__menu" role="menu">
+                        <button
+                          v-for="t in exportTools"
+                          :key="t.key"
+                          class="exp__item"
+                          type="button"
+                          role="menuitem"
+                          :disabled="exporting !== null"
+                          @click="pickExport(t.key)"
+                        >
+                          <TravelIcon :name="t.icon" :size="15" />
+                          <span class="exp__item-main">
+                            <b>{{ t.label }}</b>
+                            <i>{{ t.hint }}</i>
+                          </span>
+                        </button>
+                      </div>
+                    </Transition>
+                  </div>
                 </div>
 
                 <div class="it-actions__group it-actions__group--main">
@@ -263,8 +329,7 @@ function cancelEdit() {
                     <TravelIcon name="edit" :size="15" />
                     编辑行程
                   </button>
-                  <!-- 删除做成文字按钮：它不该与常用操作抢视觉重量，
-                       但仍要能一眼找到（放最右，位置固定） -->
+                  <!-- 删除：默认灰字（不常亮红色），悬停才转红 -->
                   <button class="delbtn" type="button" title="删除这份行程" @click="remove">
                     删除
                   </button>
@@ -451,41 +516,92 @@ function cancelEdit() {
   border-left: 1px solid var(--line);
 }
 
-/* ---- 工具按钮（导出/分享）----
-   比全局 .btn 更轻：字号更小、内边距更紧，避免与「编辑行程」抢视觉。 */
-.toolbtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 12px;
+/* ---- 导出下拉 ----
+   把三个格式收进一个菜单：导出是低频动作，原先三个并列按钮
+   占了操作区一半宽度，与「编辑行程」抢位置。 */
+.exp { position: relative; }
+
+/* 按钮里的箭头转一下当作下拉指示，避免再加一个图标 */
+.exp__icon { transform: rotate(90deg); opacity: 0.8; }
+
+.exp__caret {
+  width: 0;
+  height: 0;
+  margin-left: 1px;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  opacity: 0.7;
+  transition: transform 0.2s ease;
+}
+.exp__caret.is-open { transform: rotate(180deg); }
+
+.exp__menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 232px;
+  padding: 6px;
   border: 1px solid var(--line);
-  border-radius: var(--r-s);
+  border-radius: var(--r-m);
+  /* 菜单需要明显浮于内容之上，故这里用较强的阴影（按钮上刻意不用） */
+  box-shadow: 0 12px 32px rgba(16, 24, 40, 0.14), 0 2px 6px rgba(16, 24, 40, 0.06);
   background: var(--surface);
-  font-size: 0.82rem;
-  font-weight: 550;
-  color: var(--ink-soft);
-  transition: background-color 0.18s, border-color 0.18s, color 0.18s, transform 0.18s;
 }
-.toolbtn :deep(svg) { opacity: 0.75; transition: opacity 0.18s; }
-.toolbtn:hover:not(:disabled) {
-  background: var(--surface-soft);
-  border-color: var(--blue-200);
-  color: var(--primary);
-  transform: translateY(-1px);
+
+.exp__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: var(--r-s);
+  background: transparent;
+  text-align: left;
+  transition: background-color 0.16s ease;
 }
-.toolbtn:hover:not(:disabled) :deep(svg) { opacity: 1; }
-.toolbtn:active:not(:disabled) { transform: translateY(0); }
-.toolbtn:disabled { opacity: 0.5; cursor: not-allowed; }
-/* 分享面板已展开时保持激活态，让「再点一次收起」这件事可预期 */
-.toolbtn.is-on {
-  background: var(--primary-soft);
-  border-color: var(--blue-200);
-  color: var(--primary);
+.exp__item :deep(svg) {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--gold-600);
+  transition: color 0.16s ease;
 }
-.toolbtn.is-on :deep(svg) { opacity: 1; }
-.toolbtn:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
+.exp__item:hover:not(:disabled) { background: var(--gold-soft); }
+.exp__item:disabled { opacity: 0.5; cursor: not-allowed; }
+.exp__item:focus-visible {
+  outline: 2px solid var(--gold-600);
+  outline-offset: -2px;
+}
+
+.exp__item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.exp__item-main b { font-size: 0.86rem; font-weight: 650; color: var(--text); }
+.exp__item-main i {
+  font-style: normal;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--text3);
+}
+
+/* 展开/收起：轻微下移淡入，不做缩放（缩放会让菜单像弹出来） */
+.exp-enter-active,
+.exp-leave-active { transition: opacity 0.16s ease, transform 0.16s ease; }
+.exp-enter-from,
+.exp-leave-to { opacity: 0; transform: translateY(-4px); }
+
+/* 「分享」按钮在面板展开时保持按下感 */
+.btn-tint-green.is-open {
+  background: rgba(56, 161, 105, 0.2);
+  border-color: rgba(56, 161, 105, 0.32);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .exp__caret,
+  .exp__item,
+  .exp__item :deep(svg) { transition: none; }
+  .exp-enter-active,
+  .exp-leave-active { transition: none; }
 }
 
 /* ---- 删除：弱化为文字按钮 ----

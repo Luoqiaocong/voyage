@@ -312,6 +312,42 @@ img, svg { display: block; max-width: 100%; }
 .btn-link { background: transparent; border: none; color: var(--blue-700); padding: 4px 8px; font-weight: 650; }
 .btn-link:hover { text-decoration: underline; }
 
+/* ---- 带色调的次要按钮（tint 系列）----
+ *
+ * 用途：让功能不同的按钮有可辨的颜色语义，而不是一片灰。
+ *
+ * 为什么用「淡色底 + 饱和文字」而不是实心填充：
+ *   - 实心填充的视觉重量等同主按钮，一排实心色会互相打架，主次也丢了
+ *   - 淡色底在浅色系界面里更透气，能与卡片底色融合
+ *   - 悬停只需底色加深一档即可表达反馈，不必靠上浮与阴影
+ *
+ * 色调按语义分配而非随机：
+ *   blue   主操作、主要链接（与全站主色一致）
+ *   green  分享类（传播 / 正向）
+ *   gold   打印、PDF 等输出类（金色本就是设计系统里的「次要强调」）
+ *   cyan   与 blue 同族但可区分，避免两个蓝色按钮并排时打架
+ */
+.btn-tint { border-width: 1px; border-style: solid; font-weight: 600; }
+.btn-tint:hover:not(:disabled) { transform: translateY(-1px); }
+
+.btn-tint-blue { background: var(--blue-50); color: var(--blue-700); border-color: var(--blue-100); }
+.btn-tint-blue:hover:not(:disabled) { background: var(--blue-100); border-color: var(--blue-200); }
+
+.btn-tint-green { background: rgba(56, 161, 105, 0.1); color: var(--green-600); border-color: rgba(56, 161, 105, 0.16); }
+.btn-tint-green:hover:not(:disabled) { background: rgba(56, 161, 105, 0.18); border-color: rgba(56, 161, 105, 0.28); }
+
+.btn-tint-gold { background: var(--gold-soft); color: var(--gold-600); border-color: rgba(214, 158, 46, 0.18); }
+.btn-tint-gold:hover:not(:disabled) { background: rgba(214, 158, 46, 0.2); border-color: rgba(214, 158, 46, 0.3); }
+
+.btn-tint-cyan { background: rgba(14, 165, 233, 0.1); color: var(--cyan-600); border-color: rgba(14, 165, 233, 0.16); }
+.btn-tint-cyan:hover:not(:disabled) { background: rgba(14, 165, 233, 0.18); border-color: rgba(14, 165, 233, 0.28); }
+
+/* 深色主题：浅色底叠在深背景上会失效，改为半透明提亮 */
+:root[data-theme='dark'] .btn-tint-blue { background: rgba(37, 99, 235, 0.2); color: var(--blue-300); border-color: rgba(37, 99, 235, 0.3); }
+:root[data-theme='dark'] .btn-tint-green { background: rgba(56, 161, 105, 0.2); color: var(--green-400); border-color: rgba(56, 161, 105, 0.3); }
+:root[data-theme='dark'] .btn-tint-gold { background: rgba(214, 158, 46, 0.2); color: var(--gold-400); border-color: rgba(214, 158, 46, 0.3); }
+:root[data-theme='dark'] .btn-tint-cyan { background: rgba(14, 165, 233, 0.2); color: var(--cyan-400); border-color: rgba(14, 165, 233, 0.3); }
+
 .section-sub { color: var(--text2); margin-top: 10px; font-size: 1rem; }
 
 /* ---- 表单 ---- */
