@@ -11,7 +11,9 @@ class AdminUserItem(BaseModel):
     email: Annotated[str, Field(description="邮箱")]
     username: Annotated[str | None, Field(description="昵称")] = None
     avatar: Annotated[str | None, Field(description="头像文件名")] = None
-    role: Annotated[str, Field(description="角色：user / admin")]
+    # 三个角色：super_admin（超级管理员，可读写）/ admin（普通管理员，只读）/
+    # user（普通用户）。前端据此显示不同底色并决定是否渲染操作按钮。
+    role: Annotated[str, Field(description="角色：user / admin / super_admin")]
     is_active: Annotated[bool, Field(description="账号是否启用")]
     created_at: Annotated[Any, Field(description="注册时间（UTC）")]
 
@@ -35,9 +37,12 @@ class AdminUserPage(BaseModel):
 
 
 class RoleUpdateRequest(BaseModel):
-    """修改用户角色。"""
+    """修改用户角色（仅超级管理员可调用）。"""
 
-    role: Annotated[str, Field(description="目标角色：user / admin")]
+    role: Annotated[
+        str,
+        Field(description="目标角色：user（普通用户）/ admin（普通管理员，只读）/ super_admin（超级管理员）"),
+    ]
 
 
 class StatusUpdateRequest(BaseModel):

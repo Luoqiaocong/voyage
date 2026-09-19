@@ -1,4 +1,13 @@
-"""管理端接口：全部要求管理员身份（见 get_current_admin）。"""
+"""管理端接口。
+
+权限分两级：
+  - 路由级依赖 get_current_admin —— **读取**权限，普通管理员与超管都可。
+  - 写接口额外注入 get_current_super_admin —— **写入**权限，仅超管。
+
+之所以在路由级就挂读权限（而不是逐个端点声明）：新增端点时天然受保护，
+不会因遗漏而裸奔。写接口则必须显式换成超管依赖，这个「必须显式」是刻意的 ——
+漏掉会直接表现为接口权限过宽，在测试(test_admin_roles)里能立刻发现。
+"""
 import csv
 import io
 from typing import Annotated
@@ -10,7 +19,8 @@ from starlette import status
 
 from app.config import config
 from app.core.route import UnifiedRoute
-from app.modules.user.dependencies import get_current_admin
+from app.modules.user.constants import ROLE_SUPER_ADMIN
+from app.modules.user.dependencies import get_current_admin, get_current_super_admin
 from app.shared.db.models import User
 
 from .schemas import (
@@ -54,6 +64,12 @@ def _new_csv() -> tuple[io.StringIO, "csv._writer"]:
 @cbv(router)
 class AdminRouter:
     service: AdminService = Depends()
+    # 读取身份：普通管理员即可。
+    #
+    # ⚠️ 这里是 **类级依赖**，@cbv 会把它应用到本类**所有**路由。
+    # 因此绝不能把「仅超管」的依赖也放在这一层 —— 那会让只读看板也要求超管，
+    # 普通管理员就什么都看不到，与「只有查看权限」的定位完全相反。
+    # 超管依赖只加在两个写端点的函数参数上（见 update_role / update_status）。
     current_admin: User = Depends(get_current_admin)
 
     # ==================== 看板 ====================
@@ -111,27 +127,72 @@ class AdminRouter:
         page: Annotated[int, Query(ge=1)] = 1,
         page_size: Annotated[int, Query(ge=1, le=100)] = config.ADMIN_PAGE_SIZE_DEFAULT,
         keyword: Annotated[str | None, Query(description="按邮箱或昵称模糊搜索")] = None,
-        role: Annotated[str | None, Query(description="按角色筛选：user / admin")] = None,
+        role: Annotated[
+            str | None, Query(description="按角色筛选：user / admin / super_admin")
+        ] = None,
         is_active: Annotated[bool | None, Query(description="按启用状态筛选")] = None,
     ):
+        """用户列表。
+
+        结果里**不含层级高于当前查看者的账号** —— 普通管理员看不到超级管理员的
+        邮箱（那是可被用于撞库或钓鱼的信息）。过滤在 SQL 层完成，
+        因此 total 与分页也是一致的，不会出现「本页 10 条但总共说有 12 条」。
+        """
         return await self.service.list_users(
-            page=page, page_size=page_size, keyword=keyword, role=role, is_active=is_active
+            page=page,
+            page_size=page_size,
+            keyword=keyword,
+            role=role,
+            is_active=is_active,
+            viewer_role=self.current_admin.role,
         )
 
     @router.get("/users/{user_id}", summary="用户详情", status_code=status.HTTP_200_OK)
     async def get_user(self, user_id: int):
         return await self.service.get_user_detail(user_id)
 
-    @router.patch("/users/{user_id}/role", summary="修改用户角色", status_code=status.HTTP_200_OK)
-    async def update_role(self, user_id: int, req: RoleUpdateRequest, request: Request):
+    @router.get("/me", summary="当前管理员的身份与权限", status_code=status.HTTP_200_OK)
+    async def me(self):
+        """前端据此决定是否渲染写操作按钮（改角色 / 停用）。
+
+        另有许多接口在写操作时会被后端拒绝，但**前端提前隐藏**能避免用户
+        点了才收到「权限不足」，那是更差的体验。
+        """
+        return {
+            "id": self.current_admin.id,
+            "email": self.current_admin.email,
+            "username": self.current_admin.username,
+            "role": self.current_admin.role,
+            "can_write": self.current_admin.role == ROLE_SUPER_ADMIN,
+        }
+
+    @router.patch("/users/{user_id}/role", summary="修改用户角色（仅超级管理员）", status_code=status.HTTP_200_OK)
+    async def update_role(
+        self,
+        user_id: int,
+        req: RoleUpdateRequest,
+        request: Request,
+        # 超管权限在**函数参数**上声明，而不是类级依赖 ——
+        # 类级依赖会作用于本类全部路由（见 current_admin 处的说明）。
+        operator: User = Depends(get_current_super_admin),
+    ):
         return await self.service.update_role(
-            operator=self.current_admin, target_id=user_id, new_role=req.role, ip=_client_ip(request)
+            operator=operator,
+            target_id=user_id,
+            new_role=req.role,
+            ip=_client_ip(request),
         )
 
-    @router.patch("/users/{user_id}/status", summary="启用/禁用用户", status_code=status.HTTP_200_OK)
-    async def update_status(self, user_id: int, req: StatusUpdateRequest, request: Request):
+    @router.patch("/users/{user_id}/status", summary="启用/禁用用户（仅超级管理员）", status_code=status.HTTP_200_OK)
+    async def update_status(
+        self,
+        user_id: int,
+        req: StatusUpdateRequest,
+        request: Request,
+        operator: User = Depends(get_current_super_admin),
+    ):
         return await self.service.update_status(
-            operator=self.current_admin,
+            operator=operator,
             target_id=user_id,
             is_active=req.is_active,
             ip=_client_ip(request),

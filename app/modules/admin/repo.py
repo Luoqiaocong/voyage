@@ -5,6 +5,7 @@ from fastapi import Depends
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.user.constants import ROLE_RANK
 from app.shared.db import get_db
 from app.shared.db.models import Conversation, Itinerary, TokenUsage, User
 
@@ -24,8 +25,14 @@ class AdminRepo:
         keyword: str | None = None,
         role: str | None = None,
         is_active: bool | None = None,
+        viewer_rank: int | None = None,
     ) -> tuple[list[User], int]:
-        """分页查询用户，支持邮箱/昵称关键词与角色、状态筛选。"""
+        """分页查询用户，支持邮箱/昵称关键词与角色、状态筛选。
+
+        viewer_rank：查看者的角色层级。传入时会**过滤掉层级高于查看者的账号**
+        （防止普通管理员看到超级管理员的邮箱，那是可被用于撞库/钓鱼的信息）。
+        传 None 表示不做过滤（如 CLI 脚本）。
+        """
         conditions = []
         if keyword:
             like = f"%{keyword.strip()}%"
@@ -34,6 +41,9 @@ class AdminRepo:
             conditions.append(User.role == role)
         if is_active is not None:
             conditions.append(User.is_active == is_active)
+        if viewer_rank is not None:
+            allowed = [r for r, rank in ROLE_RANK.items() if rank <= viewer_rank]
+            conditions.append(User.role.in_(allowed))
 
         count_stmt = select(func.count(User.id))
         list_stmt = select(User)
@@ -67,13 +77,18 @@ class AdminRepo:
         ).scalar_one()
         return int(conversations), int(itineraries)
 
-    async def count_admins(self) -> int:
-        """当前启用状态的管理员数量（用于「不能停用最后一个管理员」的保护）。"""
+    async def count_super_admins(self) -> int:
+        """当前启用状态的**超级管理员**数量。
+
+        用于「不能停用/降级最后一个超级管理员」的保护。
+        刻意不统计普通管理员：后者没有管理能力，即使剩好几个也无法靠它们
+        恢复权限，把它们算进来会让保护形同虚设。
+        """
         return int(
             (
                 await self.db.execute(
                     select(func.count(User.id)).where(
-                        User.role == "admin", User.is_active.is_(True)
+                        User.role == "super_admin", User.is_active.is_(True)
                     )
                 )
             ).scalar_one()

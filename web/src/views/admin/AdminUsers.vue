@@ -2,15 +2,24 @@
 /**
  * 用户管理：分页 + 关键词搜索 + 角色/状态筛选 + 改角色 + 启用禁用。
  *
- * 关于自我保护：后端会拒绝「停用自己」与「停用/降级最后一个启用管理员」，
- * 前端把这些提示原样透出即可，不重复实现规则。
+ * 权限分两级（与后端一致）：
+ *   super_admin  可改角色、可启停用
+ *   admin        只读，页面上不渲染任何操作按钮
+ * 后端仍会独立校验（写接口走 get_current_super_admin），前端隐藏只是
+ * 避免「点了才被拒」的差体验，不是安全边界。
+ *
+ * 关于自我保护：后端会拒绝「停用自己」「操作同级或更高级」「降级最后一个
+ * 超管」，前端把这些提示原样透出即可，不重复实现规则。
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import {
+  getAdminMe,
   getUserDetail,
   listUsers,
   updateUserRole,
   updateUserStatus,
+  type AdminMe,
+  type AdminRole,
   type AdminUserDetail,
   type AdminUserItem
 } from '@/api/admin'
@@ -26,18 +35,32 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const keyword = ref('')
-const roleFilter = ref<'' | 'user' | 'admin'>('')
+const roleFilter = ref<'' | 'user' | 'admin' | 'super_admin'>('')
 const activeFilter = ref<'all' | 'active' | 'inactive'>('all')
 
 const detail = ref<AdminUserDetail | null>(null)
 const detailLoading = ref(false)
 const busyId = ref<number | null>(null)
 
+/** 当前管理员的身份与写权限，由 /admin/me 返回（以后端为准，不在前端推断） */
+const adminMe = ref<AdminMe | null>(null)
+const canWrite = computed(() => adminMe.value?.can_write === true)
+
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 
 /** 当前登录者是否就是这一行（用于禁用「停用自己」按钮并给出原因） */
 function isSelf(u: AdminUserItem): boolean {
   return me.userInfo?.email === u.email
+}
+
+/** 角色 → 显示文案与样式。三级各有独立底色，超管蓝、普通管理员绿。 */
+const ROLE_META: Record<string, { label: string; cls: string }> = {
+  super_admin: { label: '超级管理员', cls: 'tag--super' },
+  admin: { label: '普通管理员', cls: 'tag--admin' },
+  user: { label: '用户', cls: 'tag--user' }
+}
+function roleMeta(role: string) {
+  return ROLE_META[role] ?? { label: role, cls: 'tag--user' }
 }
 
 async function load() {
@@ -82,13 +105,19 @@ function goto(next: number) {
   page.value = next
 }
 
-async function toggleRole(u: AdminUserItem) {
-  const next = u.role === 'admin' ? 'user' : 'admin'
-  const ok = await ui.confirm(
-    next === 'admin'
-      ? `将「${u.email}」提升为管理员？管理员可查看全站数据并管理所有用户。`
-      : `将「${u.email}」降为普通用户？`
-  )
+/**
+ * 改角色。三档循环：user -> admin -> super_admin -> user。
+ *
+ * 为什么不是「一键切换管理员/用户」：现在有三种角色，二值切换无法表达
+ * 「普通管理员」这一档，必须给用户明确的选择。
+ */
+async function setRole(u: AdminUserItem, next: AdminRole) {
+  const NAME: Record<string, string> = {
+    user: '普通用户',
+    admin: '普通管理员（只能查看数据，不能做任何操作）',
+    super_admin: '超级管理员（可管理用户与其它管理员）'
+  }
+  const ok = await ui.confirm(`将「${u.email}」设为${NAME[next] ?? next}？`)
   if (!ok) return
   busyId.value = u.id
   try {
@@ -101,6 +130,35 @@ async function toggleRole(u: AdminUserItem) {
   } finally {
     busyId.value = null
   }
+}
+
+/**
+ * 该行是否可被当前管理员操作。
+ *
+ * 与后端 can_manage_role 同一套规则：**只能操作层级严格低于自己的账号**，
+ * 且不能操作自己。在前端复刻一份是为了让按钮置灰并给出原因，
+ * 而不是让用户点了才收到「权限不足」。
+ */
+const RANK: Record<string, number> = { user: 0, admin: 1, super_admin: 2 }
+
+/** 当前管理员的层级；未加载时为 0（视为无权限，默认拒绝） */
+const myRank = computed(() => RANK[adminMe.value?.role ?? ''] ?? 0)
+
+function canOperate(u: AdminUserItem): boolean {
+  if (!canWrite.value) return false
+  if (isSelf(u)) return false
+  const targetRank = RANK[u.role]
+  if (targetRank === undefined) return false
+  return myRank.value > targetRank
+}
+
+/** 不可操作的原因，作为按钮的 title 与 disabled 提示 */
+function whyCannot(u: AdminUserItem): string {
+  if (!canWrite.value) return '当前账号只有查看权限'
+  if (isSelf(u)) return '不能操作自己的账号'
+  const targetRank = RANK[u.role] ?? -1
+  if (targetRank >= myRank.value) return '不能操作与自己同级或级别更高的账号'
+  return ''
 }
 
 async function toggleStatus(u: AdminUserItem) {
@@ -140,6 +198,13 @@ function closeDetail() {
 onMounted(async () => {
   // 管理台入口依赖 role，进入本页前先确保用户信息已加载，否则「自己」判断会失效
   await me.fetchUserInfo(true)
+  // 写权限以后端 /admin/me 为准，不在前端按角色名推断 ——
+  // 这样将来后端调整权限规则，前端无需同步改动
+  try {
+    adminMe.value = await getAdminMe()
+  } catch {
+    adminMe.value = null // 拿不到就按只读处理（默认拒绝）
+  }
   load()
 })
 </script>
@@ -152,7 +217,8 @@ onMounted(async () => {
       <select v-model="roleFilter" class="select toolbar__select">
         <option value="">全部角色</option>
         <option value="user">普通用户</option>
-        <option value="admin">管理员</option>
+        <option value="admin">普通管理员</option>
+        <option value="super_admin">超级管理员</option>
       </select>
       <select v-model="activeFilter" class="select toolbar__select">
         <option value="all">全部状态</option>
@@ -188,8 +254,8 @@ onMounted(async () => {
               </td>
               <td>{{ u.username ?? '—' }}</td>
               <td>
-                <span class="tag" :class="u.role === 'admin' ? 'tag--admin' : 'tag--user'">
-                  {{ u.role === 'admin' ? '管理员' : '用户' }}
+                <span class="tag" :class="roleMeta(u.role).cls">
+                  {{ roleMeta(u.role).label }}
                 </span>
               </td>
               <td>
@@ -201,23 +267,52 @@ onMounted(async () => {
                 {{ u.created_at?.slice(0, 10) }}
               </td>
               <td class="table__ops">
+                <!-- 详情对所有管理员开放：它只展示统计数字，不含操作 -->
                 <button class="btn btn-link btn--xs" @click="openDetail(u)">详情</button>
-                <button
-                  class="btn btn-link btn--xs"
-                  :disabled="busyId === u.id"
-                  @click="toggleRole(u)"
-                >
-                  {{ u.role === 'admin' ? '降为用户' : '设为管理员' }}
-                </button>
-                <button
-                  class="btn btn-link btn--xs"
-                  :class="{ 'is-danger': u.is_active }"
-                  :disabled="busyId === u.id || (isSelf(u) && u.is_active)"
-                  :title="isSelf(u) && u.is_active ? '不能停用当前登录的账号' : ''"
-                  @click="toggleStatus(u)"
-                >
-                  {{ u.is_active ? '禁用' : '启用' }}
-                </button>
+
+                <!--
+                  写操作仅超管可见。普通管理员（只读）连按钮都不渲染，
+                  而不是渲染后置灰 —— 后者会让人反复尝试。
+                  即便前端漏了，后端写接口也有 get_current_super_admin 兜底。
+                -->
+                <template v-if="canWrite">
+                  <button
+                    v-if="canOperate(u)"
+                    class="btn btn-link btn--xs"
+                    :disabled="busyId === u.id"
+                    @click="setRole(u, u.role === 'super_admin' ? 'user' : u.role === 'admin' ? 'super_admin' : 'admin')"
+                  >
+                    {{ u.role === 'user' ? '设为管理员' : u.role === 'admin' ? '升为超管' : '降为用户' }}
+                  </button>
+                  <!-- 同级或更高级：保留按钮但置灰，并说明原因 ——
+                       直接隐藏会让管理员以为「功能没了」 -->
+                  <button
+                    v-else
+                    class="btn btn-link btn--xs"
+                    disabled
+                    :title="whyCannot(u)"
+                  >
+                    改角色
+                  </button>
+
+                  <button
+                    v-if="canOperate(u)"
+                    class="btn btn-link btn--xs"
+                    :class="{ 'is-danger': u.is_active }"
+                    :disabled="busyId === u.id"
+                    @click="toggleStatus(u)"
+                  >
+                    {{ u.is_active ? '禁用' : '启用' }}
+                  </button>
+                  <button
+                    v-else
+                    class="btn btn-link btn--xs"
+                    disabled
+                    :title="whyCannot(u)"
+                  >
+                    {{ u.is_active ? '禁用' : '启用' }}
+                  </button>
+                </template>
               </td>
             </tr>
             <tr v-if="!loading && !items.length">
@@ -337,8 +432,11 @@ onMounted(async () => {
   font-weight: 600;
   white-space: nowrap;
 }
-.tag--admin { background: var(--primary-soft); color: var(--prim); }
+.tag--admin { background: rgba(56, 161, 105, 0.13); color: var(--green-600); }
 .tag--user { background: var(--surface-soft); color: var(--text2); }
+/* 超级管理员用主题蓝突出：它是唯一能改动数据的角色，
+   与绿色的只读管理员在扫视时应能立刻区分 */
+.tag--super { background: var(--primary-soft); color: var(--prim); font-weight: 700; }
 .tag--ok { background: rgba(72, 187, 120, 0.14); color: var(--success); }
 .tag--off { background: rgba(224, 82, 82, 0.13); color: var(--danger); }
 .tag--me { background: var(--gold-soft); color: var(--gold-600); margin-left: 6px; }

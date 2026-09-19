@@ -20,7 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import config
 from app.core.business import BusinessCode, UserException
-from app.modules.user.constants import ROLE_ADMIN, VALID_ROLES
+from app.modules.user.constants import (
+    ROLE_SUPER_ADMIN,
+    VALID_ROLES,
+    can_manage_role,
+    role_rank,
+)
 from app.shared import audit
 from app.shared.db import get_db
 from app.shared.db.models import User
@@ -178,7 +183,14 @@ class AdminService(TransactionMixin):
         keyword: str | None = None,
         role: str | None = None,
         is_active: bool | None = None,
+        viewer_role: str | None = None,
     ) -> dict[str, Any]:
+        """用户列表。
+
+        viewer_role：查看者的角色。据此**隐藏层级高于自己的账号** ——
+        普通管理员在列表里看不到超级管理员，避免暴露其邮箱
+        （可被用于撞库、钓鱼或针对性社工）。超级管理员能看到全部。
+        """
         page = max(1, page)
         page_size = max(1, min(page_size, config.ADMIN_PAGE_SIZE_MAX))
         users, total = await self.repo.list_users(
@@ -187,11 +199,14 @@ class AdminService(TransactionMixin):
             keyword=keyword,
             role=role,
             is_active=is_active,
+            viewer_rank=role_rank(viewer_role) if viewer_role else None,
         )
         return {
             "total": total,
             "page": page,
             "page_size": page_size,
+            # 前端据此决定是否渲染「改角色 / 停用」等按钮，与后端权限保持一致
+            "can_write": viewer_role == ROLE_SUPER_ADMIN,
             "items": [
                 {
                     "id": u.id,
@@ -224,7 +239,7 @@ class AdminService(TransactionMixin):
     async def update_role(
         self, *, operator: User, target_id: int, new_role: str, ip: str | None
     ) -> dict[str, Any]:
-        """修改用户角色。"""
+        """修改用户角色。仅超级管理员可达（路由层已用 get_current_super_admin 拦截）。"""
         if new_role not in VALID_ROLES:
             raise UserException(code=BusinessCode.PARAM_INVALID)
 
@@ -233,9 +248,37 @@ class AdminService(TransactionMixin):
         if old_role == new_role:
             return {"id": target.id, "role": target.role, "changed": False}
 
-        # 自我保护：不允许把最后一个启用状态的管理员降级
-        if old_role == ROLE_ADMIN and new_role != ROLE_ADMIN:
-            await self._ensure_not_last_admin(target.id, "降级")
+        # 层级校验：只能管理级别严格低于自己的账号。
+        # 这条同时挡住两件事——
+        #   1. 普通管理员改动任何人（它的层级不高于绝大多数目标）
+        #   2. 超级管理员互相降级（平级不能操作，避免内耗导致无人可管）
+        if not can_manage_role(operator.role, target.role):
+            raise UserException(
+                code=BusinessCode.FORBIDDEN,
+                msg="不能修改与自己同级或级别更高的账号",
+            )
+        # 提升他人时，新角色也不能达到或超过自己 —— 否则等于批量制造平级，
+        # 甚至（若校验只看旧角色）可以造出比自己更高的账号。
+        if not can_manage_role(operator.role, new_role):
+            raise UserException(
+                code=BusinessCode.FORBIDDEN,
+                msg="不能把他人提升到与自己同级或更高的角色",
+            )
+
+        # 自我保护：不允许把自己降级。
+        # 与「不能操作平级」是两条不同的理由——这里防的是误操作：
+        # 一次不小心的点击就会让自己失去后台权限，且改回来需要别人帮忙。
+        if target.id == operator.id:
+            raise UserException(
+                code=BusinessCode.FORBIDDEN,
+                msg="不能修改自己的角色，请让其他超级管理员操作",
+            )
+
+        # 兜底：不允许平台失去最后一个启用的超级管理员。
+        # 层级校验已能挡住大部分情况（超管之间互不可动），但若将来放开
+        # 平级操作，这条是最后一道防线。
+        if old_role == ROLE_SUPER_ADMIN and new_role != ROLE_SUPER_ADMIN:
+            await self._ensure_not_last_super_admin(target.id, "降级")
 
         async with self.transaction_scope():
             target.role = new_role
@@ -256,7 +299,7 @@ class AdminService(TransactionMixin):
     async def update_status(
         self, *, operator: User, target_id: int, is_active: bool, ip: str | None
     ) -> dict[str, Any]:
-        """启用/禁用用户。"""
+        """启用/禁用用户。仅超级管理员可达（路由层已拦截）。"""
         target = await self._require_user(target_id)
         old = target.is_active
         if old == is_active:
@@ -267,9 +310,15 @@ class AdminService(TransactionMixin):
             raise UserException(
                 code=BusinessCode.FORBIDDEN, msg="不能停用当前登录的管理员账号"
             )
-        # 自我保护二：不能停用最后一个启用状态的管理员
-        if not is_active and target.role == ROLE_ADMIN:
-            await self._ensure_not_last_admin(target.id, "停用")
+        # 层级校验：只能管理级别严格低于自己的账号（含「普通管理员停用超管」）
+        if not can_manage_role(operator.role, target.role):
+            raise UserException(
+                code=BusinessCode.FORBIDDEN,
+                msg="不能操作与自己同级或级别更高的账号",
+            )
+        # 兜底：不能停用最后一个启用的超级管理员
+        if not is_active and target.role == ROLE_SUPER_ADMIN:
+            await self._ensure_not_last_super_admin(target.id, "停用")
 
         async with self.transaction_scope():
             target.is_active = is_active
@@ -293,17 +342,23 @@ class AdminService(TransactionMixin):
             raise UserException(code=BusinessCode.USER_NOT_FOUND)
         return user
 
-    async def _ensure_not_last_admin(self, target_id: int, action: str) -> None:
-        """确保该操作不会让平台失去最后一个启用的管理员。"""
-        admins = await self.repo.count_admins()
+    async def _ensure_not_last_super_admin(self, target_id: int, action: str) -> None:
+        """确保该操作不会让平台失去最后一个启用的超级管理员。
+
+        注意统计的是 **super_admin** 而非 admin：普通管理员没有管理能力，
+        即使还剩好几个也不能靠它们恢复权限。
+        """
+        supers = await self.repo.count_super_admins()
         target = await self.repo.get_user(target_id)
-        target_is_active_admin = (
-            target is not None and target.role == ROLE_ADMIN and target.is_active
+        target_is_active_super = (
+            target is not None
+            and target.role == ROLE_SUPER_ADMIN
+            and target.is_active
         )
-        if target_is_active_admin and admins <= 1:
+        if target_is_active_super and supers <= 1:
             raise UserException(
                 code=BusinessCode.FORBIDDEN,
-                msg=f"不能{action}最后一个启用状态的管理员，否则将无人可管理后台",
+                msg=f"不能{action}最后一个启用状态的超级管理员，否则将无人可管理后台",
             )
 
     # ==================== 会话洞察 ====================

@@ -34,7 +34,7 @@ from .auth import (
     get_hashed_id,
     validate_password_strength,
 )
-from .constants import ROLE_ADMIN, ROLE_USER, SELF_EDITABLE_FIELDS
+from .constants import ROLE_SUPER_ADMIN, ROLE_USER, SELF_EDITABLE_FIELDS
 from .repo import UserRepo
 
 
@@ -128,15 +128,18 @@ class UserService(TransactionMixin):
         try:
             async with self.transaction_scope():
                 is_first = await self.repo.is_empty_locked()
+                # 首个注册用户设为**超级管理员**而非普通管理员：
+                # 后者只有查看权限，若把引导设成它，部署完将没有任何人能管理用户，
+                # 反而需要登服务器跑脚本补救 —— 与「首个用户即可用」的初衷相悖。
                 user = await self.repo.create(
                     email,
                     hashed_pwd,
                     username,
-                    role=ROLE_ADMIN if is_first else ROLE_USER,
+                    role=ROLE_SUPER_ADMIN if is_first else ROLE_USER,
                 )
                 if is_first:
                     log.warning(
-                        f"[bootstrap] 首个注册用户 {email} 已被设为管理员（id={user.id}）；"
+                        f"[bootstrap] 首个注册用户 {email} 已被设为超级管理员（id={user.id}）；"
                         f"此后注册的用户均为普通用户"
                     )
                 return user

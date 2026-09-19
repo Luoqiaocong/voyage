@@ -14,7 +14,20 @@ class UserBaseRequest(BaseModel):
     password: Annotated[str, Field(description="用户密码", min_length=8)] 
     
 class UserProfileBase(BaseModel):
-    username: Annotated[str | None, Field(description="昵称", max_length=10)] = None
+    """昵称/头像的**共用字段定义**，刻意不带长度约束。
+
+    为什么不能在这里写 max_length：
+      它同时被 UserInfo（**响应**模型）与 UserProfileUpdate（输入模型）继承。
+      响应模型上用 Field(max_length=10) 会变成**读取时的校验** ——
+      只要库里有一个超过 10 字的昵称（历史数据、后台导入、脚本写入都可能），
+      该用户的 GET /users/info 就会 500，而前端登录后第一件事就是调它，
+      等于账号直接不可用。实测已复现：昵称 'probe-admin'（11 字）触发
+      ValidationError，接口返回 500 而非降级展示。
+
+      长度约束应当只加在**输入**模型上（RegisterUserRequest 与
+      UserProfileUpdate 各自声明），读取路径一律宽松。
+    """
+    username: Annotated[str | None, Field(description="昵称")] = None
     avatar: Annotated[str | None, Field(description="头像文件名（如 photographer.png）")] = None
 
 class RegisterUserRequest(UserBaseRequest):
@@ -76,7 +89,7 @@ class UserInfo(UserIdentity, UserProfileBase):
     # 只读回显：前端据此决定是否展示管理端入口。
     # 注意这里只「读」——写入路径被 SELF_EDITABLE_FIELDS 白名单挡住，
     # 用户无法通过 PATCH /users/info 修改这两个字段。
-    role: Annotated[str, Field(description="角色：user / admin")] = "user"
+    role: Annotated[str, Field(description="角色：user / admin / super_admin")] = "user"
     is_active: Annotated[bool, Field(description="账号是否启用")] = True
 
     @field_serializer('id')
@@ -86,12 +99,22 @@ class UserInfo(UserIdentity, UserProfileBase):
     model_config = {"from_attributes": True}
     
 class UserProfileUpdate(UserProfileBase):
+    """用户自助修改资料。
+
+    长度约束必须声明在这里（而不是共用的 UserProfileBase），
+    否则会变成响应模型的读取校验，详见 UserProfileBase 的说明。
+    """
+    username: Annotated[
+        str | None,
+        Field(description="昵称", min_length=2, max_length=10),
+    ] = None
+
     model_config = {
         "json_schema_extra": {
             "examples": [
-                {"username": "new username"},
+                {"username": "newname"},
                 {"avatar": "photographer.png"},
-                {"username": "new username", "avatar": "photographer.png"},
+                {"username": "newname", "avatar": "photographer.png"},
             ]
         }
     }

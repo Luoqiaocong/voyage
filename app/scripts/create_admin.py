@@ -34,7 +34,7 @@ from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy import select
 
 from app.modules.user.auth import PasswordManager, validate_password_strength
-from app.modules.user.constants import ROLE_ADMIN
+from app.modules.user.constants import ROLE_SUPER_ADMIN, VALID_ROLES
 from app.shared.db import AsyncSessionLocal, engine
 from app.shared.db.models import User
 
@@ -44,6 +44,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--email", required=True, help="管理员邮箱")
     parser.add_argument("--username", help="用户不存在时新建所需的昵称（2-10 字）")
     parser.add_argument("--password-env", help="从该环境变量读取新建账号的密码；不传则交互式输入")
+    parser.add_argument(
+        "--role",
+        default=ROLE_SUPER_ADMIN,
+        choices=sorted(VALID_ROLES),
+        help=(
+            "目标角色，默认 super_admin。"
+            "super_admin=可读写后台；admin=普通管理员，只能查看数据不能操作。"
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true", help="只检查将要执行的动作，不写库")
     return parser.parse_args()
 
@@ -70,20 +79,20 @@ async def _run(args: argparse.Namespace) -> int:
         ).scalar_one_or_none()
 
         if user is not None:
-            if user.role == ROLE_ADMIN and user.is_active:
-                print(f"[skip] {email} 已是启用的管理员（id={user.id}），无需变更")
+            if user.role == args.role and user.is_active:
+                print(f"[skip] {email} 已是启用的 {args.role}（id={user.id}），无需变更")
                 return 0
             print(
-                f"[promote] 提升为管理员: {email} (id={user.id}) "
-                f"role={user.role} -> {ROLE_ADMIN}, is_active={user.is_active} -> True"
+                f"[promote] 设为 {args.role}: {email} (id={user.id}) "
+                f"role={user.role} -> {args.role}, is_active={user.is_active} -> True"
             )
             if args.dry_run:
                 print("[dry-run] 未写库")
                 return 0
-            user.role = ROLE_ADMIN
+            user.role = args.role
             user.is_active = True
             await session.commit()
-            print(f"[done] {email} 现在是管理员")
+            print(f"[done] {email} 现在是 {args.role}")
             return 0
 
         if not args.username:
@@ -111,12 +120,12 @@ async def _run(args: argparse.Namespace) -> int:
                 email=email,
                 username=username,
                 password=PasswordManager.hash(password),
-                role=ROLE_ADMIN,
+                role=args.role,
                 is_active=True,
             )
         )
         await session.commit()
-        print(f"[done] 管理员 {email} 创建完成")
+        print(f"[done] {args.role} {email} 创建完成")
         return 0
 
 

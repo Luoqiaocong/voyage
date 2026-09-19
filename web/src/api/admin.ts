@@ -149,12 +149,15 @@ export async function getMetricsTrend(days = 7): Promise<{ days: number; trend: 
 }
 
 // ==================== 用户管理 ====================
+/** 三档角色。super_admin 可读写；admin 只读；user 无后台权限。 */
+export type AdminRole = 'user' | 'admin' | 'super_admin'
+
 export interface AdminUserItem {
   id: number
   email: string
   username: string | null
   avatar: string | null
-  role: 'user' | 'admin'
+  role: AdminRole
   is_active: boolean
   created_at: string
 }
@@ -168,14 +171,29 @@ export interface AdminUserPage {
   total: number
   page: number
   page_size: number
+  /** 当前查看者是否有写权限（后端下发的权威判断，前端不自行推断） */
+  can_write?: boolean
   items: AdminUserItem[]
+}
+
+/** 当前管理员自身的身份与权限（GET /admin/me） */
+export interface AdminMe {
+  id: number
+  email: string
+  username: string | null
+  role: AdminRole
+  can_write: boolean
+}
+
+export async function getAdminMe(): Promise<AdminMe> {
+  return (await http.get('/admin/me')) as unknown as AdminMe
 }
 
 export interface ListUsersParams {
   page?: number
   page_size?: number
   keyword?: string
-  role?: 'user' | 'admin' | ''
+  role?: AdminRole | ''
   is_active?: boolean | null
 }
 
@@ -204,7 +222,7 @@ export interface ChangeResult {
   is_active?: boolean
 }
 
-export async function updateUserRole(userId: number, role: 'user' | 'admin'): Promise<ChangeResult> {
+export async function updateUserRole(userId: number, role: AdminRole): Promise<ChangeResult> {
   return (await http.patch(`/admin/users/${userId}/role`, { role })) as unknown as ChangeResult
 }
 
