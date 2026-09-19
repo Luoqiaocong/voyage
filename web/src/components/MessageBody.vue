@@ -61,6 +61,43 @@ const blocks = computed<Block[]>(() => parseMessage(props.text))
         <p>{{ b.text }}</p>
       </aside>
 
+      <!--
+        表格：车次、票价、天气这类多列信息的正确形态。
+        解析器原先不认 markdown 表格，那些行落进普通段落被渲染成
+        一堆竖线与短横线的原始文本，看起来「很乱」。
+        首列用等宽字体并加粗：车次号、日期这类标识符最需要纵向对齐比对。
+      -->
+      <div v-else-if="b.kind === 'table' && b.table" class="mb__table-wrap">
+        <table class="mb__table">
+          <thead>
+            <tr>
+              <th v-for="(h, hi) in b.table.headers" :key="hi">
+                <span
+                  v-for="(sp, si) in toSpans(h)"
+                  :key="si"
+                  :class="{ 'mb__b': sp.bold }"
+                >{{ sp.text }}</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, ri) in b.table.rows" :key="ri">
+              <td
+                v-for="(cell, ci) in row"
+                :key="ci"
+                :class="{ 'mb__table-first': ci === 0 }"
+              >
+                <span
+                  v-for="(sp, si) in toSpans(cell)"
+                  :key="si"
+                  :class="{ 'mb__b': sp.bold }"
+                >{{ sp.text }}</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
       <!-- 行程片段：可直接提取 -->
       <section v-else-if="b.kind === 'itinerary'" class="mb__trip">
         <header class="mb__trip-head">
@@ -297,6 +334,54 @@ const blocks = computed<Block[]>(() => parseMessage(props.text))
   border-color: var(--prim);
   transform: translateY(-1px);
 }
+
+/* ---- 表格 ----
+   模型给车次/票价/天气这类多列信息时会写 markdown 表格。
+   外层 wrap 负责横向滚动：列多时（车次表常有 5~6 列）窄屏必然放不下，
+   让表格自己滚而不是撑破消息区。 */
+.mb__table-wrap {
+  overflow-x: auto;
+  margin: 4px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+}
+
+.mb__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.mb__table th,
+.mb__table td {
+  padding: 8px 12px;
+  text-align: left;
+  white-space: nowrap;   /* 单元格不折行，避免「G1234」被拆成两行 */
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* 表头：淡底 + 深字，与数据行拉开层次 */
+.mb__table th {
+  background: var(--surface-soft);
+  font-weight: 650;
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+.mb__table tbody tr:last-child td { border-bottom: none; }
+/* 悬停整行高亮：横向比对车次时不容易看错行 */
+.mb__table tbody tr:hover { background: var(--blue-50); }
+
+/* 首列用等宽并加粗：车次号、日期这类标识符最需要纵向对齐 */
+.mb__table-first {
+  font-family: var(--mono);
+  font-weight: 650;
+  color: var(--text);
+}
+
+/* 行内 **粗体** */
+.mb__b { font-weight: 650; }
+
 .mb__days {
   list-style: none;
   margin: 0;

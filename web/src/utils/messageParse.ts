@@ -15,7 +15,14 @@
  * 但在这套提示词下是模型的主要小标题形态。
  */
 
-export type BlockKind = 'heading' | 'list' | 'itinerary' | 'para' | 'tip' | 'divider'
+export type BlockKind =
+  | 'heading'
+  | 'list'
+  | 'itinerary'
+  | 'para'
+  | 'tip'
+  | 'divider'
+  | 'table'
 
 export interface ListItem {
   /** 条目标题（来自 **粗体** 前缀或「名称：」的前半段） */
@@ -32,12 +39,21 @@ export interface ItineraryDay {
   slots: string[]
 }
 
+/** 表格数据。模型常把车次、票价、天气这类多列信息写成 markdown 表格。 */
+export interface TableData {
+  /** 表头单元格（原始文本，可能含行内标记，渲染时再切 spans） */
+  headers: string[]
+  /** 数据行 */
+  rows: string[][]
+}
+
 export interface Block {
   kind: BlockKind
   text: string
   level?: number
   items?: ListItem[]
   days?: ItineraryDay[]
+  table?: TableData
 }
 
 /** 行首 emoji / 装饰符号 */
@@ -52,6 +68,35 @@ export const DAY_RE = /(?:day\s*(\d+)|第\s*([一二三四五六七八九十\d]+
 
 /** 时段词 */
 export const SLOT_RE = /(上午|下午|晚上|傍晚|清晨|中午|早上)/
+
+/**
+ * 表格分隔行：`| --- | :---: | ---: |`（对齐标记可有可无）。
+ *
+ * 这一行是 markdown 表格的**判定依据** —— 只有「表头 + 分隔行 + 数据行」
+ * 才是表格。仅凭某行含 `|` 就判定会把「A | B」这类正文误当成表格。
+ */
+export const TABLE_SEP_RE = /^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?\s*$/
+
+/** 该行是否可能是表格行 */
+export function looksLikeTableRow(line: string): boolean {
+  const t = line.trim()
+  if (!t.includes('|')) return false
+  // 至少两个竖线才算「多列」。
+  //
+  // 原先还要求以竖线开头或结尾，但 markdown 表格**允许省略外层竖线**
+  // （`车次 | 出发 | 二等座` 是合法写法），那个条件会漏掉这类表格。
+  // 真正的防线是「下一行必须是分隔行」——只在含竖线就判定才会误伤正文，
+  // 而「北京 | 上海」这类正文只有一个竖线，两个竖线以上基本不会出现在散句里。
+  return (t.match(/\|/g) || []).length >= 2
+}
+
+/** 按竖线切分单元格；去掉首尾空cell（来自行首/行尾的竖线） */
+export function splitTableRow(line: string): string[] {
+  let t = line.trim()
+  if (t.startsWith('|')) t = t.slice(1)
+  if (t.endsWith('|')) t = t.slice(0, -1)
+  return t.split('|').map((c) => c.trim())
+}
 
 /** 去掉行内 markdown 标记，留下纯文本 */
 export function stripInline(s: string): string {
@@ -233,6 +278,46 @@ export function parseMessage(src: string): Block[] {
       flushList()
       flushPara()
       blocks.push({ kind: 'heading', text: stripInline(h[2]), level: h[1].length })
+      continue
+    }
+
+    // ---- 表格：表头 + 分隔行 + 若干数据行 ----
+    //
+    // 模型在给车次、票价、天气这类多列信息时会写 markdown 表格。
+    // 原先解析器不认表格，那些行落进「普通段落」，配合 pre-wrap 渲染成
+    // 一堆竖线与短横线的原始文本 —— 用户看到的就是「很乱」。
+    //
+    // 判定必须要求**分隔行**存在（|---|---|），不能只看含竖线：
+    // 「北京 | 上海」这类正文里也可能有竖线，误判会把正文变成表格。
+    if (
+      looksLikeTableRow(line) &&
+      i + 1 < lines.length &&
+      TABLE_SEP_RE.test(lines[i + 1])
+    ) {
+      flushList()
+      flushPara()
+
+      const headers = splitTableRow(line)
+      const rows: string[][] = []
+      // 从分隔行的下一行开始收集数据行，直到不再是表格行或遇到空行
+      let j = i + 2
+      while (j < lines.length) {
+        const cur = lines[j]
+        if (!cur.trim() || !looksLikeTableRow(cur)) break
+        const cells = splitTableRow(cur)
+        // 列数与表头不一致时按表头宽度补齐/截断 —— 模型偶尔会多写或少写竖线，
+        // 不补齐会让渲染出来的表格错位，比缺一格更难读
+        if (cells.length < headers.length) {
+          while (cells.length < headers.length) cells.push('')
+        } else if (cells.length > headers.length) {
+          cells.length = headers.length
+        }
+        rows.push(cells)
+        j++
+      }
+
+      blocks.push({ kind: 'table', text: '', table: { headers, rows } })
+      i = j - 1   // 跳过已消费的行（循环会再 +1）
       continue
     }
 
