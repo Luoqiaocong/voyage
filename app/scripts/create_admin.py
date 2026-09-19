@@ -1,13 +1,19 @@
-"""幂等创建/提升管理员账号（唯一的管理员产生途径）。
+"""幂等创建/提升管理员账号。
 
 用法：
     uv run python app/scripts/create_admin.py --email admin@example.com
     uv run python app/scripts/create_admin.py --email a@b.com --username admin --password-env ADMIN_PASSWORD
     uv run python app/scripts/create_admin.py --email a@b.com --dry-run
 
+与「首个注册用户成为管理员」的关系：
+- 常规部署不再需要本脚本：库为空时，第一个通过页面注册的用户会自动
+  成为管理员（见 app/modules/user/service.py 的 to_register）。
+  该引导是一次性的，一旦有人注册即永久关闭。
+- 本脚本用于**引导之外的场景**：首个账号权限丢失、需要额外增设管理员、
+  或部署方希望完全跳过引导流程直接指定账号。
+- 两条途径可以共存：脚本提升的是指定邮箱，与「谁是第一个」无关。
+
 设计取舍：
-- 刻意不提供「第一个注册用户自动成为管理员」的逻辑——那是真实的提权漏洞。
-  管理员必须由掌握服务器权限的人显式执行本脚本产生。
 - 幂等：重复执行只做「确保该邮箱是启用的管理员」，不重置密码、不报错。
 - 密码只接受交互输入或环境变量，不接受 --password 明文参数（避免进入
   shell 历史与进程列表）。

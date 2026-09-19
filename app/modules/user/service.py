@@ -27,14 +27,14 @@ from app.shared.ratelimit import (
     login_fail_key,
 )
 from app.shared.redis import reset_counter
-from app.shared.utils import TransactionMixin
+from app.shared.utils import TransactionMixin, log
 
 from .auth import (
     PasswordManager,
     get_hashed_id,
     validate_password_strength,
 )
-from .constants import SELF_EDITABLE_FIELDS
+from .constants import ROLE_ADMIN, ROLE_USER, SELF_EDITABLE_FIELDS
 from .repo import UserRepo
 
 
@@ -100,8 +100,22 @@ class UserService(TransactionMixin):
         pwd: str,
         username: str,
         code: str,
-    ) -> None:
-        """用户注册"""
+    ):
+        """用户注册。
+
+        **首个注册用户自动成为管理员**（便于部署后立刻拿到管理权限，
+        无需登服务器跑脚本创建）。
+
+        安全性说明——为什么这样是可控的：
+          1. 只在「库中一个用户都没有」时才生效，是一次性的引导（bootstrap）。
+             一旦有人注册，该通路即永久关闭，后来者一律是普通用户。
+          2. 注册本身要求邮箱验证码，不是任意匿名请求都能抢占。
+          3. **部署方应在开放注册前先完成自己的注册**。若把未初始化的实例
+             直接暴露在公网，理论上存在被人抢先注册为管理员的风险——
+             这是该便利性的固有代价，故在 README 中明确提示。
+          4. 并发保护：判断「库为空」与插入必须在同一事务内完成，
+             并对 users 表加锁，否则两个请求可能同时判定为空而双双成为管理员。
+        """
         # 先做本地参数校验（密码强度），再消费验证码，避免无效请求白白烧掉验证码
         validate_password_strength(pwd)
 
@@ -113,7 +127,19 @@ class UserService(TransactionMixin):
         # 创建用户（事务）；并发注册同一邮箱时数据库唯一约束报错，转成业务码
         try:
             async with self.transaction_scope():
-                return await self.repo.create(email, hashed_pwd, username)
+                is_first = await self.repo.is_empty_locked()
+                user = await self.repo.create(
+                    email,
+                    hashed_pwd,
+                    username,
+                    role=ROLE_ADMIN if is_first else ROLE_USER,
+                )
+                if is_first:
+                    log.warning(
+                        f"[bootstrap] 首个注册用户 {email} 已被设为管理员（id={user.id}）；"
+                        f"此后注册的用户均为普通用户"
+                    )
+                return user
         except IntegrityError:
             raise UserException(code=BusinessCode.USER_EXIST) from None
 

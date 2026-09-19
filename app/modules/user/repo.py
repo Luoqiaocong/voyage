@@ -2,10 +2,12 @@ from typing import Any
 
 from fastapi import Depends
 from pydantic import EmailStr
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.user.constants import ROLE_USER
 from app.shared.db import get_db
+from app.shared.db.config import IS_SQLITE
 from app.shared.db.models import User
 
 
@@ -46,11 +48,45 @@ class UserRepo:
         return None
 
     # ============ 创建方法 ============
-    async def create(self, email: EmailStr, pwd: str, username: str):
-        """创建新用户并返回用户对象"""
-        user = User(email=email, password=pwd, username=username)
+    async def create(
+        self,
+        email: EmailStr,
+        pwd: str,
+        username: str,
+        *,
+        role: str = ROLE_USER,
+    ) -> User:
+        """创建新用户并返回用户对象。
+
+        role 由调用方决定（默认普通用户）：首个注册用户会成为管理员，
+        该判断在 service 层完成，repo 只负责写入。
+        """
+        user = User(email=email, password=pwd, username=username, role=role)
         self.db.add(user)
         await self.db.flush()
+        return user
+
+    async def is_empty_locked(self) -> bool:
+        """判断用户表是否为空，并**锁定该表直到事务结束**。
+
+        为什么需要锁：首个注册用户会成为管理员，若两个请求并发注册，
+        它们可能都读到「表为空」而双双获得管理员权限。
+        这里在事务内对 users 表加锁，使并发的第二个请求排队等待，
+        待第一个提交后再读——那时表已非空，自然拿不到管理员。
+
+        不同后端的写法不同：
+          - PostgreSQL：LOCK TABLE ... IN SHARE ROW EXCLUSIVE MODE
+            （只与其它写操作互斥，不阻塞普通读取）
+          - SQLite：本身按库级写锁串行化，无需额外加锁
+
+        注意：**必须在事务内调用**，否则锁会在语句结束时立即释放，
+        起不到任何保护作用。
+        """
+        if not IS_SQLITE:
+            await self.db.execute(text("LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE"))
+
+        total = (await self.db.execute(select(func.count(User.id)))).scalar_one()
+        return total == 0
 
     # ============ 更新方法 ============
     async def update(
