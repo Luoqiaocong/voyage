@@ -1,33 +1,25 @@
 <script setup lang="ts">
 /**
- * 会话洞察：统计概览 + 活跃用户排行 + 会话规模分布。
+ * 会话洞察：统计概览 + 用户活跃排行 + Token 用量排行。
  *
- * 隐私边界（重要）：本页**只展示聚合数据与会话元数据**
- * （用户、消息数、时间），不展示会话标题或任何消息内容。
+ * 隐私边界（重要）：本页**只展示聚合数据**
+ * （用户、消息数、Token 数），不展示会话标题或任何消息内容。
  * 原先有「按标题搜索」的检索框，那等于允许对全站用户的对话标题做
  * 关键词检索——标题是 LLM 从用户消息生成的，属于用户内容，已移除。
+ *
+ * 原先下方还有一张「会话规模分布」明细表（逐行列出会话 ID + 用户 +
+ * 消息数 + 时间），已替换为 Token 用量排行。原因是会话 ID 是哈希串
+ * （如 76a3160f3a83），而标题因隐私要求不返回 —— 用户既认不出是哪次对话，
+ * 也无法据此做任何对比，作为排行它不成立。
+ * 随之删除的还有一整套分页状态与请求（见下方注释）。
  */
-import { computed, onMounted, ref, watch } from 'vue'
-import {
-  getConversationStats,
-  listConversations,
-  type AdminConversationItem,
-  type ConversationStats
-} from '@/api/admin'
+import { computed, onMounted, ref } from 'vue'
+import { getConversationStats, type ConversationStats } from '@/api/admin'
 import { useUiStore } from '@/stores/ui'
-import { formatDateTime } from '@/utils/datetime'
-import TravelIcon from '@/components/TravelIcon.vue'
 
 const ui = useUiStore()
 
-const loading = ref(false)
 const stats = ref<ConversationStats | null>(null)
-const items = ref<AdminConversationItem[]>([])
-const total = ref(0)
-const page = ref(1)
-const pageSize = ref(20)
-/** 排序维度：规模统计页默认按消息数看更直观，也可切回看最新动态 */
-const sort = ref<'created_desc' | 'messages_desc'>('messages_desc')
 
 /**
  * 活跃用户排行的口径。
@@ -81,8 +73,6 @@ function metricText(u: { conversations: number; today_messages: number }): strin
     : `今日 ${u.today_messages} 条消息`
 }
 
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
-
 async function loadStats() {
   try {
     stats.value = await getConversationStats()
@@ -91,40 +81,49 @@ async function loadStats() {
   }
 }
 
-async function load() {
-  loading.value = true
-  try {
-    // 不再传 keyword：后端已移除按标题检索的能力
-    const res = await listConversations({
-      page: page.value,
-      page_size: pageSize.value,
-      sort: sort.value
-    })
-    items.value = res.items
-    total.value = res.total
-  } catch (e: any) {
-    ui.toast(e?.message ?? '会话列表加载失败', 'error')
-  } finally {
-    loading.value = false
-  }
-}
+/*
+ * 原先此处有 load() / goto() / watch(sort) / watch(page) / totalPages
+ * 与 items / total / page / pageSize / sort / loading 等一整套分页状态，
+ * 服务于已被替换掉的「会话规模分布」明细表。
+ * 明细表移除后它们全部失去引用，故一并删除 ——
+ * 保留会让后来者以为「还有列表在拉数据」，也会白跑一次接口。
+ */
 
-// 切换排序后回到第 1 页，否则会停在一个可能已不存在的页码上
-watch(sort, () => {
-  page.value = 1
-  load()
+/* ---------------- Token 用量排行 ---------------- */
+
+const tokenExpanded = ref(false)
+
+/** 按用量降序；同值时用 user_id 保证顺序稳定（否则每次都可能换位置） */
+const rankedTokens = computed(() => {
+  const list = [...(stats.value?.top_token_users ?? [])]
+  return list
+    .sort((a, b) => (b.tokens - a.tokens) || (a.user_id - b.user_id))
+    .slice(0, 10)
 })
 
-watch(page, load)
+const visibleTokens = computed(() =>
+  tokenExpanded.value ? rankedTokens.value : rankedTokens.value.slice(0, RANK_VISIBLE)
+)
 
-function goto(next: number) {
-  if (next < 1 || next > totalPages.value) return
-  page.value = next
+const hiddenTokens = computed(() =>
+  Math.max(0, rankedTokens.value.length - RANK_VISIBLE)
+)
+
+/**
+ * Token 数压缩显示。
+ * 六位数以上的原始值（如 923985）在小字号下既难读也容易数错位数，
+ * 换成 924.0k 更直观；万以下保留原值，免得 2301 变成 2.3k 反而丢失精度。
+ */
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`
+  if (n >= 10_000) return `${(n / 1_000).toFixed(1)}k`
+  return String(n)
 }
 
 onMounted(() => {
+  // 只拉统计：两个排行（活跃 / Token）都在 getConversationStats 的响应里，
+  // 不再有第二张需要分页请求的表
   loadStats()
-  load()
 })
 </script>
 
@@ -195,56 +194,44 @@ onMounted(() => {
       </button>
     </section>
 
-    <!-- 会话元数据（不展示任何会话内容） -->
+    <!--
+      Token 用量排行：替换原先的「会话规模分布」明细表。
+      原先那张表逐行列出「会话 ID + 用户 + 消息数 + 时间」，但会话 ID 是
+      哈希串（如 76a3160f3a83），而标题因隐私要求不返回 —— 用户既认不出
+      是哪次对话，也无法据此做任何对比。作为排行它不成立。
+      Token 排行同样是「用户维度」，但数值有明确含义、可横向比较。
+    -->
     <section class="card conv__panel">
       <header class="conv__head">
-        <h2>会话规模分布</h2>
-        <div class="conv__head-ops">
-          <select v-model="sort" class="select conv__sort" aria-label="排序方式">
-            <option value="messages_desc">按消息数（多 → 少）</option>
-            <option value="created_desc">按创建时间（新 → 旧）</option>
-          </select>
-          <span class="conv__privacy">
-            <TravelIcon name="shield" :size="14" />
-            仅展示规模与归属，不展示会话内容
-          </span>
-        </div>
+        <h2>Token 用量排行</h2>
+        <span class="conv__hint">
+          仅统计引入该指标之后的用量，更早的数据没有用户维度
+        </span>
       </header>
 
-      <div class="table-wrap">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>会话 ID</th>
-              <th>所属用户</th>
-              <th>消息数</th>
-              <th>创建时间</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="c in items" :key="c.id">
-              <td class="table__mono">{{ c.id }}</td>
-              <td class="table__email">{{ c.user_email }}</td>
-              <td>{{ c.message_count }}</td>
-              <td class="table__mono table__date">{{ formatDateTime(c.created_at) }}</td>
-            </tr>
-            <tr v-if="!loading && !items.length">
-              <td colspan="4" class="table__empty">暂无会话</td>
-            </tr>
-            <tr v-if="loading">
-              <td colspan="4" class="table__empty">加载中…</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <ul v-if="rankedTokens.length" class="rank">
+        <li v-for="(u, i) in visibleTokens" :key="u.user_id">
+          <span class="rank__no" :class="medalOf(i) ? `rank__no--${medalOf(i)}` : ''">
+            {{ i + 1 }}
+          </span>
+          <span class="rank__email">{{ u.email }}</span>
+          <span class="rank__count">
+            {{ formatTokens(u.tokens) }} tokens · {{ u.calls }} 次调用
+          </span>
+        </li>
+      </ul>
+      <p v-else class="table__empty">
+        暂无数据。Token 用量从本次上线后开始累积，发一条对话即可看到。
+      </p>
 
-      <div class="pager">
-        <button class="btn btn-ghost btn--sm" :disabled="page <= 1" @click="goto(page - 1)">上一页</button>
-        <span class="pager__info">{{ page }} / {{ totalPages }}　共 {{ total }} 条</span>
-        <button class="btn btn-ghost btn--sm" :disabled="page >= totalPages" @click="goto(page + 1)">
-          下一页
-        </button>
-      </div>
+      <button
+        v-if="hiddenTokens > 0"
+        class="rank__toggle"
+        type="button"
+        @click="tokenExpanded = !tokenExpanded"
+      >
+        {{ tokenExpanded ? '收起' : `展开其余 ${hiddenTokens} 位` }}
+      </button>
     </section>
   </div>
 </template>
@@ -277,17 +264,14 @@ onMounted(() => {
 }
 .conv__head h2 { font-size: 0.98rem; font-weight: 700; }
 .conv__hint { font-size: 0.75rem; color: var(--text3); }
-/* 隐私提示：说明本页只展示元数据，消除「为什么看不到对话内容」的疑惑 */
+/* 卡片头右侧的操作区（当前只有活跃排行的口径下拉） */
 .conv__head-ops { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .conv__sort { flex: 0 0 190px; font-size: 0.82rem; }
-.conv__privacy {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.75rem;
-  color: var(--text3);
-}
-.conv__privacy :deep(svg) { color: var(--success); flex-shrink: 0; }
+/*
+ * 原先此处有 .conv__privacy（带盾牌图标的「不展示会话内容」提示）。
+ * 明细表移除后该提示也不再渲染 —— 现在页面上已没有任何会话级信息，
+ * 无需再解释「为什么看不到内容」。相关样式一并删除。
+ */
 
 .rank { display: flex; flex-direction: column; gap: 10px; }
 .rank li { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 12px; }
@@ -330,29 +314,11 @@ onMounted(() => {
 .rank__toggle:hover { background: var(--blue-50); border-color: var(--blue-200); }
 .rank__toggle:focus-visible { outline: 2px solid var(--prim); outline-offset: 2px; }
 
-.table-wrap { overflow-x: auto; }
-.table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-.table th {
-  text-align: left;
-  font-weight: 600;
-  color: var(--text3);
-  font-size: 0.75rem;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-.table td { padding: 11px 12px; border-bottom: 1px solid var(--hairline); }
-.table__mono { font-family: var(--mono); font-size: 0.78rem; }
-.table__date { color: var(--text3); white-space: nowrap; }
-.table__email { color: var(--text2); }
+/*
+ * 保留 table__empty：Token 排行的空态仍在用它（一条居中的提示文字）。
+ * 其余 .table / .table-wrap / .table__mono / .table__date / .table__email
+ * 与 .pager / .pager__info 都是「会话规模分布」明细表的样式，
+ * 那张表已被 Token 排行替换，这些规则失去引用，故删除。
+ */
 .table__empty { text-align: center; color: var(--text3); padding: 30px 0; }
-
-.pager {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  padding-top: 16px;
-}
-.pager__info { font-size: 0.82rem; color: var(--text2); font-family: var(--mono); }
 </style>

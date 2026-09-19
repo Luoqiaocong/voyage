@@ -95,7 +95,9 @@ class ConversationRouter:
         id: Annotated[ConversationId, Path()],
         req: ConversationMessageRequest,
     ) -> AsyncGenerator[ServerSentEvent, None]:
-        async for chunk in self.service.send_message(req.message, id):
+        # 带上 user_id：Token 用量要按用户归属（LLM 回调在链路内部触发，
+        # 只能经上下文变量读到它）
+        async for chunk in self.service.send_message(req.message, id, self.current_user.id):
             yield ServerSentEvent(
                 raw_data=json.dumps(chunk, ensure_ascii=False),
                 event="message",

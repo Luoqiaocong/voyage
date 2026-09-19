@@ -8,7 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.user.constants import ROLE_RANK
 from app.shared.db import get_db
-from app.shared.db.models import Conversation, Itinerary, TokenUsage, User
+from app.shared.db.models import (
+    Conversation,
+    Itinerary,
+    TokenUsage,
+    User,
+    UserTokenUsage,
+)
 from app.shared.utils import to_local_display
 from app.shared.utils.datetime_util import LOCAL_TZ
 
@@ -185,6 +191,39 @@ class AdminRepo:
                 for r in top_rows
             ],
         }
+
+    async def top_token_users(self, limit: int = ACTIVE_USER_LIMIT) -> list[dict]:
+        """Token 用量排行（按用户，累计）。
+
+        数据来自 user_token_usage —— 独立于模型维度的 token_usage
+        （理由见 UserTokenUsage 的模型注释）。
+
+        **历史数据缺失需注意**：该表从引入时开始累积，
+        token_usage 里改造前的用量没有用户维度、无法拆分，故不会出现在这里。
+        """
+        rows = (
+            await self.db.execute(
+                select(
+                    UserTokenUsage.user_id,
+                    User.email,
+                    func.sum(UserTokenUsage.total_tokens).label("tokens"),
+                    func.sum(UserTokenUsage.calls).label("calls"),
+                )
+                .join(User, User.id == UserTokenUsage.user_id)
+                .group_by(UserTokenUsage.user_id, User.email)
+                .order_by(func.sum(UserTokenUsage.total_tokens).desc())
+                .limit(limit)
+            )
+        ).all()
+        return [
+            {
+                "user_id": r[0],
+                "email": r[1],
+                "tokens": int(r[2] or 0),
+                "calls": int(r[3] or 0),
+            }
+            for r in rows
+        ]
 
     async def list_conversations(
         self,

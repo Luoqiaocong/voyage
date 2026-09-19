@@ -13,6 +13,8 @@ import httpx
 
 sys.path.insert(0, ".")
 
+from app.config import config
+
 API = "http://127.0.0.1:8000/api/v1"
 ok_n = fail_n = 0
 
@@ -37,7 +39,7 @@ async def main() -> None:
     from sqlalchemy import delete, select
 
     # 清限流，避免登录被拦
-    r = aioredis.from_url("redis://127.0.0.1:6379/7", decode_responses=True)
+    r = aioredis.from_url(config.REDIS_URL, decode_responses=True)
     keys = [k async for k in r.scan_iter(match="rate:*", count=200)]
     if keys:
         await r.delete(*keys)

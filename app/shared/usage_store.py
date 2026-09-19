@@ -16,7 +16,7 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.db.config import IS_POSTGRES
-from app.shared.db.models import TokenUsage, utc_now
+from app.shared.db.models import TokenUsage, UserTokenUsage, utc_now
 from app.shared.redis import redis_client
 from app.shared.usage_query import local_today, local_yesterday
 from app.shared.utils import log
@@ -67,6 +67,29 @@ async def drain_day_usage(day: str) -> dict[str, dict[str, int]]:
     return _parse_day_usage(list(flat or []))
 
 
+async def drain_day_user_usage(day: str) -> dict[int, dict[str, int]]:
+    """原子取出并清零指定日期的**按用户**用量增量。
+
+    返回 {user_id: {metric: value}}；无法解析成整数的字段（例如键被
+    别的东西写脏）直接跳过，不让它拖垮整批落库。
+    """
+    script = _get_drain_script()
+    flat = await script(keys=[f"usage:user:day:{day}"])
+    usage: dict[int, dict[str, int]] = {}
+    for index in range(0, len(list(flat or [])) - 1, 2):
+        raw_uid, raw_value = flat[index], flat[index + 1]
+        uid_str, _, metric = str(raw_uid).rpartition(":")
+        if not uid_str or not metric:
+            continue
+        try:
+            uid = int(uid_str)
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            continue
+        usage.setdefault(uid, {})[metric] = value
+    return usage
+
+
 def _insert_for_dialect():
     """按当前数据库后端返回对应的 insert 构造器。
 
@@ -85,7 +108,7 @@ def _insert_for_dialect():
 
 
 def _accumulate(stmt, values: dict) -> object:
-    """把 INSERT 改写成「冲突时累加」，而非覆盖。"""
+    """把 INSERT 改写成「冲突时累加」，而非覆盖（模型维度）。"""
     return stmt.on_conflict_do_update(
         index_elements=[TokenUsage.model, TokenUsage.record_date],
         set_={
@@ -97,6 +120,48 @@ def _accumulate(stmt, values: dict) -> object:
     )
 
 
+async def _flush_user_usage(session: AsyncSession, day: str) -> int:
+    """把某日「按用户」的 Redis 增量合并进 user_token_usage 表。
+
+    与模型维度分开落库：两者是不同聚合维度、写在不同表里
+    （理由见 UserTokenUsage 的模型注释）。
+    """
+    usage = await drain_day_user_usage(day)
+    if not usage:
+        log.debug(f"[usage] no user-dimension increment for {day}")
+        return 0
+
+    insert = _insert_for_dialect()
+    written = 0
+    for uid, metrics in usage.items():
+        values = {
+            "user_id": uid,
+            "record_date": day,
+            "input_tokens": metrics.get("input_tokens", 0),
+            "output_tokens": metrics.get("output_tokens", 0),
+            "total_tokens": metrics.get("total_tokens", 0),
+            "calls": metrics.get("calls", 0),
+            "created_at": utc_now(),
+        }
+        stmt = insert(UserTokenUsage).values(**values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[UserTokenUsage.user_id, UserTokenUsage.record_date],
+            set_={
+                "input_tokens": UserTokenUsage.input_tokens + values["input_tokens"],
+                "output_tokens": UserTokenUsage.output_tokens + values["output_tokens"],
+                "total_tokens": UserTokenUsage.total_tokens + values["total_tokens"],
+                "calls": UserTokenUsage.calls + values["calls"],
+            },
+        )
+        await session.execute(stmt)
+        written += 1
+
+    # 成功写入时记一条：便于排查「用户维度是否真的落库」——
+    # 这条日志在排障时是唯一能区分「没增量」与「写入被吞」的依据
+    log.info(f"[usage] user rows written: {written} for {day}")
+    return written
+
+
 async def flush_usage_to_db(session: AsyncSession, day: str | None = None) -> int:
     """把某日 Redis 增量合并进 token_usage 表。
 
@@ -105,7 +170,8 @@ async def flush_usage_to_db(session: AsyncSession, day: str | None = None) -> in
     """
     target_day = day or local_today()
     usage = await drain_day_usage(target_day)
-    if not usage:
+    user_written = await _flush_user_usage(session, target_day)
+    if not usage and not user_written:
         return 0
 
     rows_written = 0
@@ -124,7 +190,10 @@ async def flush_usage_to_db(session: AsyncSession, day: str | None = None) -> in
         rows_written += 1
 
     await session.commit()
-    log.info(f"[usage] flushed {rows_written} model rows for {target_day}")
+    log.info(
+        f"[usage] flushed {rows_written} model rows + "
+        f"{user_written} user rows for {target_day}"
+    )
     return rows_written
 
 

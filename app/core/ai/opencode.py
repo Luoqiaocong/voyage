@@ -22,6 +22,32 @@ from app.config import config
 # 当前请求所属会话；未显式声明时用配置的默认值兜底
 _current_session: ContextVar[str] = ContextVar("opencode_session", default="")
 
+# 当前请求的用户 ID；不在请求上下文内时为 0（表示「无法归属」）。
+#
+# 用途与 _current_session 类似，但方向相反：会话 ID 是**发出去**的（写进
+# x-opencode-session 头），用户 ID 是**读回来**的 —— LLM 用量回调
+# （core/ai/token.py）需要知道这次调用属于谁，才能做「按用户的 token 排行」。
+#
+# 为什么用 ContextVar 而不是给回调传参：回调由 LangChain 在链路内部触发，
+# 调用点拿不到它，也无法逐个回传。上下文变量是这条链路上唯一可用的通道，
+# 且不同对话各自运行在独立 asyncio Task 中，上下文天然隔离，不会串号。
+_current_user_id: ContextVar[int] = ContextVar("current_user_id", default=0)
+
+
+def get_current_user_id() -> int:
+    """取当前请求的用户 ID；不在请求上下文内时返回 0。"""
+    return _current_user_id.get()
+
+
+@contextmanager
+def use_user(user_id: int) -> Iterator[None]:
+    """在 with 块内把当前 asyncio 上下文标记为指定用户。"""
+    token = _current_user_id.set(int(user_id or 0))
+    try:
+        yield
+    finally:
+        _current_user_id.reset(token)
+
 
 def get_session_id() -> str:
     """取当前会话标识；未在会话上下文中时返回配置的默认值。"""

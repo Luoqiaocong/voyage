@@ -191,6 +191,53 @@ class TokenUsage(Base):
     __table_args__ = (UniqueConstraint("model", "record_date", name="uq_model_date"),)
 
 
+class UserTokenUsage(Base):
+    """LLM 用量按「用户 + 日期」聚合成一行。
+
+    ## 为什么单独一张表，而不是给 token_usage 加一列 user_id
+
+    两者是**不同的聚合维度**，不是同一张表能自然承载的：
+      · token_usage     按「模型 × 日期」——回答「哪个模型花得多」
+      · user_token_usage 按「用户 × 日期」——回答「谁用得最多」
+    若合并成一张表，唯一键会变成 (user, model, date)，其中 user_id 必须允许为空
+    （模型维度的行不属于任何用户），一个可空列参与唯一约束会让
+    upsert 的「冲突即累加」语义变得难以推理；而且现有看板的所有聚合查询
+    都要跟着改，回归风险不小。
+
+    分成两张表后：现有链路完全不动，新增的这张只负责用户维度。
+    代价是同一次调用要向两处各累加一次（写入是 Redis 内的，成本可忽略）。
+
+    ## 历史数据
+
+    本表从引入时开始累积。token_usage 里已有的数据**没有用户维度**，
+    无法拆分到用户，因此改造前的用量不会出现在用户排行里 —— 这是已知且
+    无法弥补的缺失，不是 bug。
+    """
+
+    __tablename__ = "user_token_usage"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, comment="主键")
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+        comment="所属用户ID（用户注销时级联删除其用量记录）",
+    )
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, comment="输入 token 数")
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, comment="输出 token 数")
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0, comment="总 token 数")
+    calls: Mapped[int] = mapped_column(Integer, default=0, comment="LLM 调用次数")
+    record_date: Mapped[str] = mapped_column(
+        String(10), nullable=False, index=True, comment="统计日期 yyyy-MM-dd（本地时区）"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, comment="创建时间（UTC）"
+    )
+    __table_args__ = (
+        UniqueConstraint("user_id", "record_date", name="uq_user_date"),
+    )
+
+
 class AdminAuditLog(Base):
     """管理端操作审计日志：谁、何时、对谁做了什么、改前改后是什么。
 

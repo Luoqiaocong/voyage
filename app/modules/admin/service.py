@@ -373,7 +373,15 @@ class AdminService(TransactionMixin):
 
     # ==================== 会话洞察 ====================
     async def conversation_stats(self) -> dict[str, Any]:
-        return await self.repo.conversation_stats()
+        stats = await self.repo.conversation_stats()
+        # Token 排行放在同一份响应里返回：它与会话活跃排行同属「用户排行」，
+        # 前端在一个卡片里用下拉切换口径，分成两个接口会多一次请求。
+        #
+        # 但要注意：**排行切换时不需要重新请求** —— 会话数 / 当日消息数
+        # 两种口径都在 top_active_users 里；token 是另一种「量」，
+        # 字段结构不同（tokens/calls），故单独一个数组。
+        stats["top_token_users"] = await self.repo.top_token_users()
+        return stats
 
     async def list_conversations(
         self, *, page: int, page_size: int, user_id: int | None = None, sort: str = "created_desc"

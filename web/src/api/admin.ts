@@ -251,6 +251,19 @@ export interface ConversationStats {
     /** 当日（本地时区）产生的消息数 */
     today_messages: number
   }[]
+  /**
+   * Token 用量排行（按用户，累计）。
+   *
+   * 数据来自 user_token_usage 表 —— 它从引入时开始累积。
+   * 更早的用量没有用户维度（原先只按「模型 × 日期」聚合），
+   * 无法拆分到用户，故不出现在这里。
+   */
+  top_token_users: {
+    user_id: number
+    email: string
+    tokens: number
+    calls: number
+  }[]
 }
 
 /**

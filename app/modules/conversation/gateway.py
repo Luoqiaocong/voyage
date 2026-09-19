@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ai import AgentFactory
-from app.core.ai.opencode import use_session
+from app.core.ai.opencode import use_session, use_user
 from app.core.business import BusinessCode, ConversationException
 from app.shared.db import get_db
 from app.shared.db.models import Conversation
@@ -155,11 +155,15 @@ class ConversationGateway:
         return texts
 
     # -------------------- 2. 流式发送消息 --------------------
-    async def stream_message(self, message: str, conversation_id: str):
+    async def stream_message(self, message: str, conversation_id: str, user_id: int = 0):
         """流式发送消息。
 
         OpenCode Go 要求每个请求携带 x-opencode-session 头（缺失直接 400），
         头值在 httpx 发出请求时从上下文读取，故整个流式过程必须包在会话上下文内。
+
+        user_id 供 **Token 用量归属**使用：LLM 回调在链路内部触发，
+        拿不到请求参数，只能通过上下文变量读（见 use_user）。
+        为 0 时表示无法归属（如后台预热），此时只计模型维度不写用户维度。
         """
         # 注入长期记忆后再取 agent：apply_memory 可能重建 agent 实例
         await self._apply_memory(conversation_id)
@@ -172,7 +176,7 @@ class ConversationGateway:
         started = time.perf_counter()
         ok = True
         try:
-            with use_session(conversation_id):
+            with use_session(conversation_id), use_user(user_id):
                 stream = agent.astream(
                     {"messages": [HumanMessage(content=message)]},
                     stream_mode="messages",

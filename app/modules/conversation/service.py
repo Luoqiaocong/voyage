@@ -59,10 +59,12 @@ class ConversationService(TransactionMixin):
         return await self.gateway.get_messages_page(conversation_id, limit=limit)
 
     # -------------------- 4. 流式发送消息 --------------------
-    async def send_message(self, message: str, conversation_id: str):
+    async def send_message(self, message: str, conversation_id: str, user_id: int = 0):
         ai_text = ""
         try:
-            async for chunk in self.gateway.stream_message(message, conversation_id):
+            async for chunk in self.gateway.stream_message(
+                message, conversation_id, user_id
+            ):
                 if chunk.get("type") == "text":
                     ai_text += chunk.get("content", "")
                 yield chunk
