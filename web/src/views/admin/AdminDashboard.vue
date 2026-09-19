@@ -18,6 +18,7 @@ import {
 import LineChart from '@/components/charts/LineChart.vue'
 import BarChart from '@/components/charts/BarChart.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
+import { halfCompare } from '@/utils/trendCompare'
 import { useUiStore } from '@/stores/ui'
 
 const ui = useUiStore()
@@ -62,34 +63,12 @@ const userPoints = computed(
 )
 
 /**
- * 环比：把当前窗口与**紧邻的等长前一窗口**比较。
+ * 涨跌幅度标记。
  *
- * 为什么用环比而不是同比：本项目上线时间短，没有去年同期数据，
- * 标注「同比增长 X%」只会得到空白或误导性数字。环比在数据量少时
- * 同样有意义（本周 vs 上周），且趋势图本身就是按天看的，
- * 两者口径一致。
- *
- * 数据来源：trend 接口只返回当前窗口，故用「窗口内前半段 vs 后半段」
- * 近似环比。这不是严格的相邻窗口比较，但能在不新增接口的前提下
- * 给出方向性判断，且**文案写「较前半段」而不是「环比」**，
- * 避免让人以为是比较完整的前一周期。
+ * 计算逻辑抽到 utils/trendCompare（纯函数，可单测）。
+ * 口径为 (后−前)/前，即标准增幅 —— 详见该模块的说明。
+ * 这里只负责把结果接到图上。
  */
-function halfCompare(values: number[]): { text: string; tone: 'up' | 'down' | 'flat' } | null {
-  if (values.length < 4) return null
-  const mid = Math.floor(values.length / 2)
-  const first = values.slice(0, mid).reduce((a, b) => a + b, 0)
-  const last = values.slice(mid).reduce((a, b) => a + b, 0)
-  if (first === 0 && last === 0) return null
-
-  // 前半段为 0 时无法算百分比：只能说「从 0 增长」，避免除零与「∞%」
-  if (first === 0) return { text: `较前半段新增 ${last}`, tone: 'up' }
-
-  const pct = ((last - first) / first) * 100
-  if (Math.abs(pct) < 1) return { text: '与前半段基本持平', tone: 'flat' }
-  const sign = pct > 0 ? '+' : ''
-  return { text: `较前半段 ${sign}${pct.toFixed(0)}%`, tone: pct > 0 ? 'up' : 'down' }
-}
-
 const tokenCompare = computed(() => halfCompare(tokenPoints.value.map((p) => p.value)))
 const userCompare = computed(() => halfCompare(userPoints.value.map((p) => p.value)))
 
@@ -249,6 +228,14 @@ onMounted(load)
             <LineChart :points="userPoints" unit="人" />
           </div>
         </div>
+        <!--
+          对比基准说明：标记只写「⬆ 100%」，不写「较前半段」，
+          读者需要一句话知道百分比是跟谁比、怎么算的，否则容易误读成
+          「比上一周期增长」（那是环比，本接口的数据不支持）。
+        -->
+        <p class="dash__cmp-note">
+          箭头 = 窗口内<strong>后半段相对前半段</strong>的变化幅度（(后−前)÷前）
+        </p>
       </section>
 
       <div class="dash__two">
@@ -457,17 +444,29 @@ onMounted(load)
 }
 .health__logs-hint { margin-top: 10px; color: var(--text3); font-size: 0.74rem; }
 
-/* ---- 趋势图的对比标注 ---- */
+/* ---- 趋势图的涨跌标记 ----
+   只显示箭头 + 百分比，文字基准说明放在图下方的 .dash__cmp-note。
+   标记本身用等宽数字：两个图的百分比上下并排，等宽才能对齐比较。 */
 .dash__cmp {
   margin-left: 8px;
-  padding: 1px 7px;
-  border-radius: 5px;
-  font-size: 0.72rem;
-  font-weight: 650;
+  padding: 1px 8px;
+  border-radius: 6px;
+  font-size: 0.73rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .dash__cmp--up { background: rgba(72, 187, 120, 0.14); color: var(--success); }
 .dash__cmp--down { background: rgba(224, 82, 82, 0.12); color: var(--danger); }
-.dash__cmp--flat { background: var(--surface-soft); color: var(--text3); }
+.dash__cmp--flat { background: var(--surface-soft); color: var(--text3); font-weight: 600; }
+
+.dash__cmp-note {
+  margin-top: 10px;
+  font-size: 0.73rem;
+  color: var(--text3);
+  line-height: 1.6;
+}
+.dash__cmp-note strong { color: var(--text2); font-weight: 650; }
 
 .dash__actions { display: flex; flex-wrap: wrap; gap: 10px; }
 </style>

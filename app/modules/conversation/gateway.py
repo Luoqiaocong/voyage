@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ai import AgentFactory
 from app.core.ai.opencode import use_session, use_user
+from app.core.ai.tool_metrics import ToolCallCounter
 from app.core.business import BusinessCode, ConversationException
 from app.shared.db import get_db
 from app.shared.db.models import Conversation
@@ -17,7 +18,20 @@ from app.shared.utils import log
 
 
 def _thread_config(conversation_id: str) -> RunnableConfig:
-    return {"configurable": {"thread_id": conversation_id}}
+    """构造本轮调用的 RunnableConfig。
+
+    挂上工具统计回调（ToolCallCounter）：它靠 on_tool_start/end 覆盖**所有**
+    工具，包括两层子 Agent 里的 MCP 工具 —— 原先只在 cached_tools 里埋点，
+    那 16 个 MCP 工具一个都统计不到，管理端「工具调用」恒为 0。
+
+    **每次新建实例**而不是复用模块级单例：回调内部要维护
+    「本次链路的 tool run_id 集合」用于区分嵌套层级，多请求共用会互相污染，
+    导致嵌套判定出错、计数翻倍。构造开销可忽略。
+    """
+    return {
+        "configurable": {"thread_id": conversation_id},
+        "callbacks": [ToolCallCounter()],
+    }
 
 
 class ConversationGateway:
