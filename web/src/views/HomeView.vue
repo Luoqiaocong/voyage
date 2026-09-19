@@ -19,15 +19,96 @@
  * 动效原则：一次性编排（整页入场 → 行程逐条构建），不做无意义循环动画。
  * 全部尊重 prefers-reduced-motion。
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { useRotatingPlaceholder, useTypewriter } from '@/composables/useTypewriter'
 import AppNavbar from '@/components/AppNavbar.vue'
 import AppFooter from '@/components/AppFooter.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
 
 const user = useUserStore()
 const router = useRouter()
+
+/* ==================== 0. Hero 打字机动效 ==================== */
+/*
+ * 三项动效的节奏是**依次接续**的，不是同时开始：
+ *   主标题（约 1.3s）→ 副标题（约 1.2s）→ 输入框占位轮换（持续）
+ * 同时开始会让人不知道看哪里；接续出现则形成一条自然的阅读动线。
+ */
+const HERO_TITLE_DELAY = 180
+const HERO_SUB_DELAY = 1500
+
+/**
+ * 主标题分段。用「段」而不是整串字符索引，是因为标题里有换行与高亮词，
+ * 逐段推进可以保留这些结构；段内再逐字。
+ *
+ * 分成两行（与改版前一致）：
+ *   一句话，
+ *   生成可执行的旅行日程
+ * 换行由第 0 段的 `br: true` 表达，而不是段索引判断 —— 这样调整文案时
+ * 换行位置跟着数据走，不会因为插了一段就跑到别处。
+ */
+const heroTitleSegments: { text: string; em?: boolean; br?: boolean }[] = [
+  { text: '一句话，', br: true },
+  { text: '生成' },
+  { text: '可执行', em: true },
+  { text: '的旅行日程' },
+]
+const heroTitleTotal = heroTitleSegments.reduce((n, s) => n + s.text.length, 0)
+/** 读屏器用的完整标题（不逐字朗读，也不漏掉尚未「打出」的部分） */
+const HERO_TITLE_PLAIN = heroTitleSegments.map((s) => s.text).join('')
+/** 各段起点的全局字符偏移，用于把「已输入字数」映射到段落内的位置 */
+const heroTitleOffsets = heroTitleSegments.reduce<number[]>((acc, _seg, i) => {
+  acc.push(i === 0 ? 0 : acc[i - 1] + heroTitleSegments[i - 1].text.length)
+  return acc
+}, [])
+
+const heroTitleTyped = useTypewriter(
+  'x'.repeat(heroTitleTotal), // 只借用它的计数与节流，文本内容由分段决定
+  { charMs: 62, startDelayMs: HERO_TITLE_DELAY }
+)
+
+/** 每段已显示的字符数（0..段长） */
+function segTyped(index: number): number {
+  const start = heroTitleOffsets[index]
+  return Math.max(0, Math.min(heroTitleTyped.count.value - start, heroTitleSegments[index].text.length))
+}
+
+/**
+ * 副标题：纯文本，直接用「已输入字数」切分。
+ * 模板渲染完整文本 + 隐藏未输入部分，保证高度从第一帧就是最终值。
+ */
+const HERO_SUB_TEXT =
+  '说出目的地、天数与预算。车次与天气我们实时查好，最后落成一份按天排布、随时可改的行程。'
+const heroSubTyped = useTypewriter(HERO_SUB_TEXT, {
+  charMs: 26,
+  startDelayMs: HERO_SUB_DELAY,
+})
+
+/**
+ * 输入框的轮换占位文案。
+ *
+ * 每条都刻意带上不同要素（天数、预算、交通、偏好），让轮换本身
+ * 也在示范「可以怎么描述需求」，而不只是视觉噱头。
+ */
+const PLACEHOLDER_SAMPLES = [
+  '广州到北京 3 天，预算 3000，坐高铁',
+  '成都周末两日游，帮我看看天气',
+  '西安 4 天，想拍古建筑，节奏别太赶',
+  '上海出发去大理，5 天，带父母',
+  '北京周边 2 天，想爬山',
+]
+const ph = useRotatingPlaceholder(PLACEHOLDER_SAMPLES, {
+  charMs: 88,
+  holdMs: 1900,
+  eraseMs: 32,
+})
+/** 输入框是否已聚焦：聚焦后让位给真实光标，不再显示轮换占位 */
+const inputFocused = ref(false)
+/** 用户已输入或已聚焦时，隐藏轮换占位文案 */
+const showPlaceholder = computed(() => draft.value.length === 0 && !inputFocused.value)
+
 
 /* ==================== 1. Hero：一句话规划 ==================== */
 const draft = ref('')
@@ -374,23 +455,121 @@ function stopStepTimer() {
 /* ==================== 入场与滚动揭示 ==================== */
 const entered = ref(false)
 
+/*
+ * ==================== 首屏展开闸门 ====================
+ *
+ * 首页初始**只呈现 Hero**：一句话输入框。下方的示例行程、场景、三步流程、
+ * 收尾 CTA 默认不渲染，由用户点击引导按钮或向下滚动/上滑后展开。
+ *
+ * 为什么默认收起：Hero 已经完整表达了「说一句话 → 得到行程」这件事，
+ * 首屏直接铺开四屏内容反而稀释了唯一的行动点（输入框）。
+ * 收起后首屏只有一个焦点，用户要么输入、要么展开看细节。
+ *
+ * 触发方式同时支持三种，覆盖桌面与移动端：
+ *   · 点击/回车引导按钮（主要入口，键盘可达）
+ *   · 桌面：鼠标滚轮向下
+ *   · 移动端：触摸上滑
+ * 后两者是「用户已经在尝试往下看」的强信号，此时立刻展开，
+ * 避免出现「滚不动」的困惑。
+ */
+const revealed = ref(false)
+/** 用于 aria-controls 指向的容器 id */
+const REVEAL_ID = 'home-more'
+
+/** 展开后平滑滚到内容顶部；已在视野内或用户偏好减弱动效时不滚 */
+function scrollToContent() {
+  if (typeof document === 'undefined') return
+  const el = document.getElementById(REVEAL_ID)
+  if (!el) return
+  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+  el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+}
+
+function reveal(andScroll = false) {
+  if (revealed.value) return
+  revealed.value = true
+  if (andScroll) {
+    // 等 v-show 把内容渲染出来再滚，否则目标元素高度还是 0
+    void nextTick(() => scrollToContent())
+  }
+}
+
+function collapse() {
+  revealed.value = false
+  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+  document.getElementById('main')?.scrollIntoView({
+    behavior: reduce ? 'auto' : 'smooth',
+    block: 'start'
+  })
+}
+
+function toggleReveal() {
+  if (revealed.value) collapse()
+  else reveal(true)
+}
+
+/* ---------------- 滚动 / 触摸意图 ---------------- */
+let wheelAcc = 0
+let touchStartY: number | null = null
+
+function onWheelIntent(e: WheelEvent) {
+  if (revealed.value) return
+  // 只认「向下滚」。阈值避免触控板轻微误触就展开
+  if (e.deltaY <= 0) {
+    wheelAcc = 0
+    return
+  }
+  wheelAcc += e.deltaY
+  if (wheelAcc >= 24) {
+    // 收起状态下没有可滚动内容，阻止默认行为避免用户以为页面卡住
+    e.preventDefault()
+    reveal(true)
+  }
+}
+
+function onTouchStartIntent(e: TouchEvent) {
+  if (revealed.value) return
+  touchStartY = e.touches[0]?.clientY ?? null
+}
+
+function onTouchMoveIntent(e: TouchEvent) {
+  if (revealed.value || touchStartY === null) return
+  const y = e.touches[0]?.clientY
+  if (y === undefined) return
+  // 手指上滑（y 变小）表示想看下面的内容
+  if (touchStartY - y >= 28) {
+    e.preventDefault()
+    touchStartY = null
+    reveal(true)
+  }
+}
+
 let revealTimer: number | null = null
 let io: IntersectionObserver | null = null
 
-onMounted(() => {
-  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+/*
+ * 入场揭示：为所有 .rv 元素注册 IntersectionObserver。
+ *
+ * ⚠️ 必须在**展开之后重新调用一次**，不能在 onMounted 里只做一次：
+ * 收起状态下内容容器是 display:none，被它包裹的元素**没有布局盒**，
+ * IntersectionObserver 永远不会判定它们相交，`.in` 类加不上，
+ * 展开后它们会一直停在 opacity:0 —— 表现为「下面一片空白」。
+ *
+ * 幂等：已加过 .in 的元素再次 observe 也无副作用（回调里会 unobserve）。
+ */
+let rvBound = false
 
-  if (reduce) {
-    entered.value = true
+function bindRevealObserver() {
+  // 滚动揭示只在展开后才需要：收起时下方内容不可见，注册了也不会触发
+  if (!revealed.value) return
+  if (rvBound) return
+  rvBound = true
+
+  if (typeof IntersectionObserver === 'undefined') {
+    // 环境不支持时直接显示，绝不因为动画而让内容不可见
     document.querySelectorAll('.rv').forEach((el) => el.classList.add('in'))
     return
   }
-
-  // 等两帧再置位，确保过渡有起点可播
-  revealTimer = window.setTimeout(() => {
-    entered.value = true
-  }, 60)
-
   io = new IntersectionObserver(
     (entries) => {
       for (const e of entries) {
@@ -403,16 +582,63 @@ onMounted(() => {
     { threshold: 0.12 }
   )
   document.querySelectorAll('.rv').forEach((el) => io?.observe(el))
+}
 
-  stepTimer = window.setInterval(() => {
-    activeStep.value = (activeStep.value + 1) % steps.length
-  }, 3600)
+onMounted(() => {
+  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+
+  // 展开闸门的触发器。passive:false 是必须的：收起状态下本来就没有可滚动
+  // 内容，会在处理函数里 preventDefault 以免用户以为页面卡住。
+  window.addEventListener('wheel', onWheelIntent, { passive: false })
+  window.addEventListener('touchstart', onTouchStartIntent, { passive: true })
+  window.addEventListener('touchmove', onTouchMoveIntent, { passive: false })
+
+  if (reduce) {
+    entered.value = true
+    document.querySelectorAll('.rv').forEach((el) => el.classList.add('in'))
+    return
+  }
+
+  // 等两帧再置位，确保过渡有起点可播
+  revealTimer = window.setTimeout(() => {
+    entered.value = true
+  }, 60)
+})
+
+/*
+ * 展开后：注册揭示观察器 + 启动步骤轮播。
+ *
+ * 用 watch 而不是写在点击处理函数里：滚轮/触摸也能触发展开，
+ * 若只在点击里做，另外两条路径展开后内容同样会隐形。
+ * 统一在这里处理，三条路径行为一致。
+ */
+watch(revealed, async (open) => {
+  if (!open) {
+    stopStepTimer()
+    return
+  }
+  // 等两帧：一帧让 v-show 移除 display:none，再一帧让浏览器完成布局，
+  // 这样 IntersectionObserver 才能基于真实位置判定
+  await nextTick()
+  requestAnimationFrame(() => {
+    bindRevealObserver()
+  })
+  // 步骤轮播只在可见时才转，收起状态不再空转
+  if (stepTimer === null) {
+    stepTimer = window.setInterval(() => {
+      activeStep.value = (activeStep.value + 1) % steps.length
+    }, 3600)
+  }
 })
 
 onUnmounted(() => {
   io?.disconnect()
+  io = null
   stopStepTimer()
   if (revealTimer !== null) window.clearTimeout(revealTimer)
+  window.removeEventListener('wheel', onWheelIntent)
+  window.removeEventListener('touchstart', onTouchStartIntent)
+  window.removeEventListener('touchmove', onTouchMoveIntent)
   /*
    * 离开首页时若语音识别仍在进行，必须停掉。
    * 不停的话麦克风会一直被占用（浏览器标签上持续显示录音中），
@@ -437,7 +663,12 @@ function startHref(): string {
 <template>
   <AppNavbar />
 
-  <main id="main" tabindex="-1" class="home" :class="{ 'home--in': entered }">
+  <main
+    id="main"
+    tabindex="-1"
+    class="home"
+    :class="{ 'home--in': entered, 'home--collapsed': !revealed }"
+  >
     <!-- ============================================================
          1. HERO：一句话描述需求 → 开始规划
          单栏居中：原先右侧还有一张「它替我查了什么」示意卡（车次/天气/预算），
@@ -453,14 +684,31 @@ function startHref(): string {
             多 Agent 协作 · 实时数据核对
           </p>
 
-          <h1 class="hero__title">
-            一句话，<br />
-            生成<span class="hero__title-em">可执行</span>的旅行日程
+          <!--
+            主标题：逐字出现（打字机）。
+            每一段都是「已输入部分 + 未输入部分」，未输入部分用 .tw-hide 隐藏
+            **但仍然占位** —— 这样标题的宽高从第一帧起就是最终值，
+            不会边打字边把下方内容往下推。
+            aria-label 给出完整标题：读屏器不该逐字朗读，也不该漏掉隐藏部分。
+          -->
+          <h1 class="hero__title" :aria-label="HERO_TITLE_PLAIN">
+            <span aria-hidden="true">
+              <span v-for="(seg, si) in heroTitleSegments" :key="si">
+                <span
+                  v-if="seg.em"
+                  class="hero__title-em"
+                ><span>{{ seg.text.slice(0, segTyped(si)) }}</span><span class="tw-hide">{{ seg.text.slice(segTyped(si)) }}</span></span>
+                <template v-else><span>{{ seg.text.slice(0, segTyped(si)) }}</span><span class="tw-hide">{{ seg.text.slice(segTyped(si)) }}</span></template>
+                <!-- 段数据里标记 br 的位置之后换行，还原原来的两行标题 -->
+                <br v-if="seg.br" />
+              </span>
+            </span>
           </h1>
 
+          <!-- 副标题：同样逐字，在主标题之后开始 -->
           <p class="hero__sub">
-            说出目的地、天数与预算。车次与天气我们实时查好，
-            最后落成一份按天排布、随时可改的行程。
+            <span aria-hidden="true">{{ HERO_SUB_TEXT.slice(0, heroSubTyped.count.value) }}<span class="tw-hide">{{ HERO_SUB_TEXT.slice(heroSubTyped.count.value) }}</span></span>
+            <span class="sr-only">{{ HERO_SUB_TEXT }}</span>
           </p>
 
           <!-- 可直接输入：这是 Hero 的主操作，不是装饰 -->
@@ -468,14 +716,32 @@ function startHref(): string {
             <span class="ask__icon" aria-hidden="true">
               <TravelIcon name="compass" :size="18" />
             </span>
-            <input
-              ref="inputEl"
-              v-model="draft"
-              class="ask__input"
-              type="text"
-              placeholder="例如：广州到北京 3 天，预算 3000，坐高铁"
-              aria-label="描述你的旅行计划"
-            />
+            <!--
+              输入框本体。刻意**不用原生 placeholder**：
+              原生 placeholder 无法做逐字动画，而这里要的是「像有人在打字」
+              的效果。改为在输入框上方叠一层等宽文本，用户一聚焦就隐藏，
+              真实光标立刻接手，不会与动画光标打架。
+            -->
+            <span class="ask__field">
+              <input
+                ref="inputEl"
+                v-model="draft"
+                class="ask__input"
+                type="text"
+                aria-label="描述你的旅行计划"
+                @focus="inputFocused = true"
+                @blur="inputFocused = false"
+              />
+              <!--
+                闪烁光标只在**轮换生效时**渲染。
+                reduce-motion 下占位不做动画（直接显示第一条），
+                此时若还留着光标闪烁，会暗示「正在打字」却始终不动，观感矛盾。
+              -->
+              <span v-if="showPlaceholder" class="ask__ph" aria-hidden="true">
+                <span class="ask__ph-text">{{ ph.text.value }}</span>
+                <span v-if="ph.caretVisible.value" class="ask__ph-caret"></span>
+              </span>
+            </span>
             <!--
               语音输入：只在浏览器支持时才渲染。
               移动端用户「说话」比打字自然得多，这是主要动机。
@@ -514,33 +780,62 @@ function startHref(): string {
           </div>
 
           <!--
-            轻量过渡件：一条短竖线 + 一个向下箭头。
-            作用不是装饰，而是**把视线从输入区引到下面的示例结果**，
-            让两区读起来是「输入 → 结果」的一条线，而不是两个独立章节。
-            用 CSS 画（1px 线 + 旋转的边框），不引图标、不加图片，
-            在 reduced-motion 下不做任何动画。
+            展开闸门的触发器：一条短竖线 + 带文字的按钮。
+            用 button 而非 div：原生支持 Tab 聚焦与回车/空格触发，
+            无需手写 tabindex + keydown；也自带读屏器语义。
+            aria-expanded / aria-controls 表明它控制着下方的可展开区域。
+            向下滑动或滚轮同样能展开（见脚本里的滚动意图处理）。
           -->
-          <div class="hero__handoff" aria-hidden="true">
-            <span class="hero__handoff-line"></span>
-            <TravelIcon name="chevron-down" :size="16" class="hero__handoff-arrow" />
-          </div>
+          <button
+            type="button"
+            class="hero__handoff"
+            :aria-expanded="revealed"
+            :aria-controls="REVEAL_ID"
+            @click="toggleReveal"
+          >
+            <span class="hero__handoff-line" aria-hidden="true"></span>
+            <span class="hero__handoff-label">
+              {{ revealed ? '收起' : '看看它生成什么' }}
+            </span>
+            <TravelIcon
+              name="chevron-down"
+              :size="16"
+              class="hero__handoff-arrow"
+              :class="{ 'is-up': revealed }"
+            />
+          </button>
         </div>
       </div>
     </section>
 
-    <!-- ============================================================
-         2. 示例行程
+    <!--
+      可展开区：示例行程 / 三个场景 / 三步流程 / 收尾 CTA。
 
-         这一区的定位是「上一区那句话的结果」而不是新章节，
-         故刻意做成**延续**而非并置：
-           · 与 Hero 的间距从 136px 收到 ~40px（原来是 48+88 两段内边距叠加）
-           · 首行用居中、无字距、正常字重的引导语，承接 Hero 的居中构图
-           · 去掉左对齐的 eyebrow 小标签 —— 它把这一区拉回「新章节」的语气，
-             是造成割裂感的主要来源
-         详见下方 .showcase-intro / .section--join 的样式注释。
-         ============================================================ -->
-    <section class="section section--join">
-      <div class="container">
+      用 v-show 而不是 v-if：
+        · 内容保留在 DOM 中，各区块内部的组件状态（选中的城市、
+          当前步骤）在收起再展开后不丢失
+        · 展开时无需重新挂载整棵子树，过渡更顺
+
+      inert：收起时让内部元素**完全退出键盘 Tab 序列与读屏器**。
+      只加 aria-hidden 是不够的 —— 那样键盘用户仍能 Tab 进看不见的内容。
+      Vue 对布尔属性会把 false 移除、true 置为空串，正好符合 inert 的用法。
+
+      id 与触发器的 aria-controls 对应。
+    -->
+    <div v-show="revealed" :id="REVEAL_ID" :inert="!revealed">
+      <!-- ============================================================
+           2. 示例行程
+
+           这一区的定位是「上一区那句话的结果」而不是新章节，
+           故刻意做成**延续**而非并置：
+             · 与 Hero 的间距从 136px 收到 ~40px（原来是 48+88 两段内边距叠加）
+             · 首行用居中、无字距、正常字重的引导语，承接 Hero 的居中构图
+             · 去掉左对齐的 eyebrow 小标签 —— 它把这一区拉回「新章节」的语气，
+               是造成割裂感的主要来源
+           详见下方 .showcase-intro / .section--join 的样式注释。
+           ============================================================ -->
+      <section class="section section--join">
+        <div class="container">
         <header class="showcase-intro rv">
           <p class="showcase-intro__lead">
             下面这几份，就是从<strong>上面这句话</strong>开始的
@@ -771,6 +1066,7 @@ function startHref(): string {
         </div>
       </div>
     </section>
+    </div>
   </main>
 
   <AppFooter />
@@ -1033,6 +1329,72 @@ function startHref(): string {
   transform: translateY(0);
 }
 
+/* ---------- 打字机动效 ----------
+ *
+ * .tw-hide 是「尚未打出」的部分：用 visibility 而不是 display 或 v-if。
+ *   · display:none / v-if 会让文本不占位 → 元素宽高随打字变化 →
+ *     下方内容被一路往下推，整页在两秒内持续抖动
+ *   · visibility:hidden 仍参与布局，宽高从第一帧就是最终值，
+ *     打字只是把已有位置上的字逐渐「显影」，没有任何位移
+ * 这是打字机效果能否做得体面的关键一处。
+ */
+.tw-hide {
+  visibility: hidden;
+}
+
+/* 仅供读屏器：给标题/副标题提供完整文本 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 输入框 + 打字机占位：占位需要精确定位到输入框文字起点，故用相对定位包裹 */
+.ask__field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.ask__ph {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  pointer-events: none; /* 绝不挡住点击与聚焦 */
+  color: var(--text3);
+  font-size: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ask__ph-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 打字光标：细竖条，缓慢闪烁，模拟真实输入光标 */
+.ask__ph-caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 1.05em;
+  margin-left: 2px;
+  background: currentColor;
+  animation: caretBlink 1.05s steps(1, end) infinite;
+}
+@keyframes caretBlink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
 /* ---------- 示例提问 ---------- */
 .prompts {
   display: flex;
@@ -1064,14 +1426,36 @@ function startHref(): string {
    一条短竖线 + 一个向下箭头，把视线从输入区引到下方结果。
    不用图片、不加装饰性渐变 —— 它承担的是**引导**职责：
    没有它时，两区之间只有一片空白，读者不知道下面和上面有关系。 */
+/* ---------- 展开闸门的触发器 ----------
+   结构与职责：一条短竖线 + 「看看它生成什么」+ 向下箭头。
+   点击/回车展开下方内容；滚轮向下、触摸上滑同样会展开。
+
+   做成按钮而不是纯装饰：它是首屏唯一的次要行动点，必须键盘可达、
+   必须有读屏器语义（aria-expanded / aria-controls 在模板上）。 */
 .hero__handoff {
-  display: flex;
+  /* 复位按钮默认外观 —— 它看起来应像一条引导线，而不是一个按钮 */
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
   margin-top: 34px;
+  padding: 4px 10px;
+  border: none;
+  background: transparent;
   color: var(--text3);
+  font: inherit;
+  cursor: pointer;
+  transition: color 0.2s;
 }
+.hero__handoff:hover { color: var(--prim); }
+.hero__handoff:focus-visible {
+  outline: 2px solid var(--prim);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
 .hero__handoff-line {
   width: 1px;
   height: 30px;
@@ -1082,14 +1466,51 @@ function startHref(): string {
     var(--border)
   );
 }
+
+.hero__handoff-label {
+  font-size: 0.82rem;
+  font-weight: 550;
+  letter-spacing: 0.01em;
+}
+
 .hero__handoff-arrow {
   /* 轻微上下浮动，暗示「往下看」；幅度小到不构成干扰 */
   animation: handoffBounce 2.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  transition: transform 0.24s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
+/* 展开后箭头翻转，与「收起」的文案一致（否则箭头朝下却写着收起，自相矛盾） */
+.hero__handoff-arrow.is-up { transform: rotate(180deg); }
+
 @keyframes handoffBounce {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(3px); }
 }
+
+/* ---------- 收起态：Hero 撑满一屏 ----------
+ *
+ * 收起时下方内容不渲染，页面总高可能不足一屏 —— 那会带来两个问题：
+ *   1. 页面底部露出一截空白，像没加载完
+ *   2. 目标高度小于视口时浏览器不产生滚动，用户的滚轮/上滑毫无反馈，
+ *      只能靠点击按钮（而滚动意图处理器仍会触发展开，体验上算"补救"）
+ * 让 Hero 至少占满一屏，页面就成为「完整的一屏」，展开前不存在半截空白。
+ *
+ * 用 svh（small viewport height）而不是 vh：移动端浏览器地址栏收放时
+ * vh 会把内容顶出可视区，svh 取下限更稳。带 vh 兜底供旧浏览器使用。
+ * 减去导航栏高度，避免整体超出一屏反而多出滚动条。
+ */
+.home--collapsed .hero {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - var(--nav-h, 64px));
+  min-height: calc(100svh - var(--nav-h, 64px));
+  padding-bottom: 32px;
+}
+/* Hero 内部本来就是单列居中，这里只需保证它垂直居中时不拉伸 */
+.home--collapsed .hero__inner {
+  margin-block: auto;
+}
+
 /*
  * 减弱动效偏好下**停掉浮动**，但保留线条与箭头本身。
  * 它们是引导结构而非装饰 —— 全隐藏会让「输入 → 结果」的衔接又没了提示，
@@ -1097,7 +1518,10 @@ function startHref(): string {
  * .home/.rv 的入场，覆盖不到这个无限循环动画。
  */
 @media (prefers-reduced-motion: reduce) {
-  .hero__handoff-arrow { animation: none; }
+  .hero__handoff-arrow {
+    animation: none;
+    transition: none;
+  }
 }
 
 
