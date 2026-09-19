@@ -10,11 +10,18 @@ const user = useUserStore()
 const open = ref(false)
 const scrolled = ref(false)
 
+/**
+ * 主导航项。
+ *
+ * 「我的」与「管理台」已从这里移除，改由右侧的**账号菜单**承载 ——
+ * 它们都是账号级入口，放在主导航里与「首页/助手/行程」这些功能入口并列，
+ * 语义层级不一致；而且现在头像菜单里已经有了，留着就是两个入口指向同一处。
+ * 入口本身没有消失，只是归到了更合适的位置。
+ */
 const links = [
   { label: '首页', to: '/', icon: 'compass' },
   { label: '助手', to: '/chat', auth: true, icon: 'chat' },
-  { label: '行程', to: '/itineraries', auth: true, icon: 'map' },
-  { label: '我的', to: '/profile', auth: true, icon: 'user' }
+  { label: '行程', to: '/itineraries', auth: true, icon: 'map' }
 ]
 
 /**
@@ -121,16 +128,6 @@ onUnmounted(() => {
         >
           <TravelIcon :name="l.icon" :size="15" />
           {{ l.label }}
-        </RouterLink>
-        <!--
-          管理台适度弱化：字号更小、颜色更淡、不做当前页高亮。
-          它不是面向普通用户的产品功能，而是管理入口；与「首页/助手/行程/我的」
-          同等呈现会让它看起来像主流程的一部分，也容易误点。
-          但仍保留在导航里且可点 —— 管理员的常用入口，藏进二级菜单反而麻烦。
-        -->
-        <RouterLink v-if="showAdmin" to="/admin" class="nav__admin" @click="close">
-          <TravelIcon name="compass" :size="14" />
-          管理台
         </RouterLink>
       </nav>
 
@@ -251,17 +248,58 @@ onUnmounted(() => {
       </RouterLink>
       <div class="nav__mobile-actions">
         <template v-if="user.isLoggedIn">
-          <!-- 与桌面端一致：管理台弱化一档（它不属于产品主流程） -->
-          <RouterLink
-            v-if="showAdmin"
-            to="/admin"
-            class="btn btn-ghost btn--sm nav__mobile-admin"
-            @click="close"
-          >
-            管理台
+          <!--
+            移动端同样用账号菜单承载「个人资料 / 管理台 / 退出登录」，
+            与桌面端一致（主导航里那两项已移除）。
+            这里必须保留这个入口 —— 抽屉是移动端唯一的账号入口，
+            去掉它用户就没地方退出登录了。
+            带文字标签而不是纯图标：抽屉里图标按钮不易辨认。
+          -->
+          <RouterLink to="/chat" class="btn btn-primary btn--sm nav__mobile-full" @click="close">
+            进入助手
           </RouterLink>
-          <RouterLink to="/profile" class="btn btn-ghost btn--sm" @click="close">个人资料</RouterLink>
-          <RouterLink to="/chat" class="btn btn-primary btn--sm" @click="close">进入助手</RouterLink>
+
+          <div class="nav__mobile-usermenu">
+            <button
+              type="button"
+              class="btn btn-ghost btn--sm"
+              :aria-expanded="menuOpen"
+              aria-haspopup="menu"
+              @click="menuOpen = !menuOpen"
+            >
+              <TravelIcon name="user" :size="15" />
+              账号
+              <span class="usermenu__caret" :class="{ 'is-open': menuOpen }" aria-hidden="true"></span>
+            </button>
+
+            <div v-if="menuOpen" class="nav__mobile-menu" role="menu">
+              <p class="usermenu__name">{{ user.userInfo?.username || '未设置昵称' }}</p>
+              <p class="usermenu__email">{{ user.userInfo?.email }}</p>
+              <RouterLink to="/profile" class="usermenu__item" role="menuitem" @click="closeMenu(); close()">
+                <TravelIcon name="user" :size="15" />
+                个人资料
+              </RouterLink>
+              <RouterLink
+                v-if="showAdmin"
+                to="/admin"
+                class="usermenu__item"
+                role="menuitem"
+                @click="closeMenu(); close()"
+              >
+                <TravelIcon name="compass" :size="15" />
+                管理台
+              </RouterLink>
+              <button
+                type="button"
+                class="usermenu__item usermenu__item--danger"
+                role="menuitem"
+                @click="closeMenu(); close(); doLogout()"
+              >
+                <TravelIcon name="arrow-right" :size="15" />
+                退出登录
+              </button>
+            </div>
+          </div>
         </template>
         <template v-else>
           <!--
@@ -430,37 +468,9 @@ onUnmounted(() => {
 }
 .nav__links a.router-link-active::after { opacity: 1; transform: scaleX(1); }
 
-/*
- * 管理台：刻意比其它导航项轻一档。
- * 字号 0.82rem（其余 0.88rem）、颜色 text3（其余 text2）、无当前页高亮。
- * 仍保留悬停反馈 —— 否则会显得「不可点」，而不是「次要」。
- *
- * 选择器写成 .nav__links a.nav__admin 而不是 .nav__admin：
- * 上面那些 .nav__links a.xxx 规则的特异性更高，若只用单类名就得靠
- * !important 硬压，那是坏味道。提高特异性即可自然覆盖。
- */
-.nav__links a.nav__admin {
-  margin-left: 4px;
-  font-size: 0.82rem;
-  gap: 5px;
-  color: var(--text3);
-}
-.nav__links a.nav__admin :deep(svg) { opacity: 0.55; }
-
-.nav__links a.nav__admin:hover {
-  color: var(--text2);
-  background: rgba(37, 99, 235, 0.05);
-}
-.nav__links a.nav__admin:hover :deep(svg) { opacity: 0.75; }
-
-/* 即使身处 /admin 也不给主色胶囊与指示线 —— 它不是同级导航 */
-.nav__links a.nav__admin.router-link-active {
-  color: var(--text2);
-  font-weight: 550;
-  background: rgba(37, 99, 235, 0.05);
-}
-.nav__links a.nav__admin.router-link-active :deep(svg) { opacity: 0.75; }
-.nav__links a.nav__admin.router-link-active::after { opacity: 0; }
+/* 原先此处有一组 .nav__links a.nav__admin 规则，用于把「管理台」弱化一档
+   （字号更小、颜色更淡、不给当前页高亮）。该入口已移到右侧账号菜单，
+   规则一并删除，避免留下无引用的样式。 */
 
 @media (prefers-reduced-motion: reduce) {
   .nav__links a,
@@ -665,16 +675,30 @@ onUnmounted(() => {
 
 .nav__mobile-actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
 
-/* 移动端的「管理台」同样弱化：去掉边框，视觉上退为文字入口 */
-.nav__mobile-admin {
-  border-color: transparent;
-  background: transparent;
-  color: var(--text3);
-  font-weight: 550;
-  padding-left: 8px;
-  padding-right: 8px;
+/* 「进入助手」占整行：它是移动端的主操作，与账号菜单并列会显得同等重要 */
+.nav__mobile-full { width: 100%; justify-content: center; }
+
+/* 移动端账号菜单：抽屉里不放浮层，改为内联展开 ——
+   抽屉本身已是覆盖层，再叠一个浮层既不好点也容易误触外面 */
+.nav__mobile-usermenu { width: 100%; }
+.nav__mobile-usermenu > .btn { width: 100%; justify-content: center; }
+
+.nav__mobile-menu {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--panel);
 }
-.nav__mobile-admin:hover { color: var(--text2); background: rgba(37, 99, 235, 0.05); }
+.nav__mobile-menu .usermenu__name { font-size: 0.84rem; font-weight: 650; color: var(--text); }
+.nav__mobile-menu .usermenu__email {
+  margin: 2px 0 8px;
+  font-size: 0.74rem;
+  color: var(--text3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 @media (max-width: 860px) {
   .nav__links { display: none; }
