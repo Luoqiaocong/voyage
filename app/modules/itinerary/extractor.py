@@ -2,11 +2,68 @@
 
 依赖方向：modules → core（行程域提供 schema 与专属提示词，调用 core 的通用提取器）。
 """
+from datetime import date
+
 from pydantic import BaseModel, Field
 
+from app.core.ai.date_context import current_date_line
 from app.core.ai.tasks import extract_structured
 
 from .schemas import ItineraryPlan
+
+
+def _normalize_year(d: date, today: date) -> date:
+    """把明显不合理的年份修正到离今天最近的那一年（月日保持不变）。
+
+    为什么需要：对话里说「后天出发」，攻略文本里就会出现具体日期；
+    而模型换算时若不知道今天几号，会拿自己记忆里的年份去填 ——
+    实测产出的日期月日正确、年份却落后了整整一年。
+
+    提示词里已注入当前日期，但**模型不可全信**：日期错一年的表现是
+    「行程看起来像去年的」，不报错、不显眼，用户要自己发现。故在代码层兜底。
+
+    策略：在当前年、上一年、下一年三个候选里取与今天差得最少的那个。
+    因为旅行日期总是近期的（不会有人规划去年的行程，也很少规划两年后的），
+    取最近年份是安全的；且月日保持不变，不会把日期改成另一个日子。
+    """
+    best = d
+    best_gap = abs((d - today).days)
+    for year in (today.year - 1, today.year, today.year + 1):
+        try:
+            cand = d.replace(year=year)
+        except ValueError:
+            continue  # 2 月 29 日在平年会抛错，跳过该候选
+        gap = abs((cand - today).days)
+        if gap < best_gap:
+            best, best_gap = cand, gap
+    return best
+
+
+def _sanitize_plan_dates(plan: ItineraryPlan) -> ItineraryPlan:
+    """就地修正 daily_plans 里明显错位的日期年份。"""
+    today = date.today()
+    fixed = 0
+    for day in plan.daily_plans or []:
+        raw = (day.date or "").strip()
+        if not raw:
+            continue
+        try:
+            y, m, dd = (int(x) for x in raw[:10].split("-"))
+            parsed = date(y, m, dd)
+        except (ValueError, TypeError):
+            # 格式不合规就置空：宁可没有日期（前端会退回「第 N 天」），
+            # 也不要展示一个错误日期
+            day.date = None
+            continue
+        norm = _normalize_year(parsed, today)
+        if norm != parsed:
+            day.date = norm.isoformat()
+            fixed += 1
+    if fixed:
+        from app.shared.utils import log
+
+        log.warning(f"[itinerary] 修正了 {fixed} 处错位年份的日期（模型换算失误）")
+    return plan
 
 # 关键：把完整输出结构写死在提示词里，防止模型不遵守 tool schema 绑定而自由发挥字段名
 _EXTRACT_SYSTEM_PROMPT = """你是一个旅行攻略结构化提取器。请根据用户提供的 Markdown 攻略，提取关键信息并按 JSON 格式输出。
@@ -60,16 +117,32 @@ _EXTRACT_SYSTEM_PROMPT = """你是一个旅行攻略结构化提取器。请根�
 8. tips 是字符串数组，每条是一句完整提醒
 9. 只输出纯 JSON，不要 Markdown 代码块，不要任何多余文字
 
+【关于 date 字段（重要）】
+- 攻略里**明确写出**了日期（如「9 月 21 日」「2026-09-21」）才填 date，否则省略。
+- 攻略里出现「第一天」「第二天」这类相对表述时，**不要**自行推算日期，省略该字段。
+- 需要填写时，年份必须与下方给出的「当前日期」一致或在其之后 ——
+  行程不会发生在过去。若攻略只给了月日，按当前日期判断应是今年还是明年。
+- 绝不要使用你自己记忆中的年份，一律以上方提供的当前日期为准。
 """
 
 
 async def extract_itinerary_plan(recommend_txt: str) -> ItineraryPlan | None:
-    """攻略 Markdown → ItineraryPlan；失败返回 None（不打断对话）。"""
-    return await extract_structured(
+    """攻略 Markdown → ItineraryPlan；失败返回 None（不打断对话）。
+
+    提示词里注入当前日期：对话中的「后天出发」会被模型换算成具体日期，
+    若不给今天，模型会拿记忆里的年份去填，产出落后一整年的日期。
+    """
+    prompt = (
+        f"{_EXTRACT_SYSTEM_PROMPT}\n"
+        f"【当前日期】今天是 {current_date_line()}。\n"
+    )
+    plan = await extract_structured(
         recommend_txt,
         ItineraryPlan,
-        system_instructions=_EXTRACT_SYSTEM_PROMPT,
+        system_instructions=prompt,
     )
+    # 代码层兜底：即便提示词说清了，模型仍可能填错年份
+    return _sanitize_plan_dates(plan) if plan is not None else None
 
 
 # 候选编号的选择结果：只让模型回一个序号，避免它复述整篇文本
