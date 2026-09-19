@@ -218,14 +218,21 @@ onMounted(load)
             <p class="dash__chart-title">
               Token 消耗
               <!--
-                相对昨日的涨跌：给出**具体数目**与**百分比**两段。
-                分开渲染是因为两者样式不同 —— 数目等宽便于对齐，
-                百分比带底色便于一眼看出方向与量级。
+                相对昨日的涨跌：**两个各自带箭头的量** —— 前面是具体数目，
+                后面是增减幅度。两个箭头各指自己的方向，不是「一个箭头管两个数」。
               -->
-              <span v-if="tokenCompare" class="dash__cmp" :class="`dash__cmp--${tokenCompare.tone}`">
-                <span class="dash__cmp-amount">{{ tokenCompare.amount }}</span>
-                <span v-if="tokenCompare.percent" class="dash__cmp-pct">{{ tokenCompare.percent }}</span>
-              </span>
+              <template v-if="tokenCompare">
+                <span
+                  v-if="tokenCompare.amount"
+                  class="dash__cmp"
+                  :class="`dash__cmp--${tokenCompare.tone}`"
+                >{{ tokenCompare.amount }}</span>
+                <span
+                  v-if="tokenCompare.percent"
+                  class="dash__cmp"
+                  :class="`dash__cmp--${tokenCompare.tone}`"
+                >{{ tokenCompare.percent }}</span>
+              </template>
               <span class="dash__cmp-base">较昨日</span>
             </p>
             <LineChart :points="tokenPoints" unit="token" />
@@ -233,10 +240,18 @@ onMounted(load)
           <div>
             <p class="dash__chart-title">
               新增用户
-              <span v-if="userCompare" class="dash__cmp" :class="`dash__cmp--${userCompare.tone}`">
-                <span class="dash__cmp-amount">{{ userCompare.amount }}</span>
-                <span v-if="userCompare.percent" class="dash__cmp-pct">{{ userCompare.percent }}</span>
-              </span>
+              <template v-if="userCompare">
+                <span
+                  v-if="userCompare.amount"
+                  class="dash__cmp"
+                  :class="`dash__cmp--${userCompare.tone}`"
+                >{{ userCompare.amount }}</span>
+                <span
+                  v-if="userCompare.percent"
+                  class="dash__cmp"
+                  :class="`dash__cmp--${userCompare.tone}`"
+                >{{ userCompare.percent }}</span>
+              </template>
               <span class="dash__cmp-base">较昨日</span>
             </p>
             <LineChart :points="userPoints" unit="人" />
@@ -451,29 +466,20 @@ onMounted(load)
 .health__logs-hint { margin-top: 10px; color: var(--text3); font-size: 0.74rem; }
 
 /* ---- 趋势图的「较昨日」涨跌标记 ----
-   结构：一个胶囊里放两段 —— 涨跌数目（等宽，便于两图纵向对齐）
-   + 百分比（略小、带分隔），后面跟一个「较昨日」小字说明基准。
-   基准用 tiny 灰字而不是整句说明，是因为标记本身已够清楚，
-   每张图下方再压一行解释会显得啰嗦。 */
+   两个**各自带箭头**的独立标签片：前面是具体数目，后面是增减幅度。
+   每个片子自己带底色与箭头，方向由内容自明 —— 不用「一个箭头管两个数」，
+   那样在数目与百分比方向需要区分时会含糊。
+   数目用等宽数字：两个图上下并排时便于对齐比较。 */
 .dash__cmp {
   display: inline-flex;
   align-items: baseline;
-  gap: 6px;
-  margin-left: 8px;
+  margin-left: 6px;
   padding: 2px 8px;
   border-radius: 6px;
   font-size: 0.74rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-.dash__cmp-amount { letter-spacing: -0.01em; }
-/* 百分比用竖线分隔，避免与数目粘连成「+600+50%」这种读不断的串 */
-.dash__cmp-pct {
-  padding-left: 6px;
-  border-left: 1px solid currentColor;
-  opacity: 0.75;
-  font-size: 0.72rem;
 }
 
 .dash__cmp--up { background: rgba(72, 187, 120, 0.14); color: var(--success); }
@@ -482,7 +488,7 @@ onMounted(load)
 
 /* 「较昨日」：说明对比基准，比标记更弱一档 */
 .dash__cmp-base {
-  margin-left: 6px;
+  margin-left: 8px;
   font-size: 0.72rem;
   font-weight: 500;
   color: var(--text3);

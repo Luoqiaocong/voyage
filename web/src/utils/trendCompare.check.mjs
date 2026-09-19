@@ -60,7 +60,9 @@ check('百分比为 null（无穷大不给）', fromZero?.pct === null, String(f
 const fz = formatDayOverDay(fromZero, fmt)
 console.log('  格式化 ->', fz)
 check('展示里不含 Infinity', !/Infinity|NaN/.test(JSON.stringify(fz)), JSON.stringify(fz))
-check('展示里说明昨日为 0', String(fz.amount).includes('昨日 0'), fz.amount)
+check('只给数目片子', fz.amount !== '' && fz.percent === '',
+  JSON.stringify({ amount: fz.amount, percent: fz.percent }))
+check('数目片带箭头', fz.amount.startsWith('⬆'), fz.amount)
 
 console.log('\n=== 6. 边界：两天都是 0 ===')
 check('[0,0] 返回 null', dayOverDay([0, 0]) === null,
@@ -72,26 +74,55 @@ console.log('  [50, 50] ->', flat)
 check('方向为 flat', flat?.tone === 'flat')
 check('数目为 0', flat?.delta === 0, String(flat?.delta))
 const ff = formatDayOverDay(flat, fmt)
-check('文案为「与昨日持平」', ff.amount === '与昨日持平', ff.amount)
+check('文案为「持平」', ff.amount === '持平', ff.amount)
 check('持平不给百分比', ff.percent === '', JSON.stringify(ff.percent))
 
-console.log('\n=== 8. 格式化：数目与百分比分成两段 ===')
+console.log('\n=== 8. 格式化：两个各自带箭头的量 ===')
+// 用户指定形态：⬆ 1.0M   ⬆ 100%   —— 两个箭头各指自己的方向
 const f = formatDayOverDay(dayOverDay([100, 350]), fmt)
 console.log('  [100, 350] ->', f)
-check('箭头为 ⬆', f.arrow === '⬆', f.arrow)
-check('数目段含 250', f.amount.includes('250'), f.amount)
-check('百分比段为 +250%', f.percent === '+250%', f.percent)
+check('数目片为「⬆ 250」', f.amount === '⬆ 250', f.amount)
+check('幅度片为「⬆ 250%」', f.percent === '⬆ 250%', f.percent)
+check('两个片子都带箭头',
+  f.amount.startsWith('⬆') && f.percent.startsWith('⬆'),
+  `${f.amount} / ${f.percent}`)
 
 const fdown = formatDayOverDay(dayOverDay([400, 100]), fmt)
 console.log('  [400, 100] ->', fdown)
-check('下降箭头为 ⬇', fdown.arrow === '⬇', fdown.arrow)
-check('百分比段为 −75%', fdown.percent === '−75%', fdown.percent)
+check('数目片为「⬇ 300」', fdown.amount === '⬇ 300', fdown.amount)
+check('幅度片为「⬇ 75%」', fdown.percent === '⬇ 75%', fdown.percent)
+check('下降时两个箭头都是 ⬇',
+  fdown.amount.startsWith('⬇') && fdown.percent.startsWith('⬇'),
+  `${fdown.amount} / ${fdown.percent}`)
+check('幅度片不再用 +/- 号（改由箭头表意）',
+  !f.percent.includes('+') && !fdown.percent.includes('−'),
+  `${f.percent} / ${fdown.percent}`)
 
 console.log('\n=== 9. 自定义格式化函数生效（Token 用紧凑格式） ===')
 const compactFmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 const big = formatDayOverDay(dayOverDay([1000, 2500]), compactFmt)
 console.log('  [1000, 2500] with compact ->', big)
-check('数目用紧凑格式 1.5k', big.amount.includes('1.5k'), big.amount)
+check('数目片用紧凑格式「⬆ 1.5k」', big.amount === '⬆ 1.5k', big.amount)
+check('幅度片为「⬆ 150%」', big.percent === '⬆ 150%', big.percent)
+// 用户给的例子形态是「⬆ 1.0M  ⬆ 100%」。
+// 反推输入：增量 1.0M 且增幅 100% → 基数 = 增量 / 增幅 = 1.0M。
+// 即 prev = 1.0M、curr = 2.0M。
+// （我先后两次心算成 500k→1.0M 与 500k→1.5M，实际都不是这个组合 ——
+//   这也是为什么这条用例值得留着：数目与增幅是**两个独立量**，
+//   不能凭直觉从其中一个推出另一个。）
+const mFmt = (n) => `${(n / 1e6).toFixed(1)}M`
+const mega = formatDayOverDay(dayOverDay([1000000, 2000000]), mFmt)
+console.log('  [1.0M, 2.0M] ->', mega)
+check('形态匹配用户示例「⬆ 1.0M ⬆ 100%」',
+  mega.amount === '⬆ 1.0M' && mega.percent === '⬆ 100%',
+  `${mega.amount} / ${mega.percent}`)
+// 对照：同样数目的增量（1.0M），基数不同则增幅不同 —— 500k→1.5M 是 200%。
+// 这一条正是「两个数各自独立」的证据。
+const mega2 = formatDayOverDay(dayOverDay([500000, 1500000]), mFmt)
+console.log('  [500k, 1.5M] ->', mega2)
+check('增量同为 1.0M 但增幅为 200%（两个数独立计算）',
+  mega2.amount === '⬆ 1.0M' && mega2.percent === '⬆ 200%',
+  `${mega2.amount} / ${mega2.percent}`)
 
 console.log('\n=== 10. 不出现 NaN / Infinity ===')
 for (const v of [[0, 0], [0, 1], [1, 0], [1e9, 1], [1, 1e9], [0.1, 0.2]]) {

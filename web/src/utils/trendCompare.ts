@@ -72,33 +72,47 @@ export function dayOverDay(values: number[]): DayOverDay | null {
 }
 
 /**
- * 把比较结果格式化成两段展示。
+ * 把比较结果格式化成**两个各自带箭头的量**。
  *
- * 返回 { amount, percent } 两段而不是一整句 —— 界面要分别给它们
- * 不同的样式（数目用等宽、百分比带箭头与底色），拼成一句就没法分开渲染。
+ * 展示形态（用户指定）：
+ *
+ *     Token 消耗   ⬆ 1.0M   ⬆ 100%
+ *                  └ 数目   └ 增减幅
+ *
+ * 两个箭头各自指示自己的方向，不是「一个箭头管两个数」——
+ * 截图里的写法就是两个 ⬆ 并列，故这里返回两个完整字段，
+ * 由界面各自渲染成独立的标签片。
+ *
+ * 方向一致（涨则都涨、跌则都跌），所以两个箭头符号相同；
+ * 但仍然分别生成，因为数目为 0 或无法算百分比时只渲染其中一个。
  */
+export interface DayOverDayDisplay {
+  /** 具体数目，含箭头，如「⬆ 1.0M」；持平或无法计算时为空串 */
+  amount: string
+  /** 增减幅度，含箭头，如「⬆ 100%」；无法计算时为空串 */
+  percent: string
+  tone: DayOverDay['tone']
+}
+
 export function formatDayOverDay(
   c: DayOverDay,
   fmt: (n: number) => string
-): { arrow: string; amount: string; percent: string; tone: DayOverDay['tone'] } {
-  const arrow = c.tone === 'up' ? '⬆' : c.tone === 'down' ? '⬇' : '—'
-
+): DayOverDayDisplay {
   if (c.tone === 'flat') {
-    return { arrow, amount: '与昨日持平', percent: '', tone: c.tone }
+    return { amount: '持平', percent: '', tone: c.tone }
   }
 
+  const arrow = c.tone === 'up' ? '⬆' : '⬇'
   const amount = `${arrow} ${fmt(c.delta)}`
 
-  // 昨天为 0：只报数目，不给百分比（无穷大没有展示意义）
+  // 昨日为 0：增幅是无穷大，百分比无意义 —— 只显示数目那一片
   if (c.pct === null) {
-    return { arrow, amount: `${amount}（昨日 0）`, percent: '', tone: c.tone }
+    return { amount, percent: '', tone: c.tone }
   }
 
-  const sign = c.pct > 0 ? '+' : '−'
   return {
-    arrow,
     amount,
-    percent: `${sign}${Math.abs(c.pct).toFixed(0)}%`,
+    percent: `${arrow} ${Math.abs(c.pct).toFixed(0)}%`,
     tone: c.tone
   }
 }
