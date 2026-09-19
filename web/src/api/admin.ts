@@ -23,6 +23,10 @@ export interface DashboardSummary {
   total_conversations: number
   total_itineraries: number
   today_cost: CostEstimate
+  /** 昨日同口径数据，用于「较昨日」涨跌对比 */
+  yesterday_tokens: number
+  /** 昨日新增用户数，用于「较昨日」涨跌对比 */
+  new_users_yesterday: number
 }
 
 export interface TrendPoint {

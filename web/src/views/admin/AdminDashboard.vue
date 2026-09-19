@@ -37,12 +37,36 @@ function compact(n: number): string {
   return n.toLocaleString()
 }
 
+/**
+ * 指标卡。
+ *
+ * 「今日 Token 消耗」与「今日新增用户」两张带**较昨日涨跌标记** ——
+ * 用户要的正是这两项要有具体数目与相对昨日的增减幅。
+ * 用后端给的 yesterday_* 作为对比基数（比从趋势序列推更可靠：
+ * 趋势接口只覆盖有限天数，且卡片要的就是「今日 vs 昨日」两个点）。
+ *
+ * 其余两张（活跃用户、累计会话）是**存量或不同口径**的指标，
+ * 与昨日对比没有意义，故不加强行对比。
+ */
 const cards = computed(() => {
   const s = summary.value
   if (!s) return []
+  const tokenCmp = dayOverDay([s.yesterday_tokens, s.today_tokens])
+  const userCmp = dayOverDay([s.new_users_yesterday, s.new_users_today])
   return [
-    { label: '今日 Token 消耗', value: compact(s.today_tokens), sub: `${s.today_calls} 次调用`, tone: 'primary' },
-    { label: '今日新增用户', value: compact(s.new_users_today), sub: `累计 ${s.total_users}` },
+    {
+      label: '今日 Token 消耗',
+      value: compact(s.today_tokens),
+      sub: `${s.today_calls} 次调用`,
+      tone: 'primary',
+      cmp: tokenCmp ? formatDayOverDay(tokenCmp, compact) : null
+    },
+    {
+      label: '今日新增用户',
+      value: compact(s.new_users_today),
+      sub: `累计 ${s.total_users}`,
+      cmp: userCmp ? formatDayOverDay(userCmp, (n) => String(n)) : null
+    },
     { label: '今日活跃用户', value: compact(s.active_users_today), sub: '当日产生过会话' },
     { label: '累计会话', value: compact(s.total_conversations), sub: `行程 ${s.total_itineraries}` }
   ]
@@ -188,6 +212,20 @@ onMounted(load)
         <div v-for="c in cards" :key="c.label" class="statcard" :class="`statcard--${c.tone ?? 'plain'}`">
           <p class="statcard__label">{{ c.label }}</p>
           <p class="statcard__value">{{ c.value }}</p>
+          <!--
+            较昨日涨跌：两个各自带箭头的量（具体数目 + 增减幅）。
+            放在数值下方与 sub 同一行区，因为它是这张卡的补充信息，
+            不该与主数值争夺视线。
+          -->
+          <p v-if="c.cmp" class="statcard__cmp">
+            <span v-if="c.cmp.amount" class="dash__cmp" :class="`dash__cmp--${c.cmp.tone}`">
+              {{ c.cmp.amount }}
+            </span>
+            <span v-if="c.cmp.percent" class="dash__cmp" :class="`dash__cmp--${c.cmp.tone}`">
+              {{ c.cmp.percent }}
+            </span>
+            <span class="dash__cmp-base">较昨日</span>
+          </p>
           <p class="statcard__sub">{{ c.sub }}</p>
         </div>
         <div class="statcard">
@@ -379,6 +417,18 @@ onMounted(load)
 }
 .statcard__value--sm { font-size: 1.05rem; }
 .statcard__sub { margin-top: 4px; font-size: 0.74rem; color: var(--text3); }
+
+/* 较昨日涨跌行：紧贴数值下方，两个标签片带间距 */
+.statcard__cmp {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+}
+/* 卡片内没有标题前缀，标签片不需要左侧外边距（那个是给图标题用的） */
+.statcard__cmp .dash__cmp { margin-left: 0; }
+.statcard__cmp .dash__cmp-base { margin-left: 4px; }
 
 .dash__panel { padding: 20px 22px; margin-bottom: 20px; }
 .dash__panel-head {

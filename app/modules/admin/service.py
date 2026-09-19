@@ -39,6 +39,7 @@ from app.shared.usage_query import (
     get_token_trend,
     get_user_growth_trend,
     local_today,
+    local_yesterday,
 )
 from app.shared.usage_store import flush_pending_usage
 from app.shared.utils import TransactionMixin, log, to_local_display
@@ -72,6 +73,14 @@ class AdminService(TransactionMixin):
         counters = await get_platform_counters(self.db)
         breakdown = await get_model_breakdown(self.db, local_today())
 
+        # 昨日同口径数据，供指标卡展示「较昨日」涨跌。
+        # 不放在 get_platform_counters 里：那个函数服务多处，加「昨日」维度
+        # 会让它的语义从「平台现状」变成「含对比的时间序列」，不如就近补齐。
+        yesterday_tokens = (await get_token_summary(self.db, local_yesterday()))[
+            "total_tokens"
+        ]
+        new_users_yesterday = await self.repo.count_new_users_on(local_yesterday())
+
         return {
             "today": token["date"],
             "today_tokens": token["total_tokens"],
@@ -82,6 +91,9 @@ class AdminService(TransactionMixin):
             "total_conversations": counters["total_conversations"],
             "total_itineraries": counters["total_itineraries"],
             "today_cost": estimate_cost_usd(breakdown),
+            # 对比基数：前端据此算「较昨日」的数目与增幅
+            "yesterday_tokens": int(yesterday_tokens),
+            "new_users_yesterday": int(new_users_yesterday),
         }
 
     async def dashboard_trend(self, days: int) -> dict[str, Any]:

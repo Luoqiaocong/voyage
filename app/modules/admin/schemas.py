@@ -97,6 +97,11 @@ class DashboardSummary(BaseModel):
     total_conversations: Annotated[int, Field(description="累计会话")]
     total_itineraries: Annotated[int, Field(description="累计行程")]
     today_cost: Annotated[CostEstimate, Field(description="今日成本估算")]
+    #: 昨日同口径数据，供指标卡展示「较昨日」涨跌。
+    #: 放在概览里而不是让前端自己算：趋势接口只覆盖有限天数，
+    #: 且卡片要的是「今日 vs 昨日」两个点，单独查更直接。
+    yesterday_tokens: Annotated[int, Field(description="昨日消耗 token 总数")] = 0
+    new_users_yesterday: Annotated[int, Field(description="昨日新增用户")] = 0
 
 
 class HealthReport(BaseModel):

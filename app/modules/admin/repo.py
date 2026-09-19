@@ -192,6 +192,22 @@ class AdminRepo:
             ],
         }
 
+    async def count_new_users_on(self, day: str) -> int:
+        """指定日期（本地时区）的新增用户数。
+
+        供指标卡的「较昨日」对比使用。与 get_platform_counters 的
+        new_users_today 口径一致：都按**本地时区**的日期前缀统计，
+        而不是 UTC —— 否则北京时间 0:00~8:00 注册的用户会被算到前一天。
+        """
+        from app.shared.usage_query import _day_expr
+
+        n = (
+            await self.db.execute(
+                select(func.count(User.id)).where(_day_expr(User.created_at) == day)
+            )
+        ).scalar_one()
+        return int(n)
+
     async def top_token_users(self, limit: int = ACTIVE_USER_LIMIT) -> list[dict]:
         """Token 用量排行（按用户，累计）。
 
