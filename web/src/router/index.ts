@@ -65,7 +65,34 @@ router.beforeEach(async (to) => {
       return { name: 'login', query: { redirect: to.fullPath } }
     }
     if (to.meta.guestOnly && user.isLoggedIn) {
-      return { name: 'chat' }
+      /*
+       * 已登录用户访问登录页时弹到对话页。
+       *
+       * 必须**保留 example**：首页填了需求点「开始规划」→ 去登录页
+       * （?example=...）→ 如果此刻已是登录态（例如令牌刚恢复、或从历史
+       * 记录进来），原先直接 return { name: 'chat' } 会把文案丢掉，
+       * 用户回到对话页发现刚写的内容没了。
+       *
+       * redirect 参数也要一并保留：/login?redirect=/itineraries/3 这类
+       * 深链在已登录时同样应落到原目标，而不是一律去 /chat。
+       */
+      const raw = to.query.example
+      const example = Array.isArray(raw) ? raw[0] : raw
+      const rawRedirect = to.query.redirect
+      const redirect = Array.isArray(rawRedirect) ? rawRedirect[0] : rawRedirect
+
+      // 只接受站内绝对路径，防开放重定向（与 LoginView.safeRedirect 同规则）
+      const target =
+        typeof redirect === 'string' &&
+        redirect.startsWith('/') &&
+        !redirect.startsWith('//')
+          ? redirect
+          : '/chat'
+
+      return {
+        path: target,
+        query: typeof example === 'string' && example ? { example } : undefined
+      }
     }
 
     if (to.meta.requiresAdmin) {

@@ -46,6 +46,92 @@ function usePrompt(text: string) {
   inputEl.value?.focus()
 }
 
+/* ---------------- 语音输入 ---------------- */
+/*
+ * 用浏览器原生的 Web Speech API，不引第三方 SDK。
+ *
+ * 取舍说明：
+ *   - 好处是零依赖、零成本、无需后端配合（识别在浏览器/系统侧完成）；
+ *   - 代价是**只有 Chrome/Edge/Safari 支持**，Firefox 至今没有。
+ *     故做能力检测：不支持时按钮不渲染，而不是给一个点了没反应的按钮。
+ *   - 中文识别依赖系统语言包，桌面端偶有不准；所以识别结果**只填入输入框**，
+ *     不自动提交 —— 用户可以先改错字再发送。这是有意的，避免「说错一个字
+ *     就发出去了」。
+ */
+
+/** 只声明用到的部分，避免为第三方类型引入额外依赖 */
+interface SpeechRecognitionLike {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  start(): void
+  stop(): void
+  onresult: ((e: any) => void) | null
+  onerror: ((e: any) => void) | null
+  onend: (() => void) | null
+}
+
+const voiceListening = ref(false)
+const voiceError = ref('')
+
+/** 浏览器是否支持语音识别 */
+const voiceSupported = computed(() => {
+  if (typeof window === 'undefined') return false
+  const w = window as any
+  return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition)
+})
+
+let recognition: SpeechRecognitionLike | null = null
+
+function toggleVoice() {
+  if (voiceListening.value) {
+    recognition?.stop()
+    return
+  }
+  voiceError.value = ''
+  const w = window as any
+  const Ctor = w.SpeechRecognition || w.webkitSpeechRecognition
+  if (!Ctor) return
+
+  const rec: SpeechRecognitionLike = new Ctor()
+  rec.lang = 'zh-CN'
+  // 不设 continuous：一次说完一句就结束，比持续监听更符合「填一句话」的场景，
+  // 也让用户清楚它什么时候停止（持续监听容易被误以为一直在录音）
+  rec.continuous = false
+  rec.interimResults = true
+
+  rec.onresult = (e: any) => {
+    let text = ''
+    for (let i = 0; i < e.results.length; i++) {
+      text += e.results[i][0].transcript
+    }
+    // 只填充不提交：允许用户改掉识别错的字
+    draft.value = text.trim()
+  }
+  rec.onerror = (e: any) => {
+    const code = e?.error ?? ''
+    voiceError.value =
+      code === 'not-allowed' || code === 'service-not-allowed'
+        ? '浏览器拒绝了麦克风权限，请在地址栏左侧允许后重试'
+        : code === 'no-speech'
+          ? '没有听到声音，请再说一次'
+          : '语音识别失败，请改用键盘输入'
+    voiceListening.value = false
+  }
+  rec.onend = () => {
+    voiceListening.value = false
+    recognition = null
+  }
+
+  try {
+    rec.start()
+    recognition = rec
+    voiceListening.value = true
+  } catch {
+    voiceError.value = '无法启动语音识别，请改用键盘输入'
+  }
+}
+
 const prompts = [
   '广州 → 北京 3 天，预算 3000',
   '成都周末两日游，帮我看看天气',
@@ -378,6 +464,13 @@ onUnmounted(() => {
   io?.disconnect()
   stopStepTimer()
   if (revealTimer !== null) window.clearTimeout(revealTimer)
+  /*
+   * 离开首页时若语音识别仍在进行，必须停掉。
+   * 不停的话麦克风会一直被占用（浏览器标签上持续显示录音中），
+   * 用户会以为程序在偷听；重新进入首页再点也无法重新 start。
+   */
+  recognition?.stop()
+  recognition = null
 })
 
 /**
@@ -434,11 +527,29 @@ function startHref(): string {
               placeholder="例如：广州到北京 3 天，预算 3000，坐高铁"
               aria-label="描述你的旅行计划"
             />
+            <!--
+              语音输入：只在浏览器支持时才渲染。
+              移动端用户「说话」比打字自然得多，这是主要动机。
+              不支持时按钮根本不出现，而不是点了没反应的死按钮。
+            -->
+            <button
+              v-if="voiceSupported"
+              type="button"
+              class="ask__mic"
+              :class="{ 'is-listening': voiceListening }"
+              :aria-label="voiceListening ? '停止语音输入' : '用语音描述你的旅行计划'"
+              :title="voiceListening ? '正在听…点击停止' : '语音输入'"
+              @click="toggleVoice"
+            >
+              <TravelIcon name="wave" :size="17" />
+            </button>
             <button class="ask__go" type="submit">
               开始规划
               <TravelIcon name="arrow-right" :size="16" />
             </button>
           </form>
+          <!-- 语音识别失败/被拒时的原因，避免用户以为按钮坏了 -->
+          <p v-if="voiceError" class="ask__voice-err">{{ voiceError }}</p>
 
           <div class="prompts">
             <span class="prompts__label">或试试</span>
@@ -967,6 +1078,60 @@ function startHref(): string {
 }
 .ask__input::placeholder {
   color: var(--text3);
+}
+
+/*
+ * 语音输入按钮。
+ * 放在输入框与「开始规划」之间：它属于「输入」这一组，
+ * 放到主按钮右侧会让人以为它是提交的一部分。
+ * 尺寸比主按钮小且无填充色，避免与「开始规划」抢视觉焦点。
+ */
+.ask__mic {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  margin-right: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text2);
+  transition: color 0.18s, background-color 0.18s, border-color 0.18s;
+}
+.ask__mic:hover {
+  color: var(--prim);
+  border-color: var(--blue-200);
+  background: var(--blue-50);
+}
+.ask__mic:focus-visible {
+  outline: 2px solid var(--prim);
+  outline-offset: 2px;
+}
+
+/*
+ * 正在收音：用呼吸光圈而不是变色 ——
+ * 「正在听」是一个持续状态，脉冲更能表达「还在进行中」，
+ * 单纯变色容易被理解为「已激活但已停止」。
+ */
+.ask__mic.is-listening {
+  color: #fff;
+  background: var(--prim);
+  border-color: var(--prim);
+  animation: micPulse 1.4s ease-in-out infinite;
+}
+@keyframes micPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.45); }
+  50% { box-shadow: 0 0 0 7px rgba(37, 99, 235, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ask__mic.is-listening { animation: none; }
+}
+
+.ask__voice-err {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: var(--danger);
 }
 .ask__go {
   display: inline-flex;
