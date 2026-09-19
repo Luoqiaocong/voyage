@@ -1,383 +1,257 @@
-
 <div align="center">
 
 # 🌏 Voyage AI — 智能旅行规划平台
 
-**基于 FastAPI + SQLAlchemy + LangChain/LangGraph 多 Agent 的 AI 旅行规划后端**
+**说一句话，得到一份可执行、可核验、可分享的旅行日程**
 
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.141+-009688.svg)](https://fastapi.tiangolo.com/)
-[![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-2C3E50.svg)](https://www.sqlalchemy.org/)
-[![LangGraph](https://img.shields.io/badge/LangGraph-Multi--Agent-FF6F00.svg)](https://www.langchain.com/)
-[![Version](https://img.shields.io/badge/Version-v0.1.0-orange.svg)]()
-
-**当前版本：`v0.1.0`（MVP 阶段）**
+[![Vue 3](https://img.shields.io/badge/Vue-3-42B883.svg)](https://vuejs.org/)
+[![License](https://img.shields.io/badge/Version-v0.1.0-orange.svg)]()
 
 </div>
 
 ---
 
-## 📌 项目简介
+## 📌 这是什么
 
-Voyage AI 是一个智能旅行规划平台后端，定位为「旅行专家 + 生活闲聊伙伴」。平台提供完整的用户体系、会话管理与基于多 Agent 协作的流式对话能力，可按需调用天气、车次票价、行程推荐等工具，生成个性化、可核验的出行方案，并通过会话状态持久化实现连续的多轮规划体验。
+Voyage AI 是一个**对话式的旅行规划平台**。你用自然语言描述出行需求（去哪、几天、预算、偏好），它实时查询车次、天气与目的地信息，最后生成一份**按天排布、可编辑、可分享**的行程。
 
-当前已完成**用户模块（含 Refresh Token 令牌闭环）、对话闭环与行程模块**，Redis 已接入（验证码 / 重置令牌 / Refresh Token 存储）。下一步聚焦 AI 能力调优（提示词、工具 skills）与安全/生产化加固（限流、监控、测试体系、数据库迁移）。
+与「通用聊天机器人」的区别在于三点：
 
----
-
-## 🏗️ 系统架构
-
-```mermaid
-flowchart TB
-    subgraph FE["前端"]
-        FE1["Web 应用"]
-    end
-
-    subgraph API["FastAPI 应用层"]
-        CORE["核心组件<br/>统一响应 · 异常处理 · 业务错误码"]
-        MOD["业务模块<br/>用户 · 会话 · AI 多 Agent · 行程"]
-    end
-
-    subgraph DATA["数据与外部服务"]
-        DB[("业务数据库")]
-        REDIS["Redis<br/>验证码 / 令牌"]
-        LLM["大模型服务"]
-        TOOLS["工具服务<br/>天气 / 车次 / 推荐"]
-    end
-
-    FE1 --> MOD
-    MOD --> CORE
-    MOD --> REDIS
-    MOD --> LLM
-    MOD --> TOOLS
-    CORE --> DB
-```
-
+- **数据是查来的，不是编的** —— 车次、票价、天气走实时查询，并会横向比选给出备选，而不是只给一个答案。
+- **结果能落到行程里** —— 对话中生成的方案可一键提取为结构化行程，之后随时编辑、导出或分享。
+- **它会记住你** —— 常住城市、已去过的目的地、出行节奏与预算习惯会沉淀为长期偏好，下次规划自动带上。
 
 ---
 
-## ✨ 功能特性
+## ✨ 功能一览
 
-> 标记规则：✅ 已实现 ｜ 🔄 半实现 ｜ ⬜ 未实现
+### 🗣️ 智能对话规划
 
-### 👤 用户模块
+- **流式回答**：内容边生成边呈现，不必等待整段完成。
+- **可见的执行过程**：查询了哪些数据、每一步进行到哪，以步骤时间线呈现，而不是黑盒等待。
+- **实时数据查询**：高铁/火车车次与票价、目的地天气与穿衣建议、景点与酒店的横向比选。
+- **结构化呈现**：车次票价等多列信息以表格渲染，行程按「天 + 时段」组织，而非大段文字。
+- **打断与追问**：生成中可随时停止；支持多轮追问，上下文连续。
+- **语音输入**：移动端可直接说话描述需求（浏览器支持时提供）。
+- **快捷提问**：根据当前对话内容动态推荐下一步可以问什么。
 
-| 功能 | 状态 |
-|------|------|
-| 用户注册（邮箱 + 安全密码哈希） | ✅ |
-| 密码强度校验（注册与改密均生效） | ✅ |
-| 用户登录（JWT 令牌认证） | ✅ |
-| 请求鉴权（受保护接口令牌校验） | ✅ |
-| 个人资料查看与修改（昵称、头像） | ✅ |
-| 修改密码（校验当前密码与新旧一致性） | ✅ |
-| 用户注销（清理会话后删除账号） | ✅ |
-| 可选头像库 | ✅ |
-| Refresh Token（签发 / 刷新 / 登出撤销 / 批量撤销） | ✅ |
-| 邮箱验证码 / 两步密码重置 | ✅ |
-| 软删除与注销冷却反悔机制 | ⬜ |
+### 🧳 行程管理
 
-### 💬 会话与 AI 对话模块
+- **一键提取**：把对话里聊出的方案保存为正式行程。
+- **完整编辑**：按天调整活动、住宿、交通与备注。
+- **多种导出**：日历文件（.ics）、Markdown、打印友好版。
+- **分享协作**：生成带访问密码的分享链接，可控制是否允许对方复制、是否允许编辑。
+- **公开访问页**：访客无需注册即可查看分享的行程。
 
-| 功能 | 状态 |
-|------|------|
-| 会话创建与列表 | ✅ |
-| 历史消息查询 | ✅ |
-| 会话删除（含批量清理） | ✅ |
-| 会话归属鉴权 | ✅ |
-| SSE 流式对话响应 | ✅ |
-| 多 Agent 协作编排 | ✅ |
-| 工具调用（天气、车次、行程推荐等） | ✅ |
-| 模型韧性（重试、降级、限流） | ✅ |
-| 会话状态持久化 | ✅ |
-| 会话状态清理的失败补偿与日志 | 🔄 |
-| 长会话上下文压缩 | 🔄 |
+### 👤 账号与偏好
 
-### 🧳 行程模块
+- 邮箱验证码注册与登录，支持密码找回。
+- 第三方登录（微信 / Apple / Google，按环境启用）。
+- 个人资料与头像、密码修改、账号注销。
+- **长期记忆**：平台自动沉淀你的出行偏好，并可在「记忆」面板查看、修改、停用或删除每一条 —— 记忆对你完全透明可控。
 
-| 功能 | 状态 |
-|------|------|
-| 行程规划（生成 / 查询 / 编辑 / 删除） | ✅ |
-| AI 结构化提取 | ✅ |
+### 🌓 使用体验
 
-### 🗄️ 基础设施
+- 明暗双主题，跟随系统并可手动切换。
+- 全站响应式，桌面与移动端均可用。
+- 无障碍支持：键盘可完成全部操作，图标按钮均带无障碍名称。
 
-| 功能 | 状态 |
-|------|------|
-| 异步数据库与 ORM 框架 | ✅ |
-| 数据库迁移工具 | ✅ |
-| 统一响应格式与业务错误码 | ✅ |
-| 事务控制 | ✅ |
-| Redis（验证码 / 重置令牌 / Refresh Token 存储） | ✅ |
-| SQLite → PostgreSQL 迁移 | 🔄 |
+### 🛠️ 管理后台
 
----
+面向管理员的独立后台，包含：
 
-## 🔍 核心流程
+| 页面 | 你能看到什么 |
+|---|---|
+| **概览** | 今日 Token 消耗、新增与活跃用户、累计会话；各项相对昨日的涨跌（具体数目 + 百分比）；增长与消耗趋势图；模型用量分布与成本估算；系统健康状态（Redis / 数据库 / 模型通道），异常时提供一键重新检测与排查命令 |
+| **运行指标** | 对话量、工具调用次数与耗时分位、缓存命中率、结构化提取路径与通过率、错误率；可切换近 7/30 天趋势 |
+| **用户管理** | 用户列表与详情、角色调整、启用/停用、导出 CSV |
+| **会话洞察** | 用户活跃排行（按会话数 / 按当日消息数）、Token 用量排行；平均每会话消息数 |
+| **审计日志** | 管理端写操作的完整留痕（谁、何时、对谁、改了什么） |
 
-### AI 对话流式响应
+管理后台有两个角色：
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as 客户端
-    participant S as 会话服务
-    participant A as LangGraph Agent
-    participant T as 工具 / 大模型
+- **超级管理员** —— 可读写，能调整角色与状态。
+- **普通管理员** —— **只读**：可查看全部数据与报表，但不能做任何修改。
 
-    C->>S: 发送消息
-    S->>A: 流式调用 Agent
-    loop 流式事件
-        A->>T: 需要实时数据？
-        T-->>A: 工具结果
-        A-->>S: 内容 / 思考 / 工具结果
-        S-->>C: SSE 分帧推送
-    end
-    A-->>S: 会话状态持久化
-    S-->>C: 流结束标记
-```
-
-### 多 Agent 协作流程
-
-```mermaid
-flowchart LR
-    REQ["用户请求"] --> DEC{"需要实时数据？"}
-    DEC -->|是| TOOLS["工具调用<br/>天气 / 车次 / 推荐"]
-    DEC -->|否| GEN["直接生成回答"]
-    TOOLS --> OUT["组装行程方案"]
-    GEN --> OUT
-    OUT --> DONE["流式返回客户端"]
-```
-
----
-
-## 🗺️ 开发路线
-
-```mermaid
-gantt
-    title Voyage AI 开发路线图
-    dateFormat  YYYY-MM-DD
-
-    section 用户模块
-    认证与账号闭环        :done, p1, 2026-08-01, 7d
-
-    section 对话闭环
-    会话 + 多 Agent + 工具  :done, p2, 2026-08-08, 7d
-
-    section 行程规划
-    行程生成 / 查询 / 编辑  :done, p3, 2026-08-15, 21d
-
-    section AI 能力调优
-    提示词 / Skills 优化    :active, p4, 2026-09-19, 21d
-
-    section 生产化
-    Redis 令牌存储          :done, p5, 2026-09-05, 7d
-    数据库迁移              :p5b, 2026-10-10, 14d
-    限流 / 监控 / 安全加固  :p5c, 2026-10-10, 21d
-
-    section 前端与测试
-    前端对接 + 测试体系     :p6, 2026-10-24, 14d
-```
-
----
-
-## 🧩 模块说明
-
-| 模块 | 描述 | 状态 |
-|------|------|------|
-| 用户模块 | 注册、登录、令牌认证、资料、改密、注销 | ✅ 稳定 |
-| 会话模块 | 会话管理、流式对话、历史消息 | ✅ 稳定 |
-| AI 模块 | 多 Agent 编排、工具调用、模型降级 | ✅ 可用 |
-| 行程模块 | 生成、查询、编辑、删除、AI 结构化提取 | ✅ 稳定 |
-| 业务框架 | 统一响应、错误码、异常处理 | ✅ 稳定 |
-| 数据层 | 异步 ORM、事务控制、数据库迁移、Redis 令牌存储 | ✅ 稳定 |
-
----
-
-## 🛠️ 技术栈
-
-| 类别 | 技术 |
-|------|------|
-| Web 框架 | FastAPI · Uvicorn |
-| ORM / 数据库 | SQLAlchemy · SQLite（未来迁移至 PostgreSQL） |
-| 认证 | Argon2 密码哈希 · JWT 令牌 |
-| 缓存 / 令牌 | Redis（redis-py asyncio） |
-| 邮件服务 | Resend SMTP（aiosmtplib） |
-| AI / Agent | LangChain · LangGraph |
-| 模型接入 | DeepSeek / Qwen / GLM（多模型降级） |
-| 流式传输 | SSE 服务端推送 |
-| 工具链 | 天气 · 车次票价 · 行程推荐 · 日期 |
-| 前端（规划） | Vue 3 · Element Plus |
-| 工程 | uv · pytest（规划） |
-
----
-
-## 📁 项目结构
-
-```
-voyage/
-├── app/
-│   ├── core/          # 框架核心（响应、异常、AI 编排）
-│   ├── modules/       # 业务模块（用户 / 会话 / 行程）
-│   └── shared/        # 公共组件（数据库、Redis、工具）
-├── alembic/           # 数据库迁移
-├── data/              # 运行时数据
-├── tests/             # 测试
-└── pyproject.toml     # 项目配置
-```
+> **隐私边界（重要）**：管理后台只展示**聚合数据与账号信息**，**不展示任何对话内容与会话标题**；审计日志中的操作者只显示角色，不显示邮箱。用户对他人的对话内容与自己的记忆数据均保持不可见。
 
 ---
 
 ## 🚀 快速开始
 
-1. 安装依赖（Python ≥ 3.12 + uv）
-2. 配置环境变量（数据库、密钥与模型 API Key）
-3. 初始化数据库（`alembic upgrade head`）
-4. 启动服务：`python run.py`
-5. 访问接口文档（`/docs`）
+### 方式一：Docker 一键部署（推荐）
 
-> 详细步骤见项目文档；AI 对话功能需配置大模型 API Key。
-
-### 数据库
-
-主用 **PostgreSQL**，通过 `DATABASE_URL` 配置：
-
-```
-DATABASE_URL=postgresql+asyncpg://user:password@host:5432/dbname?ssl=require
-```
-
-**留空则回退到 SQLite**（`data/exports/app.db`），本地开发与单元测试不必先装 PG。
-
-两个存储都指向同一个库：
-
-| 存储 | 内容 | 驱动 |
-|---|---|---|
-| 业务表 | 用户、会话、行程、Token 用量、审计、记忆 | asyncpg（经 SQLAlchemy） |
-| 会话消息状态 | langgraph checkpointer（历史消息的实体） | psycopg |
-
-> ⚠️ **Windows 上必须用 `python run.py` 启动**，不要直接 `uvicorn app.main:app`。
-> psycopg 的异步模式不接受 Windows 默认的 `ProactorEventLoop`，而 uvicorn 在
-> Windows 上会硬编码返回它（连 `--loop asyncio` 都不理会）。
-> `run.py` 显式指定了 `SelectorEventLoop`；Linux/macOS 无此问题。
-
-### 创建管理员
-
-**首个注册的用户会自动成为管理员**，无需任何额外操作——部署完直接打开页面注册即可。
-
-该引导只在「库中一个用户都没有」时生效，是一次性的：一旦有人注册，
-这条通路永久关闭，之后注册的都是普通用户。
-
-> ⚠️ **部署提示**：请在把实例暴露到公网**之前**先完成自己的注册。
-> 否则理论上存在被人抢先注册为管理员的风险——这是「免脚本初始化」
-> 这一便利性的固有代价。（注册本身仍需邮箱验证码，不是任意匿名请求
-> 都能抢注，但不应依赖这一点。）
-
-若需要额外创建或提升管理员（例如首个账号已丢失权限），仍可用脚本显式执行：
+前置条件：已安装 Docker 与 Docker Compose。
 
 ```bash
-# 密码走环境变量，不进 shell 历史
-ADMIN_PASSWORD='你的强密码' python app/scripts/create_admin.py \
-  --email you@example.com --username 你的昵称 --password-env ADMIN_PASSWORD
-```
-
----
-
-## 🐳 Docker 部署
-
-已提供完整容器化配置，一条命令拉起 **PostgreSQL + Redis + 后端 + 前端**：
-
-```bash
-cp .env.example .env      # 填入真实密钥（模型 API Key、JWT、邮件等）
+git clone <仓库地址> voyage && cd voyage
+cp .env.example .env
+# 编辑 .env，至少填入下面「必填项」一节列出的密钥
 docker compose up -d --build
 ```
 
-> **数据库与缓存都在容器里，无需任何额外配置。**
-> 后端会自动连接 compose 内的 `postgres` 服务（`docker-compose.yml` 里
-> 已覆盖 `DATABASE_URL`），首次启动时自动执行 `alembic upgrade head` 建表。
->
-> 若要用**外部** PostgreSQL（如 Neon）：注释掉 `docker-compose.yml` 中
-> backend 的 `DATABASE_URL` 覆盖行，并在 `.env` 里配置 `DATABASE_URL`，
-> 然后 `docker compose stop postgres` 即可。
->
-> 生产环境建议在 `.env` 里覆盖 `POSTGRES_PASSWORD`（默认值仅适用于内网）。
+启动后访问 `http://<服务器地址>/`（默认 80 端口，可用 `WEB_PORT=8080` 改为其他端口）。
 
-启动后访问 `http://<服务器地址>/`（默认 80 端口，可用 `WEB_PORT=8080` 覆盖）。
+一条命令会拉起四个服务，**数据库与缓存都在容器内，无需任何额外准备**：
 
-> ⚠️ **务必设置 `SHARE_BASE_URL`** 为实际对外地址（如 `https://your-domain.com`）。
-> 它决定分享链接的前缀，不设置会生成 `http://localhost/share/...`，别人打不开。
-> 也可以在启动时传入：`SHARE_BASE_URL=https://your-domain.com docker compose up -d`
+| 服务 | 作用 |
+|---|---|
+| `web` | 前端页面，并把接口请求反向代理到后端 |
+| `backend` | 应用服务，首次启动自动建表 |
+| `postgres` | 业务数据与会话记录，数据卷持久化 |
+| `redis` | 验证码、登录会话、限流、用量统计与工具缓存 |
 
-### 服务构成
+只有 `web` 对外暴露端口 —— 后端、数据库与 Redis 均仅在内网可达。浏览器只看到一个来源，因此**无需处理跨域**。
 
-| 服务 | 镜像 | 说明 |
-|---|---|---|
-| `postgres` | `postgres:16-alpine` | 业务数据与会话状态，`pg-data` 卷持久化 |
-| `redis` | `redis:7-alpine` | 限流、验证码、Refresh Token、Token 用量统计、工具缓存 |
-| `backend` | 本地构建 | FastAPI，**启动时自动执行 `alembic upgrade head`** |
-| `web` | 本地构建 | nginx 托管前端，并把 `/api` 反代到 backend |
+### 方式二：本地开发运行
 
-四个服务默认全部启动，无需 profile。
-
-只有 `web` 对外暴露端口；后端、PostgreSQL 与 Redis 仅在内网可达
-（PG 与 Redis 不映射宿主机端口），浏览器只看到一个源，因此**无需配置 CORS**。
-
-### ⚠️ 部署前必须改的两项
-
-1. **`SHARE_BASE_URL`** —— 分享链接的对外基址。默认是 `http://localhost`，
-   不改的话复制出来的分享链接别人打不开：
-   ```bash
-   SHARE_BASE_URL=https://your-domain.com docker compose up -d
-   ```
-
-2. **数据持久化** —— SQLite（`app.db` + `checkpoints.sqlite`）与日志通过
-   `./data:/app/data` 挂载到宿主机。**这个目录就是全部业务数据**，
-   升级重建容器不会丢，但请自行纳入备份。
-
-### 常用操作
+前置条件：Python 3.12+、[uv](https://docs.astral.sh/uv/)、Node.js 20+。
 
 ```bash
-docker compose logs -f backend      # 跟踪后端日志
-docker compose restart backend      # 重启后端
-docker compose down                 # 停止（保留数据卷）
-docker compose up -d --build        # 更新代码后重新部署（会自动跑迁移）
+# 后端
+cp .env.example .env      # 填写密钥；数据库可留空，会自动使用本地 SQLite
+uv sync
+uv run python run.py      # 访问 http://127.0.0.1:8000/docs 查看接口文档
+
+# 前端（另开终端）
+cd web
+npm install
+npm run dev               # 访问 http://127.0.0.1:5173
 ```
 
-在容器内执行管理脚本（首个用户已是管理员，此脚本仅在需要额外提升时使用）：
+> **数据库可留空**：未配置时会自动回退到本地 SQLite 文件，因此跑起来不需要先装 PostgreSQL。生产环境请配置 PostgreSQL。
+
+> ⚠️ **Windows 用户请用 `uv run python run.py` 启动后端**，不要直接使用 `uvicorn` 命令。原因见下方「常见问题」。
+
+---
+
+## ⚙️ 配置说明
+
+所有配置通过项目根目录的 `.env` 文件提供（该文件**不会**进入版本库，请勿提交）。
+
+### 必填项
+
+| 变量 | 说明 |
+|---|---|
+| `OPENCODE_API_KEY` | 大模型通道的 API Key，**AI 功能依赖它**，缺失或无效会导致对话不可用 |
+| `JWT_SECRET_KEY` | 登录令牌签名密钥，请使用足够长的随机串 |
+| `HASH_SALT` | 内部标识哈希盐值，一旦设定**不要更改**（改了会导致既有链接失效） |
+| `RESEND_API_KEY` | 发送邮箱验证码所用服务的密钥 |
+
+### 部署到服务器时请注意
+
+| 变量 | 说明 |
+|---|---|
+| `SHARE_BASE_URL` | **必改**。分享链接的对外基址，例如 `https://your-domain.com`。不设置会生成 `http://localhost/share/...`，别人打不开 |
+| `POSTGRES_PASSWORD` | **建议改**。容器内数据库的密码，默认值仅适用于内网 |
+| `ALLOWED_ORIGINS` | 建议设置。跨域白名单（JSON 数组）。**留空时后端会回显请求方来源并允许携带登录凭据**，相当于允许任意站点访问接口；同源部署下不生效，但建议配置作为纵深防御 |
+| `APP_TIMEZONE` | 「今日用量」等统计的跨日口径，默认 `Asia/Shanghai` |
+| `WEB_PORT` | 对外暴露的端口，默认 `80` |
+
+### 启用 HTTPS
+
+仓库内提供了 Caddy 叠加配置，可自动申请并续期证书：
+
+```bash
+# 在 .env 中补充 DOMAIN 与 ACME_EMAIL
+docker compose -f docker-compose.yml -f deploy/docker-compose.tls.yml up -d
+```
+
+详细步骤与故障排查见 **`deploy/RUNBOOK.md`**。
+
+---
+
+## 📖 使用说明
+
+### 首次部署后：立刻注册管理员
+
+**第一个注册的账号会自动成为超级管理员**，无需任何脚本或额外操作。
+
+> ⚠️ **请在把实例暴露到公网之前完成这次注册。** 否则理论上存在被他人抢先注册的风险。
+> 注册本身仍需邮箱验证码，并非任意匿名请求都能抢注，但不应依赖这一点。
+
+该引导只在「一个用户都没有」时生效，是一次性的 —— 一旦有人注册，之后注册的都是普通用户。
+
+若首个管理员权限丢失，可用脚本显式创建：
+
+```bash
+# 密码通过环境变量传入，避免留在命令历史里
+ADMIN_PASSWORD='你的强密码' uv run python app/scripts/create_admin.py \
+  --email you@example.com --username 你的昵称 --password-env ADMIN_PASSWORD
+```
+
+Docker 部署时在容器内执行：
 
 ```bash
 docker compose exec backend python app/scripts/create_admin.py \
   --email you@example.com --username 你的昵称
 ```
 
-### 关于 Redis 版本
+### 把用户提升为管理员
 
-必须使用 **Redis ≥ 7**。限流的计数原语依赖 `EXPIRE` 的 `NX` 选项
-（7.0 才引入）；当前实现已改用 Lua 脚本以兼容 5.x/6.x，
-但 7.x 才有完整的过期语义。
-
-### 不使用 Docker 时
-
-`Dockerfile` 是标准的单镜像构建，也可单独使用：
-
-```bash
-docker build -t voyage-backend .        # 后端（上下文为仓库根）
-docker build -f web/Dockerfile -t voyage-web ./web   # 前端（上下文为 web/）
-```
-
-构建上下文与 `.dockerignore` 已配置妥当：`.env`（密钥）与 `data/`（本机数据）
-都会被排除，不会进镜像层。
+用超级管理员登录后台，在「用户管理」中调整角色即可。普通管理员只能查看、不能操作。
 
 ---
 
-## 📋 开发计划
+## 🔧 常用运维操作
+
+```bash
+docker compose ps                      # 查看各服务状态
+docker compose logs -f backend         # 跟踪后端日志
+docker compose restart backend         # 重启后端
+docker compose up -d --build           # 更新代码后重新部署（会自动执行数据库迁移）
+docker compose down                    # 停止服务（数据卷保留）
+docker compose down -v                 # 停止并删除数据卷（⚠️ 会清空全部数据）
+```
+
+**数据备份**：全部业务数据都在 Docker 数据卷中（`pg-data` 与 `redis-data`），请自行纳入定期备份。日志与导出文件位于宿主机的 `./data` 目录。
+
+---
+
+## ❓ 常见问题
+
+**Q：部署后 AI 对话不可用，怎么排查？**
+
+最常见的原因是模型通道的 API Key 未填写或无效。请检查 `.env` 中的 `OPENCODE_API_KEY` 是否为真实值（样例文件里是占位符），然后在管理后台「概览 → 系统健康」查看模型通道状态，或查看后端日志：
+
+```bash
+docker compose logs --tail=200 backend | grep -iE "opencode|401|403|timeout|connect"
+```
+
+若日志显示**连接超时**，说明服务器无法访问该服务域名，需要检查服务器的出网策略。
+
+> 注意：系统健康检查只判断「配置是否填写」，**不代表 Key 一定有效**，因此填写了仍可能失败，以实际对话或日志为准。
+
+**Q：Windows 上启动后端报数据库驱动相关的错误？**
+
+Windows 上请务必使用 `uv run python run.py`，不要直接用 `uvicorn`。这是 Windows 事件循环与异步数据库驱动的已知兼容问题，`run.py` 已经处理好了；Linux / macOS 无此问题。
+
+**Q：想用外部数据库（如云托管 PostgreSQL）而不是容器内的？**
+
+注释掉 `docker-compose.yml` 中后端服务的 `DATABASE_URL` 覆盖行，在 `.env` 里配置你的 `DATABASE_URL`，然后 `docker compose stop postgres`。
+
+**Q：分享链接别人打不开？**
+
+检查 `SHARE_BASE_URL` 是否为实际的对外地址。
+
+**Q：改动了 `HASH_SALT` 会怎样？**
+
+既有的分享链接与外部标识会全部失效，请勿在有数据后更改。
+
+---
+
+## 🗺️ 后续计划
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
-| Phase 1 | 用户模块 + 令牌认证 | ✅ 已完成 |
-| Phase 2 | 会话管理 + AI 流式对话 | ✅ 已完成 |
-| Phase 3 | 行程规划（生成 / 编辑 / 删除 / 结构化提取） | ✅ 已完成 |
-| Phase 4 | AI 能力调优（提示词 / Skills） | 🔄 进行中 |
-| Phase 5 | 生产化：限流 / 监控 / 安全加固 / 数据库迁移 | 🔄 进行中 |
-| Phase 6 | 前端对接 + 测试体系 | ⬜ 待开发 |
+| Phase 1 | 用户体系与登录认证 | ✅ 已完成 |
+| Phase 2 | 会话管理与流式 AI 对话 | ✅ 已完成 |
+| Phase 3 | 行程生成、编辑与结构化提取 | ✅ 已完成 |
+| Phase 4 | 分享协作、长期记忆 | ✅ 已完成 |
+| Phase 5 | 管理后台与运行监控 | ✅ 已完成 |
+| Phase 6 | AI 能力持续调优、生产化加固 | 🔄 进行中 |
 
 ---
 
