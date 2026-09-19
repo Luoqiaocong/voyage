@@ -229,6 +229,18 @@ img, svg { display: block; max-width: 100%; }
 .container { width: min(1120px, calc(100% - 48px)); margin-inline: auto; }
 @media (max-width: 640px) { .container { width: min(1120px, calc(100% - 32px)); } }
 
+/*
+ * 宽容器：给**数据密集型**页面用（目前是管理端）。
+ *
+ * 为什么需要单独一个变体而不是把 .container 调宽：
+ * 1120px 对公开页面是对的——正文行宽过长会显著降低可读性。
+ * 但管理端是看表格与图表的，更宽的视口直接换来更多可见信息，
+ * 没有可读性顾虑。1120px 减去侧栏 200px 与间距后内容区只剩 888px，
+ * 折线图被压得很扁。
+ */
+.container--wide { width: min(1440px, calc(100% - 48px)); }
+@media (max-width: 640px) { .container--wide { width: min(1440px, calc(100% - 32px)); } }
+
 /* ---- 跳转链接 ---- */
 .skip-link {
   position: fixed; top: -100px; left: 16px; z-index: 200;

@@ -280,3 +280,116 @@ export function toSpans(s: string): Span[] {
   if (last < s.length) out.push({ bold: false, text: s.slice(last) })
   return out.length ? out : [{ bold: false, text: s }]
 }
+
+/* ==================== 按时段归组 ==================== */
+
+/** 时段顺序：上午 → 下午 → 晚上 */
+export const SLOT_ORDER = ['morning', 'afternoon', 'evening'] as const
+
+export const SLOT_TEXT: Record<string, string> = {
+  morning: '上午',
+  afternoon: '下午',
+  evening: '晚上',
+}
+
+/** 中文时段词 → 规范时段键 */
+const CN_SLOT_TO_KEY: Record<string, string> = {
+  上午: 'morning', 早上: 'morning', 清晨: 'morning',
+  下午: 'afternoon', 中午: 'afternoon',
+  晚上: 'evening', 傍晚: 'evening', 夜间: 'evening',
+}
+
+/** 把任意写法归一成 morning / afternoon / evening；认不出返回 undefined */
+export function normalizeSlot(raw?: string | null): string | undefined {
+  if (!raw) return undefined
+  const s = String(raw).trim().toLowerCase()
+  if (s in SLOT_TEXT) return s
+  for (const [cn, key] of Object.entries(CN_SLOT_TO_KEY)) {
+    if (s.includes(cn)) return key
+  }
+  return undefined
+}
+
+/**
+ * 从一段文字里识别时段。
+ * 用于对话中解析出的行程片段——那里的文本形如「上午：宽窄巷子，免费」，
+ * 没有结构化字段，只能从字面识别。
+ */
+export function detectSlot(text: string): string | undefined {
+  const m = text.match(SLOT_RE)
+  return m ? normalizeSlot(m[1]) : undefined
+}
+
+/**
+ * 去掉条目开头的时段词与紧随的分隔符。
+ *
+ * 归组后时段已作为分组标题出现，条目里再带一次「上午：」就是重复：
+ *     上午
+ *       上午：宽窄巷子，免费     ← 又一次「上午」
+ * 故渲染前剥掉。只处理**开头**的时段词，句中出现的保留
+ * （如「下午茶」这类词不能被误删）。
+ */
+export function stripSlotPrefix(text: string): string {
+  return text
+    .replace(/^\s*(?:上午|下午|晚上|傍晚|清晨|中午|早上|夜间)\s*[:：、,，\-—]*\s*/, '')
+    .trim()
+}
+
+export interface SlotGroup<T> {
+  /** morning / afternoon / evening；认不出时段时为 undefined */
+  slot?: string
+  /** 显示用标题，如「上午」；无时段时为空串 */
+  label: string
+  items: T[]
+}
+
+/**
+ * 把条目按时段归组，并**保持原有顺序**。
+ *
+ * 为什么需要：原先每条活动前面都挂一个「上午/下午/晚上」标签，而一天内
+ * 常有多条属于同一时段，同一个词于是重复出现好几次——真正的内容
+ * （去哪、做什么）反而被这些重复标签淹没。归组后时段只作为分组标题
+ * 出现一次，条目直接铺开。
+ *
+ * 归组规则：
+ *  - 只与**紧邻的上一组**合并，从而不改变原有顺序语义
+ *  - 认不出时段的条目不硬塞进相邻组（塞错比不分组更糟）
+ *  - 相同时段不连续出现时（上午→下午→上午）各自成组，不重排
+ *
+ * 做成泛型的原因：行程详情页用结构化的 ItineraryActivity[]，
+ * 对话页用从文本解析出的字符串，两者需要同一套归组语义。
+ */
+export function groupBySlot<T>(
+  items: T[],
+  getSlot: (item: T) => string | undefined,
+): SlotGroup<T>[] {
+  const groups: SlotGroup<T>[] = []
+  for (const item of items) {
+    const key = normalizeSlot(getSlot(item))
+    const last = groups[groups.length - 1]
+    if (last && last.slot === key) {
+      last.items.push(item)
+      continue
+    }
+    groups.push({ slot: key, label: key ? SLOT_TEXT[key] : '', items: [item] })
+  }
+  return groups
+}
+
+/**
+ * 把时段组按「上午 → 下午 → 晚上」重排。
+ *
+ * 与 groupBySlot 的「保持原序」是两种策略，按场景选用：
+ *  - 对话里解析出的片段：顺序往往就是模型给出的合理安排，保持原序
+ *  - 行程详情页：数据是结构化的，按时间排序更符合阅读预期
+ * 无时段的组排在最后，不打断有明确时段的安排。
+ */
+export function sortGroupsBySlot<T>(groups: SlotGroup<T>[]): SlotGroup<T>[] {
+  const rank = (g: SlotGroup<T>) =>
+    g.slot ? SLOT_ORDER.indexOf(g.slot as (typeof SLOT_ORDER)[number]) : 99
+  return [...groups].sort((a, b) => {
+    const ia = rank(a)
+    const ib = rank(b)
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib)
+  })
+}

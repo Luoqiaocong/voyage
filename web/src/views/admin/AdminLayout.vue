@@ -8,6 +8,7 @@
  */
 import { computed } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
+import TravelIcon from '@/components/TravelIcon.vue'
 import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
@@ -28,7 +29,7 @@ const currentTitle = computed(
 
 <template>
   <div class="admin">
-    <div class="container admin__inner">
+    <div class="container container--wide admin__inner">
       <aside class="admin__side">
         <div class="admin__brand">
           <span class="admin__badge">ADMIN</span>
@@ -41,7 +42,19 @@ const currentTitle = computed(
           </RouterLink>
         </nav>
 
-        <RouterLink to="/chat" class="admin__back">← 返回助手</RouterLink>
+        <!--
+          「返回助手」做成有边框的按钮，并加一道分隔线与上方导航区分开。
+          原先是一行 0.82rem 的灰色纯文字：既不像可点的控件，也与站内其它
+          按钮不一致（用户反馈「怎么没框」）。
+          它与导航项性质不同——导航是「在管理端内切换」，这是「离开管理端」，
+          故用分隔线区分，而不是混进上方那份导航列表里。
+        -->
+        <div class="admin__back-wrap">
+          <RouterLink to="/chat" class="admin__back">
+            <TravelIcon name="arrow-left" :size="15" />
+            返回助手
+          </RouterLink>
+        </div>
       </aside>
 
       <section class="admin__main">
@@ -104,13 +117,39 @@ const currentTitle = computed(
   font-weight: 650;
 }
 
-.admin__back {
-  display: inline-block;
+/* ---- 返回助手 ----
+   做成有边框的次要按钮：纯文字链接看起来不像能点的控件。
+   加一道上分隔线，与上方导航列表区分开——两者性质不同：
+   导航是在管理端内切换，这里是离开管理端。 */
+.admin__back-wrap {
   margin-top: 20px;
-  font-size: 0.82rem;
-  color: var(--text3);
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline);
 }
-.admin__back:hover { color: var(--prim); }
+
+.admin__back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-s);
+  background: var(--panel);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text2);
+  transition: background-color 0.18s, border-color 0.18s, color 0.18s, transform 0.18s;
+}
+.admin__back:hover {
+  background: var(--panel2);
+  border-color: var(--blue-200);
+  color: var(--prim);
+  transform: translateY(-1px);
+}
+.admin__back:active {
+  transform: translateY(0);
+}
 
 .admin__main { min-width: 0; }
 

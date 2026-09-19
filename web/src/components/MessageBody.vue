@@ -6,7 +6,14 @@
  * 拆开的原因：解析是这里的主要复杂度，留在 SFC 里就无法独立验证。
  */
 import { computed } from 'vue'
-import { parseMessage, toSpans, SLOT_RE, type Block } from '@/utils/messageParse'
+import {
+  parseMessage,
+  toSpans,
+  groupBySlot,
+  detectSlot,
+  stripSlotPrefix,
+  type Block
+} from '@/utils/messageParse'
 
 interface Props {
   /** markdown 原文 */
@@ -67,9 +74,20 @@ const blocks = computed<Block[]>(() => parseMessage(props.text))
             <span class="mb__day-no">{{ d.no }}</span>
             <span class="mb__day-body">
               <b v-if="d.theme">{{ d.theme }}</b>
-              <span v-for="(s, si) in d.slots" :key="si" class="mb__slot">
-                <em>{{ s.match(SLOT_RE)?.[0] ?? '安排' }}</em>
-                {{ s.replace(SLOT_RE, '').replace(/^[：:、\s]+/, '') }}
+              <!--
+                按时段归组，而不是每条前面都挂「上午/下午/晚上」。
+                同一天内常有连续几条属于同一时段，重复标签会淹没真正的内容。
+                组内条目保持原有顺序（那通常就是模型给的合理安排）。
+              -->
+              <span
+                v-for="(g, gi) in groupBySlot(d.slots, detectSlot)"
+                :key="gi"
+                class="mb__slot-group"
+              >
+                <em v-if="g.label" class="mb__slot-label">{{ g.label }}</em>
+                <span v-for="(s, si) in g.items" :key="si" class="mb__slot-item">
+                  {{ stripSlotPrefix(s) }}
+                </span>
               </span>
             </span>
           </li>
@@ -306,23 +324,35 @@ const blocks = computed<Block[]>(() => parseMessage(props.text))
 .mb__day-body {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 6px;
   min-width: 0;
 }
 .mb__day-body b {
   font-size: 0.87rem;
   font-weight: 650;
 }
-.mb__slot {
-  font-size: 0.85rem;
+
+/* ---- 时段分组 ----
+   组标题（上午/下午/晚上）以左侧一道细线+小字呈现，
+   与「条目正文」形成层次；条目本身不再带时段词。 */
+.mb__slot-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 2px solid var(--blue-100, var(--hairline));
+}
+.mb__slot-label {
+  font-style: normal;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--blue-700);
+  letter-spacing: 0.02em;
+}
+.mb__slot-item {
+  font-size: 0.86rem;
   color: var(--text2);
   line-height: 1.65;
-}
-.mb__slot em {
-  font-style: normal;
-  font-weight: 600;
-  color: var(--blue-700);
-  margin-right: 5px;
 }
 
 /* ---------- 移动端 ---------- */

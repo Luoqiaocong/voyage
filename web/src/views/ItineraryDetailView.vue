@@ -14,6 +14,7 @@ import {
   type ItineraryDetail
 } from '@/api/itinerary'
 import { useUiStore } from '@/stores/ui'
+import { groupBySlot, sortGroupsBySlot } from '@/utils/messageParse'
 
 const route = useRoute()
 const router = useRouter()
@@ -49,11 +50,9 @@ const kindLabel: Record<string, string> = {
   rest: '休整'
 }
 
-const timeLabel: Record<string, string> = {
-  morning: '上午',
-  afternoon: '下午',
-  evening: '晚上'
-}
+// 原先此处有一份 timeLabel（morning→上午…）用于每条活动前的时段标签。
+// 改为按时段归组后，标签由 groupBySlot 统一从 messageParse 的 SLOT_TEXT 生成，
+// 本文件不再需要自己维护一份映射，故删除以免两处不一致。
 
 onMounted(async () => {
   try {
@@ -312,29 +311,46 @@ function cancelEdit() {
               </div>
             </header>
 
-            <ul class="day__acts">
-              <li v-for="(act, i) in day.activities" :key="i" class="act">
-                <span class="act__time badge-kind badge-country">{{ timeLabel[act.time_slot] }}</span>
-                <span class="badge-kind badge-tag">{{ kindLabel[act.kind] }}</span>
-                <div class="act__body">
-                  <h3>{{ act.name }}</h3>
-                  <p>{{ act.description }}</p>
-                  <div class="act__meta">
-                    <span v-if="act.duration_hours">约 {{ act.duration_hours }} 小时</span>
-                    <!--
-                      cost 是整数、单位元，0 表示免费。
-                      原先写 v-if="act.cost"，而 0 是假值，导致免费活动
-                      整个费用位不渲染 —— 看起来像数据缺失，实际是免费的。
-                      故改为始终渲染，0 显示「免费」。
-                    -->
-                    <span :class="{ 'act__free': !act.cost }">
-                      {{ act.cost ? `¥${act.cost}` : '免费' }}
-                    </span>
-                    <span v-if="act.note" class="act__note">{{ act.note }}</span>
-                  </div>
-                </div>
-              </li>
-            </ul>
+            <!--
+              按时段归组渲染，而不是每条活动前面都挂「上午/下午/晚上」。
+              一天内常有多条属于同一时段，逐条挂标签会让同一个词重复出现，
+              真正的内容反而被淹没。归组后时段只作分组标题出现一次。
+              这里用 sortGroupsBySlot 按时间排序（数据是结构化的，
+              按「上午→下午→晚上」阅读更自然）。
+            -->
+            <div class="day__slots">
+              <section
+                v-for="(grp, gi) in sortGroupsBySlot(
+                  groupBySlot(day.activities, (a: ItineraryActivity) => a.time_slot)
+                )"
+                :key="gi"
+                class="slotgrp"
+              >
+                <h4 v-if="grp.label" class="slotgrp__label">{{ grp.label }}</h4>
+                <ul class="day__acts">
+                  <li v-for="(act, i) in grp.items" :key="i" class="act">
+                    <span class="badge-kind badge-tag">{{ kindLabel[act.kind] }}</span>
+                    <div class="act__body">
+                      <h3>{{ act.name }}</h3>
+                      <p>{{ act.description }}</p>
+                      <div class="act__meta">
+                        <span v-if="act.duration_hours">约 {{ act.duration_hours }} 小时</span>
+                        <!--
+                          cost 是整数、单位元，0 表示免费。
+                          原先写 v-if="act.cost"，而 0 是假值，导致免费活动
+                          整个费用位不渲染 —— 看起来像数据缺失，实际是免费的。
+                          故改为始终渲染，0 显示「免费」。
+                        -->
+                        <span :class="{ 'act__free': !act.cost }">
+                          {{ act.cost ? `¥${act.cost}` : '免费' }}
+                        </span>
+                        <span v-if="act.note" class="act__note">{{ act.note }}</span>
+                      </div>
+                    </div>
+                  </li>
+                </ul>
+              </section>
+            </div>
 
             <p class="day__summary">{{ day.summary }}</p>
           </section>
@@ -426,11 +442,37 @@ function cancelEdit() {
 .day__theme { font-size: 1.25rem; }
 .day__date { color: var(--ink-soft); font-size: 0.85rem; }
 
+/* ---- 时段分组 ----
+   一天内的活动按时段归组，时段只作分组标题出现一次。
+   组与组之间有间距，组内条目紧凑一些——这样「上午做了三件事」
+   在视觉上是一个整体，而不是三条并列的独立卡片。 */
+.day__slots { display: flex; flex-direction: column; gap: 18px; }
+
+.slotgrp { display: flex; flex-direction: column; gap: 8px; }
+
+.slotgrp__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--blue-700);
+  letter-spacing: 0.02em;
+}
+/* 标题右侧一道渐隐横线，把「上午」与后面的条目在视觉上连成一组 */
+.slotgrp__label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--blue-200), transparent);
+}
+
 .day__acts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 
+/* 归组后时段标签已移出条目，故列数由 3 列改为 2 列（类型徽标 + 正文） */
 .act {
   display: grid;
-  grid-template-columns: auto auto 1fr;
+  grid-template-columns: auto 1fr;
   gap: 10px;
   align-items: flex-start;
   padding: 12px 14px;
@@ -438,8 +480,6 @@ function cancelEdit() {
   border-radius: 12px;
   background: var(--surface);
 }
-
-.act__time { white-space: nowrap; }
 
 .act__body h3 { font-size: 1rem; }
 .act__body p { color: var(--ink-soft); font-size: 0.88rem; margin-top: 2px; }
