@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { canAccessAdmin } from '@/utils/role'
+import { useLogout } from '@/composables/useLogout'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
 
@@ -27,6 +28,41 @@ const links = [
  */
 const showAdmin = computed(() => canAccessAdmin(user.userInfo?.role))
 
+/* ---------------- 账号菜单 ---------------- */
+const menuOpen = ref(false)
+const menuWrap = ref<HTMLElement | null>(null)
+
+/** 头像完整地址：后端只存文件名，需拼上 CDN 前缀 */
+const AVATAR_BASE = 'https://yunimg.heiseven.top/voyage-avatar/'
+const avatarUrl = computed(() => {
+  const a = user.userInfo?.avatar
+  return a ? `${AVATAR_BASE}${a}` : ''
+})
+
+/** 无头像时用昵称/邮箱首字母兜底，避免菜单入口是个空白圆 */
+const initial = computed(() => {
+  const name = user.userInfo?.username || user.userInfo?.email || '?'
+  return name.slice(0, 1).toUpperCase()
+})
+
+function closeMenu() {
+  menuOpen.value = false
+}
+
+/** 点击菜单外部收起。只在展开时挂监听，避免每次页面点击都走判断 */
+function onDocClick(e: MouseEvent) {
+  if (!menuOpen.value) return
+  const el = menuWrap.value
+  if (el && !el.contains(e.target as Node)) menuOpen.value = false
+}
+
+/** Esc 收起：键盘用户需要退路，不能只靠点空白 */
+function onDocKey(e: KeyboardEvent) {
+  if (e.key === 'Escape' && menuOpen.value) menuOpen.value = false
+}
+
+const { doLogout } = useLogout()
+
 function close() {
   open.value = false
 }
@@ -39,6 +75,10 @@ onMounted(() => {
   window.addEventListener('scroll', onScroll, { passive: true })
   onScroll()
 
+  // 账号菜单的「点击外部收起 / Esc 收起」
+  document.addEventListener('pointerdown', onDocClick)
+  document.addEventListener('keydown', onDocKey)
+
   // userInfo 只存在内存中，整页刷新后会丢失；而「管理台」入口的显隐依赖它。
   // 这里主动补一次（store 内部有缓存，已加载过就不会重复请求）。
   if (user.isLoggedIn && !user.userInfo) {
@@ -48,6 +88,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('scroll', onScroll)
+  document.removeEventListener('pointerdown', onDocClick)
+  document.removeEventListener('keydown', onDocKey)
 })
 </script>
 
@@ -98,6 +140,77 @@ onUnmounted(() => {
           <RouterLink to="/chat" class="btn btn-primary btn--sm" @click="close">
             进入助手
           </RouterLink>
+
+          <!--
+            头像菜单：把「个人资料 / 管理台 / 退出登录」收进来。
+            原先桌面端导航栏没有「我的」入口，退出登录只在个人页最底部 ——
+            登出是账号级操作，藏在二级页面底部既不合常规也不便使用。
+            这里一次点击进菜单、两步完成登出，是主流做法。
+          -->
+          <div ref="menuWrap" class="usermenu">
+            <button
+              type="button"
+              class="usermenu__btn"
+              :class="{ 'is-open': menuOpen }"
+              :aria-expanded="menuOpen"
+              aria-haspopup="menu"
+              aria-label="账号菜单"
+              @click="menuOpen = !menuOpen"
+            >
+              <img
+                v-if="avatarUrl"
+                class="usermenu__avatar"
+                :src="avatarUrl"
+                alt=""
+              />
+              <span v-else class="usermenu__avatar usermenu__avatar--initial">
+                {{ initial }}
+              </span>
+              <span class="usermenu__caret" aria-hidden="true"></span>
+            </button>
+
+            <Transition name="um">
+              <div v-if="menuOpen" class="usermenu__panel" role="menu">
+                <div class="usermenu__head">
+                  <p class="usermenu__name">{{ user.userInfo?.username || '未设置昵称' }}</p>
+                  <p class="usermenu__email" :title="user.userInfo?.email">
+                    {{ user.userInfo?.email }}
+                  </p>
+                </div>
+
+                <RouterLink
+                  to="/profile"
+                  class="usermenu__item"
+                  role="menuitem"
+                  @click="closeMenu"
+                >
+                  <TravelIcon name="user" :size="15" />
+                  个人资料
+                </RouterLink>
+
+                <RouterLink
+                  v-if="showAdmin"
+                  to="/admin"
+                  class="usermenu__item"
+                  role="menuitem"
+                  @click="closeMenu"
+                >
+                  <TravelIcon name="compass" :size="15" />
+                  管理台
+                </RouterLink>
+
+                <button
+                  type="button"
+                  class="usermenu__item usermenu__item--danger"
+                  role="menuitem"
+                  @click="closeMenu(); doLogout()"
+                >
+                  <TravelIcon name="arrow-right" :size="15" />
+                  退出登录
+                </button>
+              </div>
+            </Transition>
+          </div>
         </template>
         <template v-else>
           <!--
@@ -355,6 +468,130 @@ onUnmounted(() => {
 }
 
 .nav__actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+/* ---- 账号菜单 ---- */
+.usermenu { position: relative; }
+
+.usermenu__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px 3px 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  transition: border-color 0.18s, background-color 0.18s;
+}
+.usermenu__btn:hover,
+.usermenu__btn.is-open {
+  border-color: var(--blue-200);
+  background: var(--blue-50);
+}
+.usermenu__btn:focus-visible { outline: 2px solid var(--prim); outline-offset: 2px; }
+
+.usermenu__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+  background: var(--surface-soft);
+}
+/* 无头像时用首字母兜底，避免入口是个空白圆 */
+.usermenu__avatar--initial {
+  display: grid;
+  place-items: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--prim);
+  background: var(--primary-soft);
+}
+
+.usermenu__caret {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--text3);
+  transition: transform 0.2s ease;
+}
+.usermenu__btn.is-open .usermenu__caret { transform: rotate(180deg); }
+
+.usermenu__panel {
+  position: absolute;
+  z-index: 70;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 216px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-m);
+  /* 菜单需要明显浮于页面之上，故用较强阴影（按钮上刻意不用） */
+  box-shadow: 0 12px 32px rgba(16, 24, 40, 0.14), 0 2px 6px rgba(16, 24, 40, 0.06);
+  background: var(--panel);
+}
+
+.usermenu__head {
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: 4px;
+}
+.usermenu__name { font-size: 0.84rem; font-weight: 650; color: var(--text); }
+.usermenu__email {
+  margin-top: 2px;
+  font-size: 0.74rem;
+  color: var(--text3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usermenu__item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: var(--r-s);
+  background: transparent;
+  font-size: 0.84rem;
+  font-weight: 550;
+  color: var(--text2);
+  text-align: left;
+  transition: background-color 0.16s, color 0.16s;
+}
+.usermenu__item:hover { background: var(--surface-soft); color: var(--text); }
+.usermenu__item:focus-visible { outline: 2px solid var(--prim); outline-offset: -2px; }
+
+/*
+ * 退出登录：默认与其它项同色，悬停才转红。
+ * 常亮红色会让它在菜单里最显眼，而它恰恰是最不该被误点的操作。
+ * 图标转 180° 表示「离开」，比再加一个图标省事。
+ */
+.usermenu__item--danger :deep(svg) { transform: rotate(180deg); }
+.usermenu__item--danger:hover {
+  background: rgba(224, 82, 82, 0.08);
+  color: var(--danger);
+}
+
+.usermenu__panel .router-link-active {
+  background: var(--primary-soft);
+  color: var(--prim);
+  font-weight: 650;
+}
+
+/* 菜单出入：轻微下移淡入（缩放会让菜单像「弹」出来） */
+.um-enter-active,
+.um-leave-active { transition: opacity 0.16s ease, transform 0.16s ease; }
+.um-enter-from,
+.um-leave-to { opacity: 0; transform: translateY(-4px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .usermenu__caret { transition: none; }
+  .um-enter-active,
+  .um-leave-active { transition: none; }
+}
 
 .nav__toggle {
   display: none;

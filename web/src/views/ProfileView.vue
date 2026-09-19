@@ -19,11 +19,12 @@ import MemoryPanel from '@/components/MemoryPanel.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
 import MapTexture from '@/components/MapTexture.vue'
 import { AVATAR_BASE_URL } from '@/constants'
-import { changePassword, deleteAccount, getAvatars, logout, updateProfile } from '@/api/user'
+import { changePassword, deleteAccount, getAvatars, updateProfile } from '@/api/user'
 import { listItineraries } from '@/api/itinerary'
 import { listConversations } from '@/api/conversation'
 import { listMemories } from '@/api/memory'
 import { useUiStore } from '@/stores/ui'
+import { useLogout } from '@/composables/useLogout'
 import { canAccessAdmin, roleLabel } from '@/utils/role'
 import { useUserStore } from '@/stores/user'
 
@@ -214,17 +215,17 @@ async function savePassword() {
   }
 }
 
+/**
+ * 退出登录改用共享 composable。
+ *
+ * 原先这段逻辑只存在于本文件，于是「退出登录」只能在个人页最底部找到 ——
+ * 登出是账号级操作，藏在二级页面底部不合常规。现在导航栏的头像菜单
+ * 与这里共用同一份实现（见 composables/useLogout.ts），行为必然一致。
+ */
+const { doLogout } = useLogout()
+
 async function handleLogout() {
-  const sure = await ui.confirm('确定退出登录吗？下次需要重新输入密码。')
-  if (!sure) return
-  try {
-    if (user.refreshToken) await logout(user.refreshToken)
-  } catch {
-    /* 即使后端撤销失败也继续本地登出，否则用户被困在当前会话里 */
-  }
-  user.clearAuth()
-  ui.toast('已退出登录', 'success')
-  router.replace('/login')
+  await doLogout()
 }
 
 async function handleDeleteAccount() {
