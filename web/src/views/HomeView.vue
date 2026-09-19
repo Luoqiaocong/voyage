@@ -138,57 +138,6 @@ const prompts = [
   '西安 4 天，想拍古建筑'
 ]
 
-/**
- * Hero 行程单数据。
- *
- * 全部为**静态示例**：车次、票价、天气都是写死的示范值。
- * 故卡片标注「示例」而非「实时」——标成实时会让人以为这是此刻查到的
- * 真实数据，属于误导。真实查询发生在对话中，由 MCP 工具完成。
- */
-/**
- * Hero 卡片展示的是**生成过程中查到的东西**（车次比选、天气、预算），
- * 而不是成品行程。
- *
- * 为什么这样分工：下方「生成结果」区展示的是最终排出的行程（按天 + 时段）。
- * 若 Hero 也放一份成品行程，两处内容必然重复（原先就是同一份北京 3 天，
- * 用户滚下去会觉得「刚才看过了」）。改为各回答一个问题：
- *   Hero    -> 它替我查到了什么、依据什么定的
- *   示例区  -> 最后排出来长什么样
- * 车次比选还顺带证明了「数据是实时查的、不是模型编的」，这正是 Hero 要传达的价值。
- */
-const heroPlan = {
-  from: '广州南',
-  to: '北京西',
-  days: 3,
-  budget: '¥3000',
-  season: '10-01 ~ 10-03'
-}
-
-/** 车次比选：体现「货比三家」，而不只是给一个答案 */
-const heroTrains = [
-  { code: 'G77', time: '08:00 → 13:24', price: 553, seat: '二等座', best: true },
-  { code: 'G79', time: '10:05 → 15:38', price: 553, seat: '二等座', best: false },
-  { code: 'G81', time: '13:20 → 19:02', price: 553, seat: '二等座', best: false }
-]
-
-/** 逐日天气：对应行程里每一天的安排 */
-const heroWeather = [
-  { day: 1, date: '10-01', text: '晴', temp: '12~22°C', icon: 'sun' },
-  { day: 2, date: '10-02', text: '多云', temp: '10~19°C', icon: 'sun' },
-  { day: 3, date: '10-03', text: '阴', temp: '11~18°C', icon: 'wave' }
-]
-
-/** 预算明细：让「¥3000」这个数字有出处 */
-const heroBudget = [
-  { label: '往返车票', value: 1106 },
-  { label: '住宿 2 晚', value: 1160 },
-  { label: '门票', value: 155 },
-  { label: '餐饮', value: 579 }
-]
-
-/** 生成阶段文案：用于说明这张卡片是怎么来的 */
-const buildStages = ['解析出行需求', '核对应季天气', '确认车次票价']
-
 /* ==================== 2. 示例行程（结果优先） ==================== */
 /** 时段：示例区的行程与 Hero 的时段标签共用 */
 type Slot = 'morning' | 'afternoon' | 'evening'
@@ -490,14 +439,14 @@ function startHref(): string {
 
   <main id="main" tabindex="-1" class="home" :class="{ 'home--in': entered }">
     <!-- ============================================================
-         1. HERO：可输入的规划框 + 正在生成的行程单
-         左「说」右「得」，让输入与结果的关系一眼可见
+         1. HERO：一句话描述需求 → 开始规划
+         单栏居中：原先右侧还有一张「它替我查了什么」示意卡（车次/天气/预算），
+         与下方「生成结果」区内容重复度高，已删除（详见 .hero__inner 的样式注释）
          ============================================================ -->
     <section class="hero">
       <div class="hero__aura" aria-hidden="true"></div>
 
       <div class="container hero__inner">
-        <!-- 左：说 -->
         <div class="hero__say">
           <p class="hero__kicker">
             <span class="dot"></span>
@@ -563,114 +512,6 @@ function startHref(): string {
               {{ p }}
             </button>
           </div>
-        </div>
-
-        <!--
-          右：得（生成过程中查到的东西）
-          刻意不放成品行程——下方「生成结果」区已有三份按天排布的行程，
-          这里若再放一份就会重复。此处展示车次比选、逐日天气与预算构成，
-          回答的是「它替我查了什么、依据什么定的」。
-        -->
-        <div class="hero__get">
-          <article class="plan">
-            <header class="plan__head">
-              <div class="plan__route">
-                <TravelIcon name="route" :size="15" />
-                <span>{{ heroPlan.from }}</span>
-                <span class="plan__arrow" aria-hidden="true">
-                  <i></i>
-                  <TravelIcon name="plane" :size="13" />
-                  <i></i>
-                </span>
-                <span>{{ heroPlan.to }}</span>
-              </div>
-              <span class="plan__badge">示例</span>
-            </header>
-
-            <p class="plan__meta">
-              {{ heroPlan.season }} · {{ heroPlan.days }} 天 · 预算 {{ heroPlan.budget }}
-            </p>
-
-            <div class="plan__body">
-              <!-- 车次比选：给出备选而非单一答案，也证明数据是查来的 -->
-              <section class="blk">
-                <p class="blk__title">
-                  <TravelIcon name="train" :size="14" />
-                  高铁车次
-                  <span class="blk__hint">3 趟可选</span>
-                </p>
-                <ul class="trains">
-                  <li
-                    v-for="t in heroTrains"
-                    :key="t.code"
-                    class="trains__row"
-                    :class="{ 'is-best': t.best }"
-                  >
-                    <span class="trains__code">{{ t.code }}</span>
-                    <span class="trains__time">{{ t.time }}</span>
-                    <span class="trains__seat">{{ t.seat }}</span>
-                    <span class="trains__price">¥{{ t.price }}</span>
-                    <span v-if="t.best" class="trains__tag">推荐</span>
-                  </li>
-                </ul>
-              </section>
-
-              <!-- 逐日天气：对应行程里每一天 -->
-              <section class="blk">
-                <p class="blk__title">
-                  <TravelIcon name="sun" :size="14" />
-                  出行天气
-                </p>
-                <ul class="weather">
-                  <li v-for="w in heroWeather" :key="w.day" class="weather__item">
-                    <span class="weather__day">Day {{ w.day }}</span>
-                    <TravelIcon :name="w.icon" :size="15" />
-                    <span class="weather__text">{{ w.text }}</span>
-                    <span class="weather__temp">{{ w.temp }}</span>
-                  </li>
-                </ul>
-              </section>
-
-              <!-- 预算构成：让「¥3000」有出处 -->
-              <section class="blk">
-                <p class="blk__title">
-                  <TravelIcon name="luggage" :size="14" />
-                  预算构成
-                  <span class="blk__hint">合计 {{ heroPlan.budget }}</span>
-                </p>
-                <ul class="budget">
-                  <li v-for="b in heroBudget" :key="b.label" class="budget__row">
-                    <span class="budget__label">{{ b.label }}</span>
-                    <span class="budget__bar" aria-hidden="true">
-                      <i :style="{ width: `${Math.round((b.value / 3000) * 100)}%` }"></i>
-                    </span>
-                    <span class="budget__value">¥{{ b.value }}</span>
-                  </li>
-                </ul>
-              </section>
-            </div>
-
-            <!--
-              页脚说明这张卡片经过了哪几步，而不是播放进度。
-              原先这里是一段「正在解析 → 正在核对 → 已确认」的动态进度条，
-              配合区块逐块揭示。实测观感不好：卡片会从空盒子里分三层
-              往外跳，刷新页面时尤其突兀。
-              行程卡本身就是最好的说明，不需要再演一遍生成过程。
-            -->
-            <footer class="plan__foot">
-              <span class="plan__stages">
-                <template v-for="(s, si) in buildStages" :key="s">
-                  <span class="plan__stage-i">
-                    <TravelIcon name="check" :size="11" />{{ s }}
-                  </span>
-                  <span v-if="si < buildStages.length - 1" class="plan__stage-sep" aria-hidden="true">·</span>
-                </template>
-              </span>
-              <span class="plan__done">可保存</span>
-            </footer>
-          </article>
-
-          <p class="hero__note">示例数据 · 实际车次、天气与票价以对话中查询结果为准</p>
         </div>
       </div>
     </section>
@@ -982,15 +823,29 @@ function startHref(): string {
   pointer-events: none;
 }
 
+/*
+ * Hero 内容区。
+ *
+ * 原先这里是两栏：左侧文案 + 右侧「它替我查了什么」示意卡（.hero__get）。
+ * 右侧卡片已删除，理由：它展示的高铁车次 / 逐日天气 / 预算构成，
+ * 与下方「生成结果」区的内容重复度高，而首页首屏最该做的是让人一眼
+ * 看懂「这是什么、能干什么、从哪开始」—— 旁边堆一张信息密度很高的
+ * 示意卡反而分散注意力，也把主操作按钮挤到了左半边。
+ *
+ * 改为单栏居中：文案与输入框成为唯一的视觉焦点，视线自然落在
+ * 「说出你的需求」这个主操作上。
+ */
 .hero__inner {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 460px;
-  gap: 64px;
+  display: flex;
+  flex-direction: column;
   align-items: center;
+  text-align: center;
+  max-width: 760px;
+  margin: 0 auto;
 }
 
-/* ---------- 左：说 ---------- */
+/* ---------- 说 ---------- */
 .hero__kicker {
   display: inline-flex;
   align-items: center;
@@ -1184,264 +1039,6 @@ function startHref(): string {
   background: var(--primary-soft);
 }
 
-/* ---------- 右：行程单 ---------- */
-.hero__get {
-  position: relative;
-}
-
-.plan {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 20px 22px 16px;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 20px 46px rgba(16, 24, 40, 0.09);
-}
-
-.plan__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--hairline);
-}
-.plan__route {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 0.95rem;
-  font-weight: 700;
-}
-.plan__arrow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--prim);
-}
-.plan__arrow i {
-  width: 22px;
-  height: 1px;
-  background: repeating-linear-gradient(90deg, var(--blue-300) 0 3px, transparent 3px 6px);
-}
-.plan__arrow :deep(svg) {
-  transform: rotate(45deg);
-}
-.plan__badge {
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: var(--gold-600);
-  background: var(--gold-soft);
-  padding: 3px 9px;
-  border-radius: 6px;
-}
-
-/* 路线下方的轻量概要行 */
-.plan__meta {
-  margin: 12px 0 2px;
-  font-size: 0.78rem;
-  color: var(--text3);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ---------- 三个信息区块（车次 / 天气 / 预算） ---------- */
-/*
- * 不再固定最小高度：原先写 min-height: 268px 是为了让区块逐块揭示时
- * 卡片不跳高，但那也意味着页面刚加载时有一段空白占位。
- * 现在三块一次性呈现，高度由内容决定即可。
- */
-.plan__body {
-  padding-top: 2px;
-}
-.blk {
-  padding: 12px 0;
-  border-bottom: 1px dashed var(--hairline);
-}
-.blk:last-child {
-  border-bottom: none;
-}
-.blk__title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: var(--text2);
-  margin-bottom: 9px;
-}
-.blk__title :deep(svg) {
-  color: var(--prim);
-}
-.blk__hint {
-  margin-left: auto;
-  font-weight: 500;
-  font-size: 0.72rem;
-  color: var(--text3);
-}
-
-/* ---------- 车次比选 ---------- */
-.trains {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.trains__row {
-  display: grid;
-  grid-template-columns: 46px 1fr 46px 50px auto;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 8px;
-  border-radius: 8px;
-  font-size: 0.79rem;
-}
-.trains__row.is-best {
-  background: var(--primary-soft);
-}
-.trains__code {
-  font-family: var(--mono);
-  font-weight: 700;
-  font-size: 0.76rem;
-}
-.trains__time {
-  color: var(--text2);
-  font-variant-numeric: tabular-nums;
-}
-.trains__seat,
-.trains__price {
-  color: var(--text3);
-  font-size: 0.74rem;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.trains__tag {
-  font-size: 0.66rem;
-  font-weight: 700;
-  color: var(--prim);
-  background: var(--panel);
-  border-radius: 5px;
-  padding: 2px 6px;
-}
-
-/* ---------- 逐日天气 ---------- */
-.weather {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  gap: 8px;
-}
-.weather__item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  padding: 10px 4px;
-  border-radius: 10px;
-  background: var(--panel2);
-  border: 1px solid var(--hairline);
-}
-.weather__item :deep(svg) {
-  color: var(--gold-600);
-}
-.weather__day {
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  color: var(--text3);
-}
-.weather__text {
-  font-size: 0.76rem;
-  font-weight: 650;
-}
-.weather__temp {
-  font-size: 0.7rem;
-  color: var(--text3);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ---------- 预算构成 ---------- */
-.budget {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.budget__row {
-  display: grid;
-  grid-template-columns: 68px 1fr 56px;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 0;
-  font-size: 0.76rem;
-}
-.budget__label {
-  color: var(--text3);
-}
-/* 条形图比纯数字更直观地看出钱花在哪 */
-.budget__bar {
-  height: 6px;
-  border-radius: 3px;
-  background: var(--panel2);
-  overflow: hidden;
-}
-.budget__bar i {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-  background: var(--grad);
-  transition: width 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
-}
-.budget__value {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  color: var(--text2);
-  font-weight: 600;
-}
-
-/* 页脚：左侧列出这张卡片经过的三步，右侧标「可保存」 */
-.plan__foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--hairline);
-  font-size: 0.72rem;
-  color: var(--text3);
-}
-.plan__stages {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-.plan__stage-i {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  white-space: nowrap;
-}
-.plan__stage-i :deep(svg) {
-  color: var(--success);
-  flex-shrink: 0;
-}
-.plan__stage-sep {
-  opacity: 0.45;
-}
-.plan__done {
-  margin-left: auto;
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  font-weight: 650;
-  color: var(--success);
-}
-
-.hero__note {
-  margin-top: 12px;
-  text-align: center;
-  font-size: 0.74rem;
-  color: var(--text3);
-}
 
 /* ============================================================
    通用区块
@@ -2023,15 +1620,11 @@ function startHref(): string {
    响应式（移动端优先考量：Hero 堆叠、输入框换行、场景单列）
    ============================================================ */
 @media (max-width: 1080px) {
-  .hero__inner {
-    grid-template-columns: 1fr;
-    gap: 42px;
-  }
+  /* 原先这里调 .hero__inner 的 grid 列数与 gap（两栏变单栏）。
+     Hero 已是单栏居中布局，这两条失去作用，故删除；
+     断点本身保留 —— 下面 .hero 的 padding 仍需要它。 */
   .hero {
     padding-top: 52px;
-  }
-  .hero__get {
-    max-width: 540px;
   }
   .scene {
     grid-template-columns: 1fr;
@@ -2091,31 +1684,7 @@ function startHref(): string {
     text-align: left;
   }
   /* 车次比选在窄屏改为两行：车次+时刻一行，座位+票价另起一行 */
-  .trains__row {
-    grid-template-columns: 46px 1fr auto;
-    row-gap: 2px;
-  }
-  .trains__seat {
-    grid-column: 2 / 3;
-    grid-row: 2;
-    text-align: left;
-  }
-  .trains__price {
-    grid-column: 3 / 4;
-    grid-row: 2;
-  }
-  .trains__tag {
-    grid-column: 3 / 4;
-    grid-row: 1;
-  }
   /* 天气三格在窄屏压缩内边距，避免文字换行 */
-  .weather__item {
-    padding: 9px 2px;
-  }
-  .budget__row {
-    grid-template-columns: 58px 1fr 50px;
-    gap: 8px;
-  }
   .preview {
     padding: 22px 18px;
     min-height: 260px;

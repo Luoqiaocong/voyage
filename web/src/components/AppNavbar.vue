@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { canAccessAdmin } from '@/utils/role'
+import { canAccessAdmin, roleLabel } from '@/utils/role'
 import { useLogout } from '@/composables/useLogout'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
@@ -51,6 +51,16 @@ const initial = computed(() => {
   const name = user.userInfo?.username || user.userInfo?.email || '?'
   return name.slice(0, 1).toUpperCase()
 })
+
+/**
+ * 角色标识：只在管理员时显示。
+ *
+ * 普通用户不显示 —— 给每个人都挂一个「普通用户」标签等于没有信息量，
+ * 反而占位置。管理员才需要一眼确认自己的身份（避免误以为权限丢失）。
+ */
+const roleBadge = computed(() =>
+  canAccessAdmin(user.userInfo?.role) ? roleLabel(user.userInfo?.role) : ''
+)
 
 function closeMenu() {
   menuOpen.value = false
@@ -139,10 +149,9 @@ onUnmounted(() => {
           </RouterLink>
 
           <!--
-            头像菜单：把「个人资料 / 管理台 / 退出登录」收进来。
-            原先桌面端导航栏没有「我的」入口，退出登录只在个人页最底部 ——
-            登出是账号级操作，藏在二级页面底部既不合常规也不便使用。
-            这里一次点击进菜单、两步完成登出，是主流做法。
+            账号菜单（桌面端）。
+            信息区（头像/昵称/邮箱）与操作区分层：信息区带浅底与头像，
+            一眼看清「当前是谁」；操作项独立成组，退出登录再单独一组。
           -->
           <div ref="menuWrap" class="usermenu">
             <button
@@ -163,48 +172,69 @@ onUnmounted(() => {
               <span v-else class="usermenu__avatar usermenu__avatar--initial">
                 {{ initial }}
               </span>
-              <span class="usermenu__caret" aria-hidden="true"></span>
+              <TravelIcon
+                name="chevron-down"
+                :size="14"
+                class="usermenu__caret"
+              />
             </button>
 
             <Transition name="um">
               <div v-if="menuOpen" class="usermenu__panel" role="menu">
+                <!-- 信息区：浅底 + 大一圈的头像，与操作项形成明确层次 -->
                 <div class="usermenu__head">
-                  <p class="usermenu__name">{{ user.userInfo?.username || '未设置昵称' }}</p>
-                  <p class="usermenu__email" :title="user.userInfo?.email">
-                    {{ user.userInfo?.email }}
-                  </p>
+                  <img v-if="avatarUrl" class="usermenu__head-avatar" :src="avatarUrl" alt="" />
+                  <span v-else class="usermenu__head-avatar usermenu__avatar--initial">
+                    {{ initial }}
+                  </span>
+                  <div class="usermenu__head-text">
+                    <p class="usermenu__name">
+                      {{ user.userInfo?.username || '未设置昵称' }}
+                    </p>
+                    <p class="usermenu__email" :title="user.userInfo?.email">
+                      {{ user.userInfo?.email }}
+                    </p>
+                  </div>
+                  <span v-if="roleBadge" class="usermenu__role">{{ roleBadge }}</span>
                 </div>
 
-                <RouterLink
-                  to="/profile"
-                  class="usermenu__item"
-                  role="menuitem"
-                  @click="closeMenu"
-                >
-                  <TravelIcon name="user" :size="15" />
-                  个人资料
-                </RouterLink>
+                <div class="usermenu__group">
+                  <RouterLink
+                    to="/profile"
+                    class="usermenu__item"
+                    role="menuitem"
+                    @click="closeMenu"
+                  >
+                    <span class="usermenu__ico"><TravelIcon name="user" :size="16" /></span>
+                    <span class="usermenu__label">个人资料</span>
+                    <TravelIcon name="arrow-right" :size="14" class="usermenu__go" />
+                  </RouterLink>
 
-                <RouterLink
-                  v-if="showAdmin"
-                  to="/admin"
-                  class="usermenu__item"
-                  role="menuitem"
-                  @click="closeMenu"
-                >
-                  <TravelIcon name="compass" :size="15" />
-                  管理台
-                </RouterLink>
+                  <RouterLink
+                    v-if="showAdmin"
+                    to="/admin"
+                    class="usermenu__item"
+                    role="menuitem"
+                    @click="closeMenu"
+                  >
+                    <span class="usermenu__ico"><TravelIcon name="gear" :size="16" /></span>
+                    <span class="usermenu__label">管理台</span>
+                    <TravelIcon name="arrow-right" :size="14" class="usermenu__go" />
+                  </RouterLink>
+                </div>
 
-                <button
-                  type="button"
-                  class="usermenu__item usermenu__item--danger"
-                  role="menuitem"
-                  @click="closeMenu(); doLogout()"
-                >
-                  <TravelIcon name="arrow-right" :size="15" />
-                  退出登录
-                </button>
+                <!-- 退出登录单独一组，用分割线隔开；悬停才转警示色 -->
+                <div class="usermenu__group usermenu__group--foot">
+                  <button
+                    type="button"
+                    class="usermenu__item usermenu__item--danger"
+                    role="menuitem"
+                    @click="closeMenu(); doLogout()"
+                  >
+                    <span class="usermenu__ico"><TravelIcon name="sign-out" :size="16" /></span>
+                    <span class="usermenu__label">退出登录</span>
+                  </button>
+                </div>
               </div>
             </Transition>
           </div>
@@ -269,35 +299,58 @@ onUnmounted(() => {
             >
               <TravelIcon name="user" :size="15" />
               账号
-              <span class="usermenu__caret" :class="{ 'is-open': menuOpen }" aria-hidden="true"></span>
+              <TravelIcon
+                name="chevron-down"
+                :size="14"
+                class="usermenu__caret"
+                :class="{ 'is-open': menuOpen }"
+              />
             </button>
 
+            <!-- 结构与桌面端保持一致，只是把「图标容器」在窄屏省掉 -->
             <div v-if="menuOpen" class="nav__mobile-menu" role="menu">
-              <p class="usermenu__name">{{ user.userInfo?.username || '未设置昵称' }}</p>
-              <p class="usermenu__email">{{ user.userInfo?.email }}</p>
-              <RouterLink to="/profile" class="usermenu__item" role="menuitem" @click="closeMenu(); close()">
-                <TravelIcon name="user" :size="15" />
-                个人资料
-              </RouterLink>
-              <RouterLink
-                v-if="showAdmin"
-                to="/admin"
-                class="usermenu__item"
-                role="menuitem"
-                @click="closeMenu(); close()"
-              >
-                <TravelIcon name="compass" :size="15" />
-                管理台
-              </RouterLink>
-              <button
-                type="button"
-                class="usermenu__item usermenu__item--danger"
-                role="menuitem"
-                @click="closeMenu(); close(); doLogout()"
-              >
-                <TravelIcon name="arrow-right" :size="15" />
-                退出登录
-              </button>
+              <div class="usermenu__head">
+                <img v-if="avatarUrl" class="usermenu__head-avatar" :src="avatarUrl" alt="" />
+                <span v-else class="usermenu__head-avatar usermenu__avatar--initial">
+                  {{ initial }}
+                </span>
+                <div class="usermenu__head-text">
+                  <p class="usermenu__name">{{ user.userInfo?.username || '未设置昵称' }}</p>
+                  <p class="usermenu__email" :title="user.userInfo?.email">
+                    {{ user.userInfo?.email }}
+                  </p>
+                </div>
+                <span v-if="roleBadge" class="usermenu__role">{{ roleBadge }}</span>
+              </div>
+
+              <div class="usermenu__group">
+                <RouterLink to="/profile" class="usermenu__item" role="menuitem" @click="closeMenu(); close()">
+                  <TravelIcon name="user" :size="16" />
+                  <span class="usermenu__label">个人资料</span>
+                </RouterLink>
+                <RouterLink
+                  v-if="showAdmin"
+                  to="/admin"
+                  class="usermenu__item"
+                  role="menuitem"
+                  @click="closeMenu(); close()"
+                >
+                  <TravelIcon name="gear" :size="16" />
+                  <span class="usermenu__label">管理台</span>
+                </RouterLink>
+              </div>
+
+              <div class="usermenu__group usermenu__group--foot">
+                <button
+                  type="button"
+                  class="usermenu__item usermenu__item--danger"
+                  role="menuitem"
+                  @click="closeMenu(); close(); doLogout()"
+                >
+                  <TravelIcon name="sign-out" :size="16" />
+                  <span class="usermenu__label">退出登录</span>
+                </button>
+              </div>
             </div>
           </div>
         </template>
@@ -479,23 +532,34 @@ onUnmounted(() => {
 
 .nav__actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 
-/* ---- 账号菜单 ---- */
+/* ============================================================
+   账号菜单
+   ------------------------------------------------------------
+   设计思路：把它当成一张**小卡片**而不是一串菜单项。
+   三层结构，逐层降低视觉权重：
+     1. 信息区  —— 浅底 + 40px 头像 + 昵称/邮箱 + 角色标识
+                    回答「我现在是谁」，也是这张卡片的「封面」
+     2. 操作区  —— 个人资料 / 管理台，图标放进圆形浅底容器
+     3. 危险区  —— 退出登录，分割线隔开，默认中性、悬停才转警示色
+   动效克制：只做 4px 位移 + 淡入，不做缩放（缩放像「弹」出来，廉价感）。
+   ============================================================ */
 .usermenu { position: relative; }
 
 .usermenu__btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 6px 3px 3px;
+  gap: 4px;
+  padding: 3px 8px 3px 3px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--panel);
-  transition: border-color 0.18s, background-color 0.18s;
+  transition: border-color 0.18s, background-color 0.18s, box-shadow 0.18s;
 }
 .usermenu__btn:hover,
 .usermenu__btn.is-open {
   border-color: var(--blue-200);
   background: var(--blue-50);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.10);
 }
 .usermenu__btn:focus-visible { outline: 2px solid var(--prim); outline-offset: 2px; }
 
@@ -506,6 +570,8 @@ onUnmounted(() => {
   object-fit: cover;
   display: block;
   background: var(--surface-soft);
+  /* 头像加一圈描边：浅色底上能看出边界，不会糊进背景 */
+  box-shadow: 0 0 0 1px rgba(16, 24, 40, 0.06);
 }
 /* 无头像时用首字母兜底，避免入口是个空白圆 */
 .usermenu__avatar--initial {
@@ -514,91 +580,185 @@ onUnmounted(() => {
   font-size: 0.8rem;
   font-weight: 700;
   color: var(--prim);
-  background: var(--primary-soft);
+  background: linear-gradient(135deg, #dbeafe, #eff6ff);
 }
 
+/* 下拉指示：改用描边图标而不是 CSS 三角形 —— 三角在圆角按钮里显得糙 */
 .usermenu__caret {
-  width: 0;
-  height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 5px solid var(--text3);
-  transition: transform 0.2s ease;
+  color: var(--text3);
+  transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 .usermenu__btn.is-open .usermenu__caret { transform: rotate(180deg); }
 
 .usermenu__panel {
   position: absolute;
   z-index: 70;
-  top: calc(100% + 8px);
+  top: calc(100% + 10px);
   right: 0;
-  min-width: 216px;
+  width: 268px;
   padding: 6px;
   border: 1px solid var(--line);
-  border-radius: var(--r-m);
-  /* 菜单需要明显浮于页面之上，故用较强阴影（按钮上刻意不用） */
-  box-shadow: 0 12px 32px rgba(16, 24, 40, 0.14), 0 2px 6px rgba(16, 24, 40, 0.06);
+  border-radius: 14px;
+  /* 两级阴影：近处一层收边，远处一层抬起。
+     单层大模糊会显得灰扑扑，两层才有「浮起来」的实感。 */
+  box-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.05),
+    0 12px 28px -6px rgba(16, 24, 40, 0.16),
+    0 24px 52px -12px rgba(16, 24, 40, 0.12);
   background: var(--panel);
+  overflow: hidden;
 }
 
+/* ---------- 1. 信息区 ---------- */
 .usermenu__head {
-  padding: 8px 10px 10px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 12px 14px;
+  border-radius: 10px 10px 0 0;
+  /* 用主色极淡的渐变当「封面」，与下方纯白操作区自然分层 */
+  background: linear-gradient(180deg, #f8fafc, #ffffff);
   border-bottom: 1px solid var(--hairline);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
-.usermenu__name { font-size: 0.84rem; font-weight: 650; color: var(--text); }
+
+.usermenu__head-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  font-size: 1rem;
+  font-weight: 700;
+  box-shadow: 0 0 0 1px rgba(16, 24, 40, 0.06);
+}
+
+.usermenu__head-text { min-width: 0; flex: 1; }
+
+.usermenu__name {
+  font-size: 0.88rem;
+  font-weight: 650;
+  color: var(--text);
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .usermenu__email {
-  margin-top: 2px;
-  font-size: 0.74rem;
+  margin-top: 3px;
+  font-size: 0.73rem;
   color: var(--text3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* 角色标识：只有管理员才渲染，普通用户挂个「普通用户」标签没有信息量 */
+.usermenu__role {
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--prim);
+  background: var(--primary-soft);
+  border: 1px solid var(--blue-200);
+}
+
+/* ---------- 2/3. 操作区与危险区 ---------- */
+.usermenu__group { display: flex; flex-direction: column; gap: 1px; }
+/* 危险区用分割线隔开：退出与上面两项性质不同，不该混在一组里 */
+.usermenu__group--foot {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--hairline);
+}
+
 .usermenu__item {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   width: 100%;
-  padding: 9px 10px;
+  padding: 8px 10px;
   border: none;
-  border-radius: var(--r-s);
+  border-radius: 9px;
   background: transparent;
-  font-size: 0.84rem;
+  font-size: 0.845rem;
   font-weight: 550;
   color: var(--text2);
   text-align: left;
-  transition: background-color 0.16s, color 0.16s;
+  transition: background-color 0.15s, color 0.15s;
 }
 .usermenu__item:hover { background: var(--surface-soft); color: var(--text); }
 .usermenu__item:focus-visible { outline: 2px solid var(--prim); outline-offset: -2px; }
 
 /*
- * 退出登录：默认与其它项同色，悬停才转红。
- * 常亮红色会让它在菜单里最显眼，而它恰恰是最不该被误点的操作。
- * 图标转 180° 表示「离开」，比再加一个图标省事。
+ * 图标放在固定尺寸的方形浅底里。
+ * 为什么：图标直接裸放时，不同图标的视觉重量差异很大（齿轮比用户重），
+ * 一行行看会觉得参差。统一容器后左边缘对齐、重量一致，是精致感的关键。
  */
-.usermenu__item--danger :deep(svg) { transform: rotate(180deg); }
+.usermenu__ico {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  color: var(--text2);
+  background: var(--surface-soft);
+  transition: background-color 0.15s, color 0.15s;
+}
+.usermenu__item:hover .usermenu__ico {
+  background: var(--primary-soft);
+  color: var(--prim);
+}
+
+.usermenu__label { flex: 1; }
+
+/* 右侧进入指示：默认不可见，悬停时淡入并轻微右移 —— 暗示「会跳转」 */
+.usermenu__go {
+  color: var(--text3);
+  opacity: 0;
+  transform: translateX(-3px);
+  transition: opacity 0.15s, transform 0.15s;
+}
+.usermenu__item:hover .usermenu__go { opacity: 0.7; transform: translateX(0); }
+
+/*
+ * 退出登录：默认与其它项完全一致，悬停才转警示色。
+ * 常亮红色会让它成为菜单里最显眼的一项，而它恰恰最不该被误点。
+ * 只有鼠标停在上面（说明确实是奔它去的）才给出警示语义。
+ */
 .usermenu__item--danger:hover {
-  background: rgba(224, 82, 82, 0.08);
+  background: rgba(224, 82, 82, 0.07);
+  color: var(--danger);
+}
+.usermenu__item--danger:hover .usermenu__ico {
+  background: rgba(224, 82, 82, 0.11);
   color: var(--danger);
 }
 
-.usermenu__panel .router-link-active {
+/* 当前所在页：只高亮图标容器，不给整行铺色，避免菜单里出现大色块 */
+.usermenu__panel .router-link-active { color: var(--prim); font-weight: 650; }
+.usermenu__panel .router-link-active .usermenu__ico {
   background: var(--primary-soft);
   color: var(--prim);
-  font-weight: 650;
 }
 
-/* 菜单出入：轻微下移淡入（缩放会让菜单像「弹」出来） */
-.um-enter-active,
-.um-leave-active { transition: opacity 0.16s ease, transform 0.16s ease; }
+/* 菜单出入：4px 位移 + 淡入，配 cubic-bezier 让它「落」下来而不是弹出来 */
+.um-enter-active { transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.um-leave-active { transition: opacity 0.12s ease, transform 0.12s ease; }
 .um-enter-from,
-.um-leave-to { opacity: 0; transform: translateY(-4px); }
+.um-leave-to { opacity: 0; transform: translateY(-6px); }
 
 @media (prefers-reduced-motion: reduce) {
-  .usermenu__caret { transition: none; }
+  .usermenu__caret,
+  .usermenu__go,
   .um-enter-active,
   .um-leave-active { transition: none; }
 }
@@ -683,22 +843,31 @@ onUnmounted(() => {
 .nav__mobile-usermenu { width: 100%; }
 .nav__mobile-usermenu > .btn { width: 100%; justify-content: center; }
 
+/*
+ * 内联面板直接复用桌面端的 .usermenu__head / __item 结构，
+ * 但有两处必须覆盖：
+ *   · 圆角与阴影 —— 浮层是独立卡片，内联面板是抽屉的一部分，不需要抬起
+ *   · 图标容器（.usermenu__ico）—— 窄屏空间紧，省掉方形浅底，
+ *     直接裸放图标但固定 16px 宽度，保证每行文字左边缘对齐
+ */
 .nav__mobile-menu {
   margin-top: 8px;
-  padding: 10px;
+  padding: 6px;
   border: 1px solid var(--line);
-  border-radius: var(--r-m);
+  border-radius: 12px;
   background: var(--panel);
 }
-.nav__mobile-menu .usermenu__name { font-size: 0.84rem; font-weight: 650; color: var(--text); }
-.nav__mobile-menu .usermenu__email {
-  margin: 2px 0 8px;
-  font-size: 0.74rem;
-  color: var(--text3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.nav__mobile-menu .usermenu__head {
+  border-radius: 8px 8px 0 0;
+  padding: 11px 10px 12px;
 }
+.nav__mobile-menu .usermenu__item > :deep(svg:first-child) {
+  flex-shrink: 0;
+  width: 16px;
+  color: var(--text3);
+}
+.nav__mobile-menu .usermenu__item:hover > :deep(svg:first-child) { color: var(--prim); }
+.nav__mobile-menu .usermenu__item--danger:hover > :deep(svg:first-child) { color: var(--danger); }
 
 @media (max-width: 860px) {
   .nav__links { display: none; }
