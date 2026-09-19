@@ -1,13 +1,14 @@
 /**
- * 涨跌幅度标记验证。
+ * 「相对昨日」涨跌标注验证。
  *
  * 运行：node web/src/utils/trendCompare.check.mjs
  *
- * 重点验证口径：(后−前)/前，即标准增幅。
- * 这组用例是**防止口径被改成「后/前」而无人察觉** —— 两者恰好差 100 个百分点，
- * 很容易在重构时被无意改掉，而界面上看不出异常。
+ * 重点：
+ *   1. 口径是 (后−前)/前（标准增幅），不是「后/前」—— 两者差 100 个百分点
+ *   2. 同时给出**具体数目**与**百分比**
+ *   3. 边界不出现 NaN / Infinity / 误导性的 +0
  */
-import { halfCompare } from './trendCompare.ts'
+import { dayOverDay, formatDayOverDay } from './trendCompare.ts'
 
 let pass = 0
 let fail = 0
@@ -17,62 +18,100 @@ function check(label, ok, detail = '') {
   console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${label}${detail ? ` — ${detail}` : ''}`)
 }
 
-console.log('=== 1. 口径：标准增幅 (后−前)/前 ===')
-// 前半段 [100,100] 合计 200，后半段 [200,200] 合计 400 → 增幅 100%
-check('翻倍 = ⬆100%', halfCompare([100, 100, 200, 200])?.text === '⬆ 100%',
-  halfCompare([100, 100, 200, 200])?.text)
-// 前半 200，后半 600 → 增幅 200%
-check('三倍 = ⬆200%', halfCompare([100, 100, 300, 300])?.text === '⬆ 200%',
-  halfCompare([100, 100, 300, 300])?.text)
-// 前半 200，后半 100 → 降幅 50%
-check('腰斩 = ⬇50%', halfCompare([100, 100, 50, 50])?.text === '⬇ 50%',
-  halfCompare([100, 100, 50, 50])?.text)
-// 若口径被误改为「后/前」，翻倍会变成 200%，此用例会失败
-const doubled = halfCompare([100, 100, 200, 200])?.text
-check('口径不是「后/前」（否则会显示 200%）', !String(doubled).includes('200'), doubled)
+const fmt = (n) => String(n)
 
-console.log('\n=== 2. 方向与颜色 tone ===')
-check('增长为 up', halfCompare([1, 1, 2, 2])?.tone === 'up')
-check('下降为 down', halfCompare([4, 4, 2, 2])?.tone === 'down')
-check('持平为 flat', halfCompare([100, 100, 100, 100])?.tone === 'flat')
+console.log('=== 1. 口径：(后−前)/前 ===')
+// 昨日 100 → 今日 200：数目 +100，百分比 +100%
+const g = dayOverDay([100, 200])
+console.log('  [100, 200] ->', g)
+check('数目为 100', g?.delta === 100, String(g?.delta))
+check('百分比为 +100%', g?.pct === 100, String(g?.pct))
+check('方向为 up', g?.tone === 'up')
+// 若口径被改成「后/前」，pct 会是 200
+check('口径不是「后/前」（否则 pct=200）', g?.pct !== 200, String(g?.pct))
 
-console.log('\n=== 3. 边界：数据不足 ===')
-check('3 个点返回 null', halfCompare([1, 2, 3]) === null)
-check('2 个点返回 null', halfCompare([1, 2]) === null)
-check('0 个点返回 null', halfCompare([]) === null)
-check('4 个点可用', halfCompare([1, 1, 2, 2]) !== null)
+console.log('\n=== 2. 下降 ===')
+const d = dayOverDay([200, 100])
+console.log('  [200, 100] ->', d)
+check('数目为 100（绝对值）', d?.delta === 100, String(d?.delta))
+check('百分比为 -50%', d?.pct === -50, String(d?.pct))
+check('方向为 down', d?.tone === 'down')
 
-console.log('\n=== 4. 边界：全 0 不显示标记 ===')
-// 显示 ⬆0% 会让人以为「有增长」，实际什么都没发生
-check('全 0 返回 null', halfCompare([0, 0, 0, 0]) === null,
-  JSON.stringify(halfCompare([0, 0, 0, 0])))
+console.log('\n=== 3. 只取最后两天（多天序列） ===')
+// 7 天：前面的值不应影响结果
+const many = dayOverDay([1, 2, 3, 4, 5, 100, 250])
+console.log('  [1,2,3,4,5,100,250] ->', many)
+check('用最后两天 100→250', many?.prev === 100 && many?.curr === 250,
+  `prev=${many?.prev} curr=${many?.curr}`)
+check('数目 150', many?.delta === 150, String(many?.delta))
+check('百分比 +150%', many?.pct === 150, String(many?.pct))
 
-console.log('\n=== 5. 边界：前半段为 0 无法算百分比 ===')
-const fromZero = halfCompare([0, 0, 5, 5])
-console.log('  ', fromZero)
-check('不显示 ∞%', !String(fromZero?.text).includes('∞'), fromZero?.text)
-check('改用「新增」表达', String(fromZero?.text).includes('新增'), fromZero?.text)
+console.log('\n=== 4. 边界：数据不足 ===')
+check('0 个点返回 null', dayOverDay([]) === null)
+check('1 个点返回 null', dayOverDay([5]) === null)
+check('2 个点可用', dayOverDay([1, 2]) !== null)
+
+console.log('\n=== 5. 边界：昨日为 0 ===')
+const fromZero = dayOverDay([0, 7])
+console.log('  [0, 7] ->', fromZero)
 check('方向为 up', fromZero?.tone === 'up')
-check('新增量正确（5+5=10）', String(fromZero?.text).includes('10'), fromZero?.text)
+check('数目为 7', fromZero?.delta === 7, String(fromZero?.delta))
+check('百分比为 null（无穷大不给）', fromZero?.pct === null, String(fromZero?.pct))
+const fz = formatDayOverDay(fromZero, fmt)
+console.log('  格式化 ->', fz)
+check('展示里不含 Infinity', !/Infinity|NaN/.test(JSON.stringify(fz)), JSON.stringify(fz))
+check('展示里说明昨日为 0', String(fz.amount).includes('昨日 0'), fz.amount)
 
-console.log('\n=== 6. 边界：不足 1% 视为持平 ===')
-const tiny = halfCompare([100, 100, 100, 100.5])
-console.log('  ', tiny)
-check('0.25% 显示持平', tiny?.tone === 'flat', tiny?.text)
+console.log('\n=== 6. 边界：两天都是 0 ===')
+check('[0,0] 返回 null', dayOverDay([0, 0]) === null,
+  JSON.stringify(dayOverDay([0, 0])))
 
-console.log('\n=== 7. 奇数长度：中位点归入后半段 ===')
-// 5 个点 → mid=2，前半 [0,1)，即前 2 个；后半为后 3 个
-const odd = halfCompare([0, 0, 10, 10, 10])
-console.log('  [0,0,10,10,10] ->', odd?.text)
-check('前半为 0 时走「新增」分支', String(odd?.text).includes('新增'), odd?.text)
-check('新增量为 30', String(odd?.text).includes('30'), odd?.text)
+console.log('\n=== 7. 持平 ===')
+const flat = dayOverDay([50, 50])
+console.log('  [50, 50] ->', flat)
+check('方向为 flat', flat?.tone === 'flat')
+check('数目为 0', flat?.delta === 0, String(flat?.delta))
+const ff = formatDayOverDay(flat, fmt)
+check('文案为「与昨日持平」', ff.amount === '与昨日持平', ff.amount)
+check('持平不给百分比', ff.percent === '', JSON.stringify(ff.percent))
 
-console.log('\n=== 8. 小数值不出现 NaN / Infinity ===')
-for (const v of [[0, 0, 1, 1], [1, 1, 0, 0], [0.1, 0.1, 0.2, 0.2], [1e6, 1e6, 1, 1]]) {
-  const r = halfCompare(v)
-  const bad = /NaN|Infinity|undefined/.test(String(r?.text))
-  check(`[${v}] 输出正常`, !bad, r?.text)
+console.log('\n=== 8. 格式化：数目与百分比分成两段 ===')
+const f = formatDayOverDay(dayOverDay([100, 350]), fmt)
+console.log('  [100, 350] ->', f)
+check('箭头为 ⬆', f.arrow === '⬆', f.arrow)
+check('数目段含 250', f.amount.includes('250'), f.amount)
+check('百分比段为 +250%', f.percent === '+250%', f.percent)
+
+const fdown = formatDayOverDay(dayOverDay([400, 100]), fmt)
+console.log('  [400, 100] ->', fdown)
+check('下降箭头为 ⬇', fdown.arrow === '⬇', fdown.arrow)
+check('百分比段为 −75%', fdown.percent === '−75%', fdown.percent)
+
+console.log('\n=== 9. 自定义格式化函数生效（Token 用紧凑格式） ===')
+const compactFmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
+const big = formatDayOverDay(dayOverDay([1000, 2500]), compactFmt)
+console.log('  [1000, 2500] with compact ->', big)
+check('数目用紧凑格式 1.5k', big.amount.includes('1.5k'), big.amount)
+
+console.log('\n=== 10. 不出现 NaN / Infinity ===')
+for (const v of [[0, 0], [0, 1], [1, 0], [1e9, 1], [1, 1e9], [0.1, 0.2]]) {
+  const r = dayOverDay(v)
+  const s = JSON.stringify(r) + JSON.stringify(r ? formatDayOverDay(r, fmt) : null)
+  check(`[${v}] 输出正常`, !/NaN|Infinity|undefined/.test(s), s.slice(0, 90))
 }
 
-console.log(`\n${'='.repeat(52)}\n涨跌标记验证: ${pass} 通过 / ${fail} 失败\n${'='.repeat(52)}`)
+console.log('\n=== 11. 负值不比较（否则百分比方向会翻转） ===')
+// 这个指标不可能为负，但一旦出现负值，除法会翻转符号：
+// [-1,-2] 是下降，pct 却算成 +100%，标注会显示「⬇ 1  +100%」自相矛盾。
+// 故守卫为直接返回 null —— 不显示好过显示错的。
+check('[-1,-2] 返回 null（不显示矛盾标注）', dayOverDay([-1, -2]) === null,
+  JSON.stringify(dayOverDay([-1, -2])))
+check('[1,-2] 返回 null', dayOverDay([1, -2]) === null)
+check('[-1,2] 返回 null', dayOverDay([-1, 2]) === null)
+check('[0,0] 仍返回 null', dayOverDay([0, 0]) === null)
+// 正常非负输入不受影响
+check('[0,5] 仍可用', dayOverDay([0, 5]) !== null)
+check('[5,0] 仍可用', dayOverDay([5, 0]) !== null)
+
+console.log(`\n${'='.repeat(52)}\n相对昨日涨跌验证: ${pass} 通过 / ${fail} 失败\n${'='.repeat(52)}`)
 process.exit(fail > 0 ? 1 : 0)

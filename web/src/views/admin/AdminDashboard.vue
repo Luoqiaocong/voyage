@@ -18,7 +18,7 @@ import {
 import LineChart from '@/components/charts/LineChart.vue'
 import BarChart from '@/components/charts/BarChart.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
-import { halfCompare } from '@/utils/trendCompare'
+import { dayOverDay, formatDayOverDay } from '@/utils/trendCompare'
 import { useUiStore } from '@/stores/ui'
 
 const ui = useUiStore()
@@ -63,14 +63,23 @@ const userPoints = computed(
 )
 
 /**
- * 涨跌幅度标记。
+ * 相对昨日的涨跌标注。
  *
- * 计算逻辑抽到 utils/trendCompare（纯函数，可单测）。
+ * 计算逻辑抽到 utils/trendCompare（纯函数，可单测）：
+ * 取趋势序列最后两天比较，给出「涨跌数目 + 百分比」两段。
  * 口径为 (后−前)/前，即标准增幅 —— 详见该模块的说明。
- * 这里只负责把结果接到图上。
+ *
+ * 这里只负责把结果接到图上。格式化成两段而不是一整句，
+ * 是因为两段要用不同样式渲染（数目等宽、百分比带底色）。
  */
-const tokenCompare = computed(() => halfCompare(tokenPoints.value.map((p) => p.value)))
-const userCompare = computed(() => halfCompare(userPoints.value.map((p) => p.value)))
+const tokenCompare = computed(() => {
+  const c = dayOverDay(tokenPoints.value.map((p) => p.value))
+  return c ? formatDayOverDay(c, compact) : null
+})
+const userCompare = computed(() => {
+  const c = dayOverDay(userPoints.value.map((p) => p.value))
+  return c ? formatDayOverDay(c, (n) => String(n)) : null
+})
 
 const modelBars = computed(() =>
   (models.value?.breakdown ?? []).map((m) => ({
@@ -208,34 +217,31 @@ onMounted(load)
           <div>
             <p class="dash__chart-title">
               Token 消耗
-              <span
-                v-if="tokenCompare"
-                class="dash__cmp"
-                :class="`dash__cmp--${tokenCompare.tone}`"
-              >{{ tokenCompare.text }}</span>
+              <!--
+                相对昨日的涨跌：给出**具体数目**与**百分比**两段。
+                分开渲染是因为两者样式不同 —— 数目等宽便于对齐，
+                百分比带底色便于一眼看出方向与量级。
+              -->
+              <span v-if="tokenCompare" class="dash__cmp" :class="`dash__cmp--${tokenCompare.tone}`">
+                <span class="dash__cmp-amount">{{ tokenCompare.amount }}</span>
+                <span v-if="tokenCompare.percent" class="dash__cmp-pct">{{ tokenCompare.percent }}</span>
+              </span>
+              <span class="dash__cmp-base">较昨日</span>
             </p>
             <LineChart :points="tokenPoints" unit="token" />
           </div>
           <div>
             <p class="dash__chart-title">
               新增用户
-              <span
-                v-if="userCompare"
-                class="dash__cmp"
-                :class="`dash__cmp--${userCompare.tone}`"
-              >{{ userCompare.text }}</span>
+              <span v-if="userCompare" class="dash__cmp" :class="`dash__cmp--${userCompare.tone}`">
+                <span class="dash__cmp-amount">{{ userCompare.amount }}</span>
+                <span v-if="userCompare.percent" class="dash__cmp-pct">{{ userCompare.percent }}</span>
+              </span>
+              <span class="dash__cmp-base">较昨日</span>
             </p>
             <LineChart :points="userPoints" unit="人" />
           </div>
         </div>
-        <!--
-          对比基准说明：标记只写「⬆ 100%」，不写「较前半段」，
-          读者需要一句话知道百分比是跟谁比、怎么算的，否则容易误读成
-          「比上一周期增长」（那是环比，本接口的数据不支持）。
-        -->
-        <p class="dash__cmp-note">
-          箭头 = 窗口内<strong>后半段相对前半段</strong>的变化幅度（(后−前)÷前）
-        </p>
       </section>
 
       <div class="dash__two">
@@ -444,29 +450,43 @@ onMounted(load)
 }
 .health__logs-hint { margin-top: 10px; color: var(--text3); font-size: 0.74rem; }
 
-/* ---- 趋势图的涨跌标记 ----
-   只显示箭头 + 百分比，文字基准说明放在图下方的 .dash__cmp-note。
-   标记本身用等宽数字：两个图的百分比上下并排，等宽才能对齐比较。 */
+/* ---- 趋势图的「较昨日」涨跌标记 ----
+   结构：一个胶囊里放两段 —— 涨跌数目（等宽，便于两图纵向对齐）
+   + 百分比（略小、带分隔），后面跟一个「较昨日」小字说明基准。
+   基准用 tiny 灰字而不是整句说明，是因为标记本身已够清楚，
+   每张图下方再压一行解释会显得啰嗦。 */
 .dash__cmp {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
   margin-left: 8px;
-  padding: 1px 8px;
+  padding: 2px 8px;
   border-radius: 6px;
-  font-size: 0.73rem;
+  font-size: 0.74rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.dash__cmp-amount { letter-spacing: -0.01em; }
+/* 百分比用竖线分隔，避免与数目粘连成「+600+50%」这种读不断的串 */
+.dash__cmp-pct {
+  padding-left: 6px;
+  border-left: 1px solid currentColor;
+  opacity: 0.75;
+  font-size: 0.72rem;
+}
+
 .dash__cmp--up { background: rgba(72, 187, 120, 0.14); color: var(--success); }
 .dash__cmp--down { background: rgba(224, 82, 82, 0.12); color: var(--danger); }
 .dash__cmp--flat { background: var(--surface-soft); color: var(--text3); font-weight: 600; }
 
-.dash__cmp-note {
-  margin-top: 10px;
-  font-size: 0.73rem;
+/* 「较昨日」：说明对比基准，比标记更弱一档 */
+.dash__cmp-base {
+  margin-left: 6px;
+  font-size: 0.72rem;
+  font-weight: 500;
   color: var(--text3);
-  line-height: 1.6;
 }
-.dash__cmp-note strong { color: var(--text2); font-weight: 650; }
 
 .dash__actions { display: flex; flex-wrap: wrap; gap: 10px; }
 </style>
