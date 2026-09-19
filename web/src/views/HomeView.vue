@@ -512,19 +512,40 @@ function startHref(): string {
               {{ p }}
             </button>
           </div>
+
+          <!--
+            轻量过渡件：一条短竖线 + 一个向下箭头。
+            作用不是装饰，而是**把视线从输入区引到下面的示例结果**，
+            让两区读起来是「输入 → 结果」的一条线，而不是两个独立章节。
+            用 CSS 画（1px 线 + 旋转的边框），不引图标、不加图片，
+            在 reduced-motion 下不做任何动画。
+          -->
+          <div class="hero__handoff" aria-hidden="true">
+            <span class="hero__handoff-line"></span>
+            <TravelIcon name="chevron-down" :size="16" class="hero__handoff-arrow" />
+          </div>
         </div>
       </div>
     </section>
 
     <!-- ============================================================
-         2. 示例行程：结果优先，先看成品
+         2. 示例行程
+
+         这一区的定位是「上一区那句话的结果」而不是新章节，
+         故刻意做成**延续**而非并置：
+           · 与 Hero 的间距从 136px 收到 ~40px（原来是 48+88 两段内边距叠加）
+           · 首行用居中、无字距、正常字重的引导语，承接 Hero 的居中构图
+           · 去掉左对齐的 eyebrow 小标签 —— 它把这一区拉回「新章节」的语气，
+             是造成割裂感的主要来源
+         详见下方 .showcase-intro / .section--join 的样式注释。
          ============================================================ -->
-    <section class="section">
+    <section class="section section--join">
       <div class="container">
-        <header class="sec-head rv">
-          <p class="eyebrow">生成结果</p>
-          <h2>先看看它排出来的行程</h2>
-          <p>三座城市，每天按时段拆开，费用写清楚。</p>
+        <header class="showcase-intro rv">
+          <p class="showcase-intro__lead">
+            下面这几份，就是从<strong>上面这句话</strong>开始的
+          </p>
+          <h2 class="showcase-intro__title">一句话 → 一份可执行的行程</h2>
         </header>
 
         <div class="tabs rv">
@@ -1039,6 +1060,46 @@ function startHref(): string {
   background: var(--primary-soft);
 }
 
+/* ---------- Hero → 示例结果的过渡件 ----------
+   一条短竖线 + 一个向下箭头，把视线从输入区引到下方结果。
+   不用图片、不加装饰性渐变 —— 它承担的是**引导**职责：
+   没有它时，两区之间只有一片空白，读者不知道下面和上面有关系。 */
+.hero__handoff {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 34px;
+  color: var(--text3);
+}
+.hero__handoff-line {
+  width: 1px;
+  height: 30px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    var(--border) 40%,
+    var(--border)
+  );
+}
+.hero__handoff-arrow {
+  /* 轻微上下浮动，暗示「往下看」；幅度小到不构成干扰 */
+  animation: handoffBounce 2.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+@keyframes handoffBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(3px); }
+}
+/*
+ * 减弱动效偏好下**停掉浮动**，但保留线条与箭头本身。
+ * 它们是引导结构而非装饰 —— 全隐藏会让「输入 → 结果」的衔接又没了提示，
+ * 静置不动即可。注意这里必须单独写：上面的 reduce 块只处理了
+ * .home/.rv 的入场，覆盖不到这个无限循环动画。
+ */
+@media (prefers-reduced-motion: reduce) {
+  .hero__handoff-arrow { animation: none; }
+}
+
 
 /* ============================================================
    通用区块
@@ -1046,13 +1107,118 @@ function startHref(): string {
 .section {
   padding: 88px 0;
 }
+
+/*
+ * 紧接 Hero 的区块：把上间距压小，让两区读起来是**一段连续的内容**。
+ *
+ * 原先 Hero 下内边距 48px + 本区上内边距 88px = 136px 纯空白，
+ * 加上一个左对齐的大标题，视觉上「翻页」了 —— 而这一区的内容
+ * 其实只是上一区那句输入的**结果**，不该另起一章。
+ */
+.section--join {
+  padding-top: 40px;
+}
+
 .section--tint {
   background: var(--bg2);
 }
+
+/* ---------- 示例结果区：整区沿用 Hero 的居中构图 ----------
+ *
+ * 原先 Hero 是居中的单栏，紧接着的「生成结果」区却是左对齐的标题 + 左对齐的
+ * 卡片，两区对齐方式相反 —— 读起来像两个不同设计的页面拼在一起，
+ * 这正是「衔接突兀」最主要的原因（比间距问题更明显）。
+ *
+ * 处理原则：**整区居中，但卡片内部保持左对齐**。
+ *   · 区级元素（引导语、tabs）居中，与 Hero 的构图对齐
+ *   · 卡片内部不清真居中 —— 那里是「时段 + 活动 + 费用」的三列网格，
+ *     文字居中会让列对不齐、扫读成本上升。卡片作为**块**在区内居中即可。
+ *     （这也是常见做法：居中的版面里，内容块内部仍按左对齐阅读。）
+ */
+.showcase-intro {
+  max-width: 46em;
+  /* 用 margin-inline 而不是 text-align 继承来居中：块本身居中后
+     内部文字仍可左对齐，将来加多行说明不会被强行居中 */
+  margin: 0 auto 30px;
+  text-align: center;
+}
+
+/* 引导语：承接 Hero「说一句话」的动作，明确下面是它的结果 */
+.showcase-intro__lead {
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: var(--text2);
+}
+.showcase-intro__lead strong {
+  color: var(--text);
+  font-weight: 650;
+}
+
+/* 标题：比通用 .sec-head h2 小一档。
+   原先用 clamp(1.6rem, 2.9vw, 2.25rem) + 800 字重，
+   体量与 Hero 主标题接近，形成第二只「大标题」抢注意力 ——
+   而它的内容只是上一区的延续，不该有同等的视觉重量。 */
+.showcase-intro__title {
+  margin-top: 8px;
+  font-size: clamp(1.25rem, 2vw, 1.6rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+/*
+ * 卡片区收窄到 980px（居中由下方通用规则统一处理）。
+ *
+ * 为什么不铺满 1120px 的容器：demo 有 3 座城市，在那个宽度下
+ * auto-fit 会排出 3 列、每张约 361px 宽，而卡片内部是
+ * 「时段 44px + 活动内容 + 费用」的三列网格 —— 太宽会让活动名与费用
+ * 之间拉出很长的空隙，扫读时反而费眼。收到 980px 后每张约 315px，
+ * 行宽落在舒适区间。
+ */
+.section--join .showcase {
+  max-width: 980px;
+}
+
 .sec-head {
   max-width: 40em;
   margin-bottom: 40px;
 }
+
+/* ============================================================
+   区块居中对齐
+   ------------------------------------------------------------
+   Hero 是居中的单栏构图，其下方各区块原先却是左对齐 —— 两区对齐方式相反，
+   页面读起来像几套不同设计拼在一起，这是「衔接突兀」最主要的原因。
+
+   这里统一为**区块级居中**，并且用一条规则覆盖所有区块，而不是逐个加样式：
+   将来新增区块会自动居中，不会再漏掉一个造成新的不一致。
+
+   刻意**不居中卡片内部**：场景卡与步骤卡内部是「时段/编号 + 内容 + 费用」
+   的多列网格，文字逐行居中会让列对不齐、扫读成本上升。
+   居中的是**块本身**，块内仍按左对齐阅读 —— 这是居中式版面的常规做法。
+   ============================================================ */
+.section .sec-head {
+  /* 块居中后文字随之居中；max-width 保证长文案不会拉成一条超长行 */
+  margin-inline: auto;
+  text-align: center;
+}
+
+/* 区块内容块整块居中 */
+.section .scenes,
+.section .steps,
+.section .showcase,
+.section .tabs {
+  max-width: 1000px;
+  margin-inline: auto;
+}
+
+/* tabs 是 flex，居中后还需让子项在行内居中排列 */
+.section .tabs {
+  justify-content: center;
+  flex-wrap: wrap;
+  overflow-x: visible;
+}
+
 .eyebrow {
   display: inline-block;
   font-size: 0.73rem;
