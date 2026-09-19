@@ -21,6 +21,7 @@ import {
 import { extractItinerary } from '@/api/itinerary'
 import { useUiStore } from '@/stores/ui'
 import { suggestFromContext } from '@/utils/quickSuggest'
+import { formatRelative } from '@/utils/datetime'
 import { useUserStore } from '@/stores/user'
 import { PAGE_COPY } from '@/constants/copy'
 
@@ -671,19 +672,18 @@ const filteredConversations = computed(() => {
 })
 
 /** 会话项显示的时间：今天显示时刻，更早显示日期，避免一长串相同日期 */
+/**
+ * 会话列表的时间显示。
+ *
+ * 原先这里自己实现了一套（用 new Date() 解析并判断是否同一天）。
+ * 现在委托给 utils/datetime 的 formatRelative：
+ *   · 统一了时间处理（原先三处各写一套，假设的后端格式还不一样）
+ *   · 修掉一个隐患：new Date('2026-09-19 17:30:00') 会被当成本机时区解析，
+ *     而后端下发的**已经是东八区本地时间**，在非东八区的机器上会再偏一次
+ *   · formatRelative 用正则提取日期分量后本地构造 Date，不做时区换算
+ */
 function convTime(createdAt?: string): string {
-  if (!createdAt) return ''
-  const d = new Date(createdAt)
-  if (Number.isNaN(d.getTime())) return createdAt.slice(0, 10)
-  const now = new Date()
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  if (sameDay) {
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  }
-  return `${d.getMonth() + 1}/${d.getDate()}`
+  return formatRelative(createdAt)
 }
 
 /** 默认快捷示例：无上下文可依据时使用 */

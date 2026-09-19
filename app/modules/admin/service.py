@@ -40,7 +40,7 @@ from app.shared.usage_query import (
     local_today,
 )
 from app.shared.usage_store import flush_pending_usage
-from app.shared.utils import TransactionMixin, log
+from app.shared.utils import TransactionMixin, log, to_local_display
 
 from .repo import AdminRepo
 
@@ -215,7 +215,15 @@ class AdminService(TransactionMixin):
                     "avatar": u.avatar,
                     "role": u.role,
                     "is_active": u.is_active,
-                    "created_at": u.created_at,
+                    # 时间必须在此转换。
+                    #
+                    # 管理端**所有路由都没有声明 response_model**（虽然
+                    # schemas.py 里定义了 AdminUserItem/AdminUserPage，但从未
+                    # 被引用），因此 Pydantic 的 field_serializer **不会执行** ——
+                    # 在 schema 上加序列化器完全不生效。
+                    # 这也是「改了 schema 却没有任何变化」的原因。
+                    # 统一在构造 dict 时转成本地时区字符串，与会话/行程模块一致。
+                    "created_at": to_local_display(u.created_at) if u.created_at else None,
                 }
                 for u in users
             ],
@@ -231,7 +239,9 @@ class AdminService(TransactionMixin):
             "avatar": user.avatar,
             "role": user.role,
             "is_active": user.is_active,
-            "created_at": user.created_at,
+            # 同 list_users：路由未声明 response_model，schema 的序列化器不生效，
+            # 时间必须在这里转（否则详情页显示 UTC，比实际早 8 小时）
+            "created_at": to_local_display(user.created_at) if user.created_at else None,
             "conversation_count": conversations,
             "itinerary_count": itineraries,
         }
@@ -415,7 +425,10 @@ class AdminService(TransactionMixin):
                     "target_id": r.target_id,
                     "detail": r.detail,
                     "ip": r.ip,
-                    "created_at": r.created_at,
+                    # 这里手工构造 dict、router 直接返回，**不经过 Pydantic schema**，
+                    # 所以 schema 上的 field_serializer 不会生效 —— 必须在此显式转换。
+                    # 否则下发的是原始 UTC，前端展示会早 8 小时。
+                    "created_at": to_local_display(r.created_at) if r.created_at else None,
                 }
                 for r in rows
             ],

@@ -1,7 +1,10 @@
 """管理端请求/响应模型。"""
+from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
+
+from app.shared.utils import to_local_display
 
 
 class AdminUserItem(BaseModel):
@@ -15,7 +18,20 @@ class AdminUserItem(BaseModel):
     # user（普通用户）。前端据此显示不同底色并决定是否渲染操作按钮。
     role: Annotated[str, Field(description="角色：user / admin / super_admin")]
     is_active: Annotated[bool, Field(description="账号是否启用")]
-    created_at: Annotated[Any, Field(description="注册时间（UTC）")]
+    created_at: Annotated[datetime, Field(description="注册时间")]
+
+    @field_serializer("created_at")
+    def _ser_created_at(self, v: datetime) -> str:
+        """统一转成本地时区字符串再下发。
+
+        原先这里声明为 Any 且没有序列化器，于是**原始 UTC 时间**直接落到
+        前端 —— 用户看到的注册时间比实际早 8 小时，格式还是
+        `2026-09-19T05:16:53.742467+00:00` 这种带微秒与时区偏移的串。
+
+        会话 / 行程 / 分享 / 记忆四个模块的 schema 早就用了
+        to_local_display()，唯独管理端漏了 —— 属于遗漏而非有意区别。
+        """
+        return to_local_display(v)
 
     model_config = {"from_attributes": True}
 
@@ -106,7 +122,12 @@ class AuditLogItem(BaseModel):
     target_id: Annotated[str, Field(description="目标标识")]
     detail: Annotated[str | None, Field(description="变更明细（JSON）")] = None
     ip: Annotated[str | None, Field(description="来源 IP")] = None
-    created_at: Annotated[Any, Field(description="操作时间（UTC）")]
+    created_at: Annotated[datetime, Field(description="操作时间")]
+
+    @field_serializer("created_at")
+    def _ser_created_at(self, v: datetime) -> str:
+        """同 AdminUserItem：转本地时区，避免展示 UTC 造成 8 小时偏差。"""
+        return to_local_display(v)
 
     model_config = {"from_attributes": True}
 

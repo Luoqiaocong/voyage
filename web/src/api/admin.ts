@@ -236,8 +236,21 @@ export async function updateUserStatus(userId: number, isActive: boolean): Promi
 export interface ConversationStats {
   total_conversations: number
   total_messages: number
+  /** 平均每会话消息数，后端已**向下取整**（不显示小数） */
   avg_messages_per_conversation: number
-  top_active_users: { user_id: number; email: string; conversations: number }[]
+  /**
+   * 活跃用户排行。
+   *
+   * 后端多返回一些候选（见 repo.ACTIVE_USER_POOL），前端按不同口径
+   * 本地重排后取前 10 —— 切换排序时不需要重新请求。
+   */
+  top_active_users: {
+    user_id: number
+    email: string
+    conversations: number
+    /** 当日（本地时区）产生的消息数 */
+    today_messages: number
+  }[]
 }
 
 /**

@@ -1,4 +1,5 @@
 """管理端数据访问层。"""
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import Depends
@@ -8,6 +9,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.user.constants import ROLE_RANK
 from app.shared.db import get_db
 from app.shared.db.models import Conversation, Itinerary, TokenUsage, User
+from app.shared.utils import to_local_display
+from app.shared.utils.datetime_util import LOCAL_TZ
+
+#: 活跃用户排行返回的条数。
+#: 用户要求「只显示前十，折叠后面七位」，因此这里多取一些，
+#: 由前端负责「先展示前 3、其余折叠」——后端只保证数据够用。
+ACTIVE_USER_LIMIT = 10
+#: 为两种排序口径（会话数 / 当日消息数）预留的候选倍数。
+#: 一次查询取回，在服务层按不同口径排序，避免为每种排序各查一次库。
+ACTIVE_USER_POOL = ACTIVE_USER_LIMIT * 3
 
 
 class AdminRepo:
@@ -108,16 +119,24 @@ class AdminRepo:
             await self.db.execute(select(func.coalesce(func.sum(Conversation.message_count), 0)))
         ).scalar_one()
 
+        total_conv = int(total_conversations)
+        total_msg = int(total_messages)
+        # 排行取前 10：用户要求「只显示前十，折叠后面七位」，
+        # 但下面还要展示「当日消息数」与「总体会话数」两个口径，
+        # 故这里一并多取一些，由服务层按口径排序后再截断，
+        # 避免为两种排序各查一次数据库。
         top_rows = (
             await self.db.execute(
                 select(Conversation.user_id, func.count(Conversation.id).label("n"))
                 .group_by(Conversation.user_id)
                 .order_by(func.count(Conversation.id).desc())
-                .limit(5)
+                .limit(ACTIVE_USER_POOL)
             )
         ).all()
         user_ids = [r[0] for r in top_rows]
+
         emails: dict[int, str] = {}
+        today_msg: dict[int, int] = {}
         if user_ids:
             user_rows = (
                 await self.db.execute(
@@ -126,14 +145,43 @@ class AdminRepo:
             ).all()
             emails = {r[0]: r[1] for r in user_rows}
 
-        total_conv = int(total_conversations)
-        total_msg = int(total_messages)
+            # 「今天」的消息数：在 Python 里算出**本地当天起点**，转成 UTC 后
+            # 直接比较时间戳。
+            #
+            # 为什么不在 SQL 里取日期前缀：那样得到的是 UTC 日期，
+            # 与用户感知的「今天」最多差 8 小时（UTC 的 16:00 之后已是北京的次日）。
+            # 用时间戳区间比较既没有方言差异（PostgreSQL 的 to_char 与
+            # SQLite 的 substr 完全不同），口径也与其它统计一致。
+            start_local = datetime.now(LOCAL_TZ).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            start_utc = start_local.astimezone(timezone.utc)
+            day_rows = (
+                await self.db.execute(
+                    select(Conversation.user_id, func.count(Conversation.id))
+                    .where(
+                        Conversation.user_id.in_(user_ids),
+                        Conversation.created_at >= start_utc,
+                    )
+                    .group_by(Conversation.user_id)
+                )
+            ).all()
+            today_msg = {r[0]: int(r[1]) for r in day_rows}
+
         return {
             "total_conversations": total_conv,
             "total_messages": total_msg,
-            "avg_messages_per_conversation": round(total_msg / total_conv, 2) if total_conv else 0.0,
+            # 用户要求「平均每会话消息应为**向下取整**的整数」。
+            # 原先用 round(...,2) 得到 3.33 这种小数——对「平均每会话几条消息」
+            # 这个指标来说，小数既没有意义也不好读。
+            "avg_messages_per_conversation": total_msg // total_conv if total_conv else 0,
             "top_active_users": [
-                {"user_id": r[0], "email": emails.get(r[0], "未知"), "conversations": int(r[1])}
+                {
+                    "user_id": r[0],
+                    "email": emails.get(r[0], "未知"),
+                    "conversations": int(r[1]),
+                    "today_messages": today_msg.get(r[0], 0),
+                }
                 for r in top_rows
             ],
         }
@@ -199,7 +247,10 @@ class AdminRepo:
                 "user_id": r[1],
                 "user_email": r[2],
                 "message_count": r[3],
-                "created_at": r[4],
+                # repo 直接返回 dict，不经过 Pydantic schema，
+                # 故时间必须在此转成本地时区字符串；否则前端拿到的是 UTC，
+                # 展示会早 8 小时（与用户详情页同样的问题）。
+                "created_at": to_local_display(r[4]) if r[4] else None,
             }
             for r in rows
         ]

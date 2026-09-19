@@ -26,6 +26,7 @@ import {
 import { useUiStore } from '@/stores/ui'
 import { useUserStore } from '@/stores/user'
 import { roleLabel } from '@/utils/role'
+import { formatDateTime, formatDate } from '@/utils/datetime'
 
 const ui = useUiStore()
 const me = useUserStore()
@@ -274,7 +275,7 @@ onMounted(async () => {
                 </span>
               </td>
               <td class="table__mono table__date" :title="u.created_at">
-                {{ u.created_at?.slice(0, 10) }}
+                {{ formatDate(u.created_at) }}
               </td>
               <td class="table__ops">
                 <!-- 详情对所有管理员开放：它只展示统计数字，不含操作 -->
@@ -362,7 +363,7 @@ onMounted(async () => {
             <dd>{{ roleLabel(detail.role) }}</dd>
           </div>
           <div><dt>状态</dt><dd>{{ detail.is_active ? '已启用' : '已禁用' }}</dd></div>
-          <div><dt>注册时间</dt><dd class="table__mono">{{ detail.created_at }}</dd></div>
+          <div><dt>注册时间</dt><dd class="table__mono">{{ formatDateTime(detail.created_at) }}</dd></div>
           <div><dt>会话数</dt><dd>{{ detail.conversation_count }}</dd></div>
           <div><dt>行程数</dt><dd>{{ detail.itinerary_count }}</dd></div>
         </dl>

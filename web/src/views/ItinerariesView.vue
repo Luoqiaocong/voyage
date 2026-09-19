@@ -5,6 +5,7 @@ import AppNavbar from '@/components/AppNavbar.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
 import { listItineraries, type ItineraryDetail } from '@/api/itinerary'
 import { useUiStore } from '@/stores/ui'
+import { formatDateTime } from '@/utils/datetime'
 import { PAGE_COPY } from '@/constants/copy'
 
 const router = useRouter()
@@ -105,7 +106,7 @@ onMounted(async () => {
             <div class="it-card__foot">
               <span class="it-card__date">
                 <TravelIcon name="clock" :size="13" />
-                更新于 {{ it.updated_at.replace('T', ' ').slice(0, 16) }}
+                更新于 {{ formatDateTime(it.updated_at) }}
               </span>
               <span class="it-card__go">
                 查看行程

@@ -7,6 +7,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { AUDIT_ACTION_LABEL, listAuditLogs, type AuditLogItem } from '@/api/admin'
+import { formatDateTime } from '@/utils/datetime'
 import { useUiStore } from '@/stores/ui'
 
 const ui = useUiStore()
@@ -121,7 +122,7 @@ onMounted(load)
           </thead>
           <tbody>
             <tr v-for="log in items" :key="log.id">
-              <td class="table__mono table__date">{{ log.created_at }}</td>
+              <td class="table__mono table__date">{{ formatDateTime(log.created_at) }}</td>
               <td class="table__email">{{ log.operator_email }}</td>
               <td>
                 <span class="tag">{{ actionText(log.action) }}</span>

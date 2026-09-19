@@ -15,6 +15,7 @@ import {
   type ConversationStats
 } from '@/api/admin'
 import { useUiStore } from '@/stores/ui'
+import { formatDateTime } from '@/utils/datetime'
 import TravelIcon from '@/components/TravelIcon.vue'
 
 const ui = useUiStore()
@@ -27,6 +28,58 @@ const page = ref(1)
 const pageSize = ref(20)
 /** 排序维度：规模统计页默认按消息数看更直观，也可切回看最新动态 */
 const sort = ref<'created_desc' | 'messages_desc'>('messages_desc')
+
+/**
+ * 活跃用户排行的口径。
+ *
+ * 用户要求「这都可以归为用户活跃排行，不必两个卡片，下拉框按不同规则排序
+ * 就可以了」。原先「活跃用户排行」与「会话规模分布」是两张卡片，
+ * 但前者按会话数、后者按消息数，本质是同一份数据的两种排法。
+ *
+ * 两种口径都只依赖已返回的 top_active_users 字段（conversations /
+ * today_messages），切换时**不需要重新请求** —— 数据一次取回、本地重排，
+ * 切换是瞬时的。后端的 ACTIVE_USER_POOL 已多取候选，保证两种排法
+ * 各自的前 10 名都落在池子里。
+ */
+/** 折叠时保留可见的条数（用户要求「显示前十，折叠后面七位」） */
+const RANK_VISIBLE = 3
+const rankExpanded = ref(false)
+
+const rankMetric = ref<'conversations' | 'today_messages'>('conversations')
+
+/** 按选定口径重排；同值时用 user_id 保证顺序稳定 */
+const rankedUsers = computed(() => {
+  const list = [...(stats.value?.top_active_users ?? [])]
+  const key = rankMetric.value
+  list.sort((a, b) => {
+    const diff = (b[key] ?? 0) - (a[key] ?? 0)
+    return diff !== 0 ? diff : a.user_id - b.user_id
+  })
+  return list.slice(0, 10)
+})
+
+/** 折叠状态下只显示前三条 */
+const visibleRank = computed(() =>
+  rankExpanded.value ? rankedUsers.value : rankedUsers.value.slice(0, RANK_VISIBLE)
+)
+
+/** 被折叠起来的条数，用于按钮文案 */
+const hiddenRank = computed(() => Math.max(0, rankedUsers.value.length - RANK_VISIBLE))
+
+/**
+ * 前三名的奖牌色识别。
+ * 返回 gold / silver / bronze，其余为空。用**背景色**而不是 emoji 奖牌，
+ * 免得与站内图标风格不一致（此前已统一去掉 emoji 图标）。
+ */
+function medalOf(index: number): string {
+  return ['gold', 'silver', 'bronze'][index] ?? ''
+}
+
+function metricText(u: { conversations: number; today_messages: number }): string {
+  return rankMetric.value === 'conversations'
+    ? `${u.conversations} 个会话`
+    : `今日 ${u.today_messages} 条消息`
+}
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 
@@ -89,6 +142,8 @@ onMounted(() => {
       </div>
       <div class="ccard">
         <p class="ccard__label">平均每会话消息</p>
+        <!-- 后端已做向下取整（用户要求），此处不再格式化，
+             避免前端再做一次 round 造成两处口径不一致 -->
         <p class="ccard__value">{{ stats?.avg_messages_per_conversation ?? '—' }}</p>
       </div>
       <!-- 原先这里还有一张「已生成标题」卡片。
@@ -96,19 +151,48 @@ onMounted(() => {
            指标本身也一并从后端移除，故这里删掉这张卡片。 -->
     </div>
 
-    <!-- 活跃用户 -->
+    <!--
+      活跃用户排行：一个卡片 + 下拉切换口径。
+      原先「活跃用户排行」（按会话数）与「会话规模分布」（按消息数）
+      是两张卡片，本质是同一份数据的两种排法，合并后更省空间也更清楚。
+      切换口径在本地重排，不重新请求 —— 数据已在前端。
+    -->
     <section v-if="stats?.top_active_users.length" class="card conv__panel">
       <header class="conv__head">
-        <h2>活跃用户排行</h2>
-        <span class="conv__hint">按会话数</span>
+        <h2>用户活跃排行</h2>
+        <div class="conv__head-ops">
+          <select
+            v-model="rankMetric"
+            class="select conv__sort"
+            aria-label="排行口径"
+          >
+            <option value="conversations">按会话数</option>
+            <option value="today_messages">按今日消息数</option>
+          </select>
+          <span class="conv__hint">仅统计规模，不含内容</span>
+        </div>
       </header>
+
       <ul class="rank">
-        <li v-for="(u, i) in stats.top_active_users" :key="u.user_id">
-          <span class="rank__no" :class="{ 'is-top': i === 0 }">{{ i + 1 }}</span>
+        <li v-for="(u, i) in visibleRank" :key="u.user_id">
+          <!-- 前三名用金银铜底色；名次本身仍是数字，不比奖牌图标更难认 -->
+          <span class="rank__no" :class="medalOf(i) ? `rank__no--${medalOf(i)}` : ''">
+            {{ i + 1 }}
+          </span>
           <span class="rank__email">{{ u.email }}</span>
-          <span class="rank__count">{{ u.conversations }} 个会话</span>
+          <span class="rank__count">{{ metricText(u) }}</span>
         </li>
       </ul>
+
+      <!-- 折叠：默认只露前 3，其余收起。条数不多时不显示这个按钮 -->
+      <button
+        v-if="hiddenRank > 0"
+        class="rank__toggle"
+        type="button"
+        @click="rankExpanded = !rankExpanded"
+      >
+        {{ rankExpanded ? '收起' : `展开其余 ${hiddenRank} 位` }}
+      </button>
     </section>
 
     <!-- 会话元数据（不展示任何会话内容） -->
@@ -142,7 +226,7 @@ onMounted(() => {
               <td class="table__mono">{{ c.id }}</td>
               <td class="table__email">{{ c.user_email }}</td>
               <td>{{ c.message_count }}</td>
-              <td class="table__mono table__date">{{ c.created_at }}</td>
+              <td class="table__mono table__date">{{ formatDateTime(c.created_at) }}</td>
             </tr>
             <tr v-if="!loading && !items.length">
               <td colspan="4" class="table__empty">暂无会话</td>
@@ -214,13 +298,37 @@ onMounted(() => {
   display: grid;
   place-items: center;
   font-size: 0.72rem;
+  font-weight: 700;
   font-family: var(--mono);
   background: var(--surface-soft);
   color: var(--text2);
 }
-.rank__no.is-top { background: var(--grad-gold); color: #fff; }
+/*
+ * 前三名金银铜。
+ * 用底色区分而不是奖牌 emoji：站内图标已统一为 SVG，混入 emoji
+ * 会在不同平台呈现成不同字形（此前已因这个原因清理过一批）。
+ * 名次本身仍是数字，比图标更精确。
+ */
+.rank__no--gold { background: linear-gradient(135deg, #f0b429, #d69e2e); color: #fff; }
+.rank__no--silver { background: linear-gradient(135deg, #cbd5e0, #a0aec0); color: #fff; }
+.rank__no--bronze { background: linear-gradient(135deg, #d69e7a, #b7791f); color: #fff; }
+
 .rank__email { font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rank__count { font-size: 0.8rem; color: var(--text3); font-family: var(--mono); }
+
+.rank__toggle {
+  margin-top: 12px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-s);
+  background: var(--panel);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--prim);
+  transition: background-color 0.18s, border-color 0.18s;
+}
+.rank__toggle:hover { background: var(--blue-50); border-color: var(--blue-200); }
+.rank__toggle:focus-visible { outline: 2px solid var(--prim); outline-offset: 2px; }
 
 .table-wrap { overflow-x: auto; }
 .table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
