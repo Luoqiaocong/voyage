@@ -80,6 +80,8 @@ let timer: ReturnType<typeof setInterval> | null = null
 
 /** 验证码输入框：发出验证码后自动聚焦到它，省掉一次手动点击 */
 const codeInputEl = ref<HTMLInputElement | null>(null)
+/** 登录表单的密码框：注册成功后把焦点放这里，用户下一步必然是输密码 */
+const loginPwdEl = ref<HTMLInputElement | null>(null)
 /** 「收不到验证码」的自助排查列表是否展开 */
 const showCodeHelp = ref(false)
 
@@ -281,11 +283,33 @@ async function handleRegister() {
       username: regForm.username.trim(),
       code: regForm.code.trim()
     })
+
+    /*
+     * 注册成功后**不自动登录**，而是切回登录表单让用户自己登录一次。
+     *
+     * 原先这里紧接着又调了一次 login() 并 setAuth()，等于注册完直接进主界面。
+     * 那样有个实际风险：用户自己都没验证过一遍密码记不记得住 ——
+     * 注册时输入的密码若记错了，当时不会有任何反馈，等到下次登录才发现，
+     * 而那时已经错过了「刚设置完、记忆最新」的纠正时机。
+     * 让他立刻用同一个密码登录一次，等于当场确认密码可用。
+     *
+     * 顺带也真正走通了登录接口（发 token 的路径），
+     * 而不是让注册接口顺带发一份 token 绕过它。
+     *
+     * 注册接口返回的 token 弃用：这里刻意不调 setAuth。
+     */
     ui.toast(AUTH_COPY.registerSuccess, 'success')
-    const res = await login(email, regForm.password)
-    user.setAuth(res)
-    await user.fetchUserInfo(true)
-    router.replace(withExample('/chat'))
+
+    // 邮箱带过去，用户只需再输一遍密码；密码与验证码清空避免误提交
+    loginForm.email = email
+    loginForm.password = ''
+    regForm.password = ''
+    regForm.code = ''
+
+    // 切到登录表单，焦点放到密码框：下一步必然是输密码
+    mode.value = 'login'
+    await nextTick()
+    loginPwdEl.value?.focus()
   } catch (e: any) {
     errors.form = e?.message ?? '注册失败，稍后重试'
   } finally {
@@ -449,6 +473,7 @@ function handleThirdParty() {
                     <TravelIcon name="lock" />
                     <input
                       id="login-pwd"
+                      ref="loginPwdEl"
                       v-model="loginForm.password"
                       class="input input--pwd"
                       :type="showLoginPwd ? 'text' : 'password'"
@@ -958,6 +983,10 @@ function handleThirdParty() {
   background: rgba(196, 69, 61, 0.08);
   border: 1px solid rgba(196, 69, 61, 0.22);
 }
+
+/* 原先这里有一组 .form-note 样式，用于「刚注册完，请登录」的常驻提示条。
+   已按用户要求去掉：该提示只需要弹出一次并自行消失（走 toast），
+   不需要在表单里长期挂一条。样式一并删除，避免留下无引用的规则。 */
 
 /* ---- 忘记密码步骤 ---- */
 .steps {

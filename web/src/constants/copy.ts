@@ -43,7 +43,13 @@ export const AUTH_COPY = {
   usernameRequired: '给自己起个旅行昵称吧',
   usernameLength: '昵称 2-10 个字符，短一点更好记',
   loginSuccess: '欢迎回来，旅程继续',
-  registerSuccess: '账号已就绪，正在带你出发…',
+  /*
+   * 注册成功后的提示。刻意**不说「正在带你出发」** ——
+   * 注册后不会自动登录，而是切回登录表单让用户自己登一次；
+   * 文案若暗示「马上进去」会与随后的界面不符。
+   * 语气贴旅行（登船 / 出发），并点出下一步动作。
+   */
+  registerSuccess: '船舱已备好，请用刚设置的密码登船～',
   codeSent: '验证码已寄出，去邮箱看看',
   resetSuccess: '密码已更新，用新密码继续出发',
   thirdPartySoon: '第三方登录正在打通，先用邮箱出发吧',
