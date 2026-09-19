@@ -51,23 +51,23 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_DB: "7"
+      # 数据库指向 compose 内的 postgres 服务。
+      #
+      # 为什么在这里写死而不是沿用 .env：.env 里的 DATABASE_URL 是**本机开发**
+      # 用的（可能指向 Neon 等外部实例）。若原样带进容器，就会出现
+      # 「起了一个没人用的 PG，而后端连去外部库」——数据到底写进哪里都说不清。
+      # 这里显式覆盖，保证容器部署的数据落在 compose 内的 PG 里。
+      #
+      # 若确实想用外部 PostgreSQL，把下面这行注释掉，并在 .env 里配 DATABASE_URL。
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-voyage}:${POSTGRES_PASSWORD:-voyage}@postgres:5432/${POSTGRES_DB:-voyage}
       # 分享链接的对外基址：改成你的服务器地址或域名，
       # 否则「分享链接」复制出来仍是 localhost，别人打不开。
       SHARE_BASE_URL: ${SHARE_BASE_URL:-http://localhost}
       # 日志输出到文件（挂载在 data 卷里，便于排查线上问题）
       LOG_TO_FILE: "true"
-      # 数据库：默认沿用 .env 里的 DATABASE_URL（通常指向外部 PostgreSQL，
-      # 如 Neon / 自建实例）。若启用了下方可选的 postgres 服务，
-      # 把这一项改成容器内的地址即可：
-      #   DATABASE_URL: postgresql+asyncpg://voyage:voyage@postgres:5432/voyage
-      #
-      # 注意：**不配 DATABASE_URL 时后端会回退到容器内的 SQLite**
-      # （/app/data/app.db），单机演示够用，但不适合多人使用。
     volumes:
-      # 这里挂载 data 目录有两个作用：
-      #   1. 日志文件（LOG_TO_FILE=true 时写在这里）
-      #   2. 未配置 DATABASE_URL 时，SQLite 回退库也在这里
-      # 配了 PostgreSQL 时，业务数据不在容器内，本卷只承载日志。
+      # 挂载 data 目录用于持久化日志文件。
+      # 业务数据在 postgres 容器里（独立的 pg-data 卷），不在这个目录下。
       - ./data:/app/data
     # 与 Dockerfile 里的 HEALTHCHECK 一致，此处显式声明便于阅读与调整。
     # depends_on 的 service_healthy 条件正是靠它生效。
@@ -80,35 +80,39 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      # 等 PG 真正可接受连接再启动，避免迁移在数据库还没就绪时失败。
+      # 用 service_healthy 而不是 service_started：后者只保证容器起来了，
+      # 而 postgres 初始化需要几秒，此时连接会被拒。
+      postgres:
+        condition: service_healthy
     networks: [voyage]
 
-  # ------------------------------------------------------- PostgreSQL（可选）
-  # 默认**不启动**：只在你没有外部 PostgreSQL 时才需要它。
+  # ------------------------------------------------------- PostgreSQL
+  # 默认随 `docker compose up -d` 一起启动。
   #
-  # 启用方式：
-  #   1. docker compose --profile with-db up -d
-  #   2. 把上面 backend 的 DATABASE_URL 指向它：
-  #        DATABASE_URL: postgresql+asyncpg://voyage:voyage@postgres:5432/voyage
-  #      （注意用服务名 postgres 而不是 localhost——容器之间走 compose 网络）
+  # 第一版曾用 profiles 把它设为「可选、默认不启动」，理由是「多数部署连外部托管 PG」。
+  # 但实际部署时发现那个默认值会坑人：起了一个没人用的 PG，而后端仍连 .env 里的
+  # 外部库，数据到底写进哪里都说不清。现在改为**默认启动且后端自动连它**，
+  # 拿到项目 `docker compose up -d --build` 一条命令即可用，无需改任何配置。
   #
-  # 用 profile 而不是直接放开的原因：多数部署连的是外部托管 PG
-  # （如 Neon），若无条件拉起一个本地 PG，会同时存在两个数据库，
-  # 容易出现「数据写进了哪个库」的混乱。
+  # 若确实要用外部 PostgreSQL：注释掉上面 backend 的 DATABASE_URL 覆盖，
+  # 并在 .env 里配置 DATABASE_URL 即可。此时本服务可以 `docker compose stop postgres`。
   postgres:
     image: postgres:16-alpine
     container_name: voyage-postgres
     restart: unless-stopped
-    profiles: ["with-db"]
     environment:
-      POSTGRES_USER: voyage
-      POSTGRES_PASSWORD: voyage
-      POSTGRES_DB: voyage
-      # 中文内容不受影响（库默认 UTF8），这里只固定排序规则便于索引行为可预期
+      # 账号密码可用环境变量覆盖；默认值仅适用于内网 compose 部署，
+      # 不对宿主机暴露端口，故不强制设置。生产环境建议在 .env 里覆盖。
+      POSTGRES_USER: ${POSTGRES_USER:-voyage}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voyage}
+      POSTGRES_DB: ${POSTGRES_DB:-voyage}
+      # 中文内容不受影响（库默认 UTF8），这里只固定初始化参数便于行为可预期
       POSTGRES_INITDB_ARGS: "--encoding=UTF8"
     volumes:
       - pg-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U voyage -d voyage"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-voyage} -d ${POSTGRES_DB:-voyage}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -142,7 +146,8 @@ services:
 volumes:
   redis-data:
     driver: local
-  # postgres 服务的持久化卷（仅在启用 with-db profile 时使用）
+  # PostgreSQL 的数据卷。**必须持久化**：容器重建时业务数据（用户、会话、行程、
+  # 对话状态）都在这里，删掉即全部丢失。
   pg-data:
     driver: local
 

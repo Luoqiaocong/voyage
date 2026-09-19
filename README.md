@@ -283,42 +283,42 @@ ADMIN_PASSWORD='你的强密码' python app/scripts/create_admin.py \
 
 ## 🐳 Docker 部署
 
-已提供完整容器化配置，一条命令拉起 Redis + 后端 + 前端：
+已提供完整容器化配置，一条命令拉起 **PostgreSQL + Redis + 后端 + 前端**：
 
 ```bash
-cp .env.example .env      # 填入真实密钥（数据库、模型 API Key、JWT、邮件等）
+cp .env.example .env      # 填入真实密钥（模型 API Key、JWT、邮件等）
 docker compose up -d --build
 ```
 
-> **数据库**：默认连 `.env` 里 `DATABASE_URL` 指向的**外部 PostgreSQL**
-> （如 Neon / 自建实例）。若没有外部 PG，compose 里提供了可选的容器内 PG：
+> **数据库与缓存都在容器里，无需任何额外配置。**
+> 后端会自动连接 compose 内的 `postgres` 服务（`docker-compose.yml` 里
+> 已覆盖 `DATABASE_URL`），首次启动时自动执行 `alembic upgrade head` 建表。
 >
-> ```bash
-> # 1. 启动带数据库的一组服务
-> docker compose --profile with-db up -d --build
-> # 2. 把 backend 的 DATABASE_URL 指向它（取消 docker-compose.yml 中该行注释）
-> #    DATABASE_URL: postgresql+asyncpg://voyage:voyage@postgres:5432/voyage
-> ```
+> 若要用**外部** PostgreSQL（如 Neon）：注释掉 `docker-compose.yml` 中
+> backend 的 `DATABASE_URL` 覆盖行，并在 `.env` 里配置 `DATABASE_URL`，
+> 然后 `docker compose stop postgres` 即可。
 >
-> 该服务用 `profiles` 隔离，默认不启动——多数部署连的是外部托管 PG，
-> 无条件拉起本地 PG 会同时存在两个库，容易混淆「数据写进了哪个」。
->
-> 完全不配 `DATABASE_URL` 时后端回退到容器内 SQLite（`/app/data` 卷），
-> 单机演示够用，但不适合多人使用。
+> 生产环境建议在 `.env` 里覆盖 `POSTGRES_PASSWORD`（默认值仅适用于内网）。
 
 启动后访问 `http://<服务器地址>/`（默认 80 端口，可用 `WEB_PORT=8080` 覆盖）。
+
+> ⚠️ **务必设置 `SHARE_BASE_URL`** 为实际对外地址（如 `https://your-domain.com`）。
+> 它决定分享链接的前缀，不设置会生成 `http://localhost/share/...`，别人打不开。
+> 也可以在启动时传入：`SHARE_BASE_URL=https://your-domain.com docker compose up -d`
 
 ### 服务构成
 
 | 服务 | 镜像 | 说明 |
 |---|---|---|
-| `redis` | `redis:7-alpine` | 限流、验证码、Refresh Token、Token 用量统计 |
+| `postgres` | `postgres:16-alpine` | 业务数据与会话状态，`pg-data` 卷持久化 |
+| `redis` | `redis:7-alpine` | 限流、验证码、Refresh Token、Token 用量统计、工具缓存 |
 | `backend` | 本地构建 | FastAPI，**启动时自动执行 `alembic upgrade head`** |
 | `web` | 本地构建 | nginx 托管前端，并把 `/api` 反代到 backend |
-| `postgres` | `postgres:16-alpine` | **可选**（`--profile with-db`），无外部 PG 时才需要 |
 
-只有 `web` 对外暴露端口；后端与 Redis 仅在内网可达，浏览器只看到一个源，
-因此**无需配置 CORS**。
+四个服务默认全部启动，无需 profile。
+
+只有 `web` 对外暴露端口；后端、PostgreSQL 与 Redis 仅在内网可达
+（PG 与 Redis 不映射宿主机端口），浏览器只看到一个源，因此**无需配置 CORS**。
 
 ### ⚠️ 部署前必须改的两项
 
