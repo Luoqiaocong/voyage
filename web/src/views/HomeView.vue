@@ -476,13 +476,26 @@ const revealed = ref(false)
 /** 用于 aria-controls 指向的容器 id */
 const REVEAL_ID = 'home-more'
 
-/** 展开后平滑滚到内容顶部；已在视野内或用户偏好减弱动效时不滚 */
+/** 展开后滚到内容区；已在视野内或用户偏好减弱动效时不滚 */
 function scrollToContent() {
   if (typeof document === 'undefined') return
   const el = document.getElementById(REVEAL_ID)
   if (!el) return
-  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
-  el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+
+  /*
+   * 用 block: 'nearest' 而不是 'start'。
+   *
+   * 'start' 会把容器**顶端**对齐到视口顶部，而容器顶部有一段内边距
+   * （.section--join 的 padding-top），于是紧贴其上方的引导件
+   * （箭头 + 一行说明）会被推到顶边之外，看起来「被遮挡 / 没显现」。
+   * 'nearest' 只在元素**完全不在视野内**时才滚动，且滚最小距离，
+   * 引导件自然留在视野中。
+   *
+   * 另外加 scroll-margin-top（见样式），让任何滚动定位都避开固定导航栏。
+   * behavior 不写：全局 html 已设 scroll-behavior: smooth，
+   * 而 reduce-motion 时全局会切成 auto，这里无需再判断一次。
+   */
+  el.scrollIntoView({ block: 'nearest' })
 }
 
 function reveal(andScroll = false) {
@@ -496,11 +509,7 @@ function reveal(andScroll = false) {
 
 function collapse() {
   revealed.value = false
-  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
-  document.getElementById('main')?.scrollIntoView({
-    behavior: reduce ? 'auto' : 'smooth',
-    block: 'start'
-  })
+  document.getElementById('main')?.scrollIntoView({ block: 'start' })
 }
 
 function toggleReveal() {
@@ -829,19 +838,23 @@ function startHref(): string {
            这一区的定位是「上一区那句话的结果」而不是新章节，
            故刻意做成**延续**而非并置：
              · 与 Hero 的间距从 136px 收到 ~40px（原来是 48+88 两段内边距叠加）
-             · 首行用居中、无字距、正常字重的引导语，承接 Hero 的居中构图
-             · 去掉左对齐的 eyebrow 小标签 —— 它把这一区拉回「新章节」的语气，
-               是造成割裂感的主要来源
-           详见下方 .showcase-intro / .section--join 的样式注释。
+             · 引导件缩成「箭头 + 一行彩色说明」，不再是两行文字
+           详见下方 .join-arrow / .section--join 的样式注释。
            ============================================================ -->
       <section class="section section--join">
         <div class="container">
-        <header class="showcase-intro rv">
-          <p class="showcase-intro__lead">
-            下面这几份，就是从<strong>上面这句话</strong>开始的
-          </p>
-          <h2 class="showcase-intro__title">一句话 → 一份可执行的行程</h2>
-        </header>
+        <!--
+          引导件：一根向下的箭头 + 右侧居中的一行说明。
+          原先这里是两行文字（引导语 + 标题），信息量偏大，把「这是一段过渡」
+          做得像「这是新区块的标题」。缩成箭头 + 一行短句后，它的作用回到
+          纯粹的指向：告诉读者下面的内容是从上面那句话来的。
+          文字水平方向在箭头右侧、垂直方向与箭头中线对齐，读起来像一句旁注。
+        -->
+        <div class="join-arrow rv">
+          <span class="join-arrow__shaft" aria-hidden="true"></span>
+          <span class="join-arrow__tip" aria-hidden="true"></span>
+          <p class="join-arrow__text">一份可执行的行程</p>
+        </div>
 
         <div class="tabs rv">
           <button
@@ -1498,17 +1511,106 @@ function startHref(): string {
  * vh 会把内容顶出可视区，svh 取下限更稳。带 vh 兜底供旧浏览器使用。
  * 减去导航栏高度，避免整体超出一屏反而多出滚动条。
  */
+/*
+ * Hero 自身有 overflow: hidden（见 .hero），内容超出会被裁掉。
+ * 留出 28px 余量，让底部的引导件（箭头 + 说明）在首屏就能露出大半、
+ * 明确提示「下面还有内容」；否则它正好压在下边界上被裁掉。
+ */
 .home--collapsed .hero {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: calc(100vh - var(--nav-h, 64px));
-  min-height: calc(100svh - var(--nav-h, 64px));
+  min-height: calc(100vh - var(--nav-h, 64px) - 28px);
+  min-height: calc(100svh - var(--nav-h, 64px) - 28px);
   padding-bottom: 32px;
 }
 /* Hero 内部本来就是单列居中，这里只需保证它垂直居中时不拉伸 */
 .home--collapsed .hero__inner {
   margin-block: auto;
+}
+
+/* ---------- Hero → 示例结果的引导件 ----------
+ *
+ * 结构：一根向下的箭头（竖线 + 箭头尖）+ 右侧与箭头**中线对齐**的一行说明。
+ * 用 CSS 画箭头（两条边框旋转 45°）而不是引图标：可与竖线在粗细、
+ * 颜色上完全连贯，也不需要为一个三角引一个组件。
+ *
+ * 原先这里是两行（引导语 + 标题），信息量偏大，读起来像「新区块的大标题」；
+ * 缩成箭头 + 一行短句后回到纯指向的作用。
+ */
+.join-arrow {
+  /* 整块居中，与 Hero 的中轴一致 */
+  display: flex;
+  align-items: center; /* 文字垂直居中于箭头的**整根**箭头，即中线对齐 */
+  justify-content: center;
+  gap: 14px;
+  margin: 0 auto 30px;
+  /* 右移一点点：箭头本身不是视觉重心，文字才是，
+     让「箭头 + 文字」这个组合看起来是整体居中的 */
+  padding-left: 6px;
+}
+
+/* 竖线：用渐变让它从透明淡入，避免与上方内容硬切 */
+.join-arrow__shaft {
+  width: 2px;
+  height: 58px;
+  border-radius: 2px;
+  background: linear-gradient(
+    180deg,
+    rgba(37, 99, 235, 0.06),
+    var(--blue-300) 30%,
+    var(--prim)
+  );
+}
+
+/* 箭头尖：两条边框旋转成 V 形 */
+.join-arrow__tip {
+  width: 11px;
+  height: 11px;
+  margin-left: -7px; /* 与竖线首尾相接，不留缝 */
+  border-right: 2px solid var(--prim);
+  border-bottom: 2px solid var(--prim);
+  border-radius: 1px;
+  transform: rotate(45deg) translate(-2px, -2px);
+}
+
+/*
+ * 说明文字：彩色标注。
+ *
+ * 用渐变文字（background-clip: text）而不是单色，是因为它承担的是
+ * 「这一步产出了什么」的强调，需要与普通正文拉开。取蓝 → 青 → 紫的
+ * 冷色过渡，与站点主色同族，不引入新色相。
+ *
+ * 必须同时写 `color` 作为降级：不支持 background-clip: text 的浏览器
+ * 会把文字画成透明（不可见）—— 那比没有强调严重得多。
+ */
+.join-arrow__text {
+  font-size: clamp(1.05rem, 1.6vw, 1.3rem);
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+
+  color: var(--prim); /* 降级色 */
+  background-image: linear-gradient(
+    100deg,
+    var(--prim) 0%,
+    #0ea5e9 42%,
+    #7c3aed 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* 深色主题下提亮一档，否则蓝紫在深底上发闷 */
+:root[data-theme='dark'] .join-arrow__text {
+  color: var(--blue-300);
+  background-image: linear-gradient(
+    100deg,
+    var(--blue-300) 0%,
+    #38bdf8 42%,
+    #a78bfa 100%
+  );
 }
 
 /*
@@ -1541,6 +1643,15 @@ function startHref(): string {
  */
 .section--join {
   padding-top: 40px;
+  /*
+   * 滚动定位时在顶部留出的余量。
+   *
+   * 没有这一条时，scrollIntoView 会把容器顶端（即它的 padding-top 起点）
+   * 对齐到视口顶部，于是紧贴其上方的引导件（箭头 + 说明）被推到顶边之外 ——
+   * 表现就是「跳下去以后箭头和文字被遮挡了」。
+   * 值 = 固定导航栏高度 + 一点呼吸空间。
+   */
+  scroll-margin-top: calc(var(--nav-h, 64px) + 16px);
 }
 
 .section--tint {
@@ -1554,41 +1665,15 @@ function startHref(): string {
  * 这正是「衔接突兀」最主要的原因（比间距问题更明显）。
  *
  * 处理原则：**整区居中，但卡片内部保持左对齐**。
- *   · 区级元素（引导语、tabs）居中，与 Hero 的构图对齐
+ *   · 区级元素（引导件、tabs）居中，与 Hero 的构图对齐
  *   · 卡片内部不清真居中 —— 那里是「时段 + 活动 + 费用」的三列网格，
  *     文字居中会让列对不齐、扫读成本上升。卡片作为**块**在区内居中即可。
  *     （这也是常见做法：居中的版面里，内容块内部仍按左对齐阅读。）
+ *
+ * 注：这里原有一组 .showcase-intro 样式（两行引导语 + 标题），
+ * 已按用户要求缩减为箭头 + 一行说明（见上方 .join-arrow），
+ * 那组规则随之删除，避免留下无引用代码。
  */
-.showcase-intro {
-  max-width: 46em;
-  /* 用 margin-inline 而不是 text-align 继承来居中：块本身居中后
-     内部文字仍可左对齐，将来加多行说明不会被强行居中 */
-  margin: 0 auto 30px;
-  text-align: center;
-}
-
-/* 引导语：承接 Hero「说一句话」的动作，明确下面是它的结果 */
-.showcase-intro__lead {
-  font-size: 0.95rem;
-  line-height: 1.7;
-  color: var(--text2);
-}
-.showcase-intro__lead strong {
-  color: var(--text);
-  font-weight: 650;
-}
-
-/* 标题：比通用 .sec-head h2 小一档。
-   原先用 clamp(1.6rem, 2.9vw, 2.25rem) + 800 字重，
-   体量与 Hero 主标题接近，形成第二只「大标题」抢注意力 ——
-   而它的内容只是上一区的延续，不该有同等的视觉重量。 */
-.showcase-intro__title {
-  margin-top: 8px;
-  font-size: clamp(1.25rem, 2vw, 1.6rem);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--text);
-}
 
 /*
  * 卡片区收窄到 980px（居中由下方通用规则统一处理）。
