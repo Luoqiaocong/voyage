@@ -7,7 +7,6 @@
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.141+-009688.svg)](https://fastapi.tiangolo.com/)
 [![Vue 3](https://img.shields.io/badge/Vue-3-42B883.svg)](https://vuejs.org/)
-[![License](https://img.shields.io/badge/Version-v0.1.0-orange.svg)]()
 
 </div>
 
@@ -257,6 +256,6 @@ Windows 上请务必使用 `uv run python run.py`，不要直接用 `uvicorn`。
 
 <div align="center">
 
-*Voyage AI · v0.1.0 · 持续迭代中*
+*Voyage AI · 持续迭代中*
 
 </div>

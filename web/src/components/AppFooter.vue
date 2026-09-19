@@ -17,7 +17,6 @@
           </svg>
         </span>
         <span class="footer__name">Voyage <em>AI</em></span>
-        <span class="ver-chip">MVP v0.1.0</span>
       </div>
 
       <p class="footer__tagline">像和资深向导聊天一样，把旅程交给 AI。</p>
@@ -62,15 +61,8 @@
 }
 .footer__name em { font-style: normal; color: var(--prim); }
 
-.ver-chip {
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 3px 10px;
-  font-size: 0.68rem;
-  letter-spacing: 0.1em;
-  color: var(--text3);
-  background: var(--panel);
-}
+/* 原先这里有一组 .ver-chip 样式，用于页脚的「MVP v0.1.0」版本标签。
+   该标签已按用户要求去掉，样式一并删除，避免留下无引用的规则。 */
 
 .footer__tagline { color: var(--text2); font-size: 0.88rem; }
 
