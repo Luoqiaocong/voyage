@@ -476,26 +476,57 @@ const revealed = ref(false)
 /** 用于 aria-controls 指向的容器 id */
 const REVEAL_ID = 'home-more'
 
-/** 展开后滚到内容区；已在视野内或用户偏好减弱动效时不滚 */
-function scrollToContent() {
+/*
+ * 展开后把「引导件」滚到导航栏正下方。
+ *
+ * ## 目标位置怎么定
+ *
+ * 不依赖任何元素引用，而是先算出引导件在文档里的绝对纵坐标，再减去
+ * 导航栏高度与一点呼吸空间。这样得到的滚动目标在滚动过程中**不会变**，
+ * 不会出现「滚到一半目标跑了」的情况。
+ *
+ * ## 为什么不用 scrollIntoView
+ *
+ * 试过 `block: 'start'` 与 `'nearest'`，问题在于它对齐的是**容器顶端**，
+ * 而容器（可展开区）顶部有一段内边距，紧贴其上的引导件因此被推到
+ * 视口顶边之外 —— 这正是「一份可执行的行程被遮挡了，箭头也没完全显现」
+ * 的成因。手动算位置能精确控制落点，让它停在导航栏下方。
+ *
+ * ## 关于滚动动画
+ *
+ * 不传 `behavior`，由全局 `html { scroll-behavior: smooth }` 决定
+ * （用户在系统里开启「减弱动效」时，全局会切换为 auto，浏览器自动
+ * 改为瞬时跳转，无需在此判断）。
+ */
+function scrollGuideIntoView() {
   if (typeof document === 'undefined') return
-  const el = document.getElementById(REVEAL_ID)
-  if (!el) return
+  const guide = document.querySelector<HTMLElement>('.join-arrow')
+  if (!guide) return
 
-  /*
-   * 用 block: 'nearest' 而不是 'start'。
-   *
-   * 'start' 会把容器**顶端**对齐到视口顶部，而容器顶部有一段内边距
-   * （.section--join 的 padding-top），于是紧贴其上方的引导件
-   * （箭头 + 一行说明）会被推到顶边之外，看起来「被遮挡 / 没显现」。
-   * 'nearest' 只在元素**完全不在视野内**时才滚动，且滚最小距离，
-   * 引导件自然留在视野中。
-   *
-   * 另外加 scroll-margin-top（见样式），让任何滚动定位都避开固定导航栏。
-   * behavior 不写：全局 html 已设 scroll-behavior: smooth，
-   * 而 reduce-motion 时全局会切成 auto，这里无需再判断一次。
-   */
-  el.scrollIntoView({ block: 'nearest' })
+  const nav = document.querySelector<HTMLElement>('.nav')
+  const navH = nav?.getBoundingClientRect().height ?? 64
+  const BREATH = 24 // 引导件与导航栏之间的呼吸空间
+
+  const docTop = guide.getBoundingClientRect().top + window.scrollY
+  const targetY = Math.max(docTop - navH - BREATH, 0)
+  window.scrollTo(0, targetY)
+}
+
+/**
+ * 展开后的滚动入口。
+ *
+ * **必须等布局稳定再滚**：内容刚由 display:none 变为可见时，`.rv` 元素
+ * 还停在 opacity:0 并带 20px 位移，各区块高度尚未定型 —— 此时算出的
+ * 目标位置是错的（实测那样滚几乎不生效）。
+ * 故等两帧（一帧移除 display、一帧完成布局）再加一小段延时，
+ * 让入场过渡走过大部分位移后再计算并滚动。
+ */
+function scrollToContent() {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      window.setTimeout(scrollGuideIntoView, 120)
+    })
+  })
 }
 
 function reveal(andScroll = false) {
@@ -509,7 +540,12 @@ function reveal(andScroll = false) {
 
 function collapse() {
   revealed.value = false
-  document.getElementById('main')?.scrollIntoView({ block: 'start' })
+  /*
+   * 回顶部。同样不传 behavior —— 由全局 scroll-behavior 决定。
+   * 收起后页面总高骤降、浏览器会自行纠正滚动位置，回顶部最可预期：
+   * 收起后的首屏就是 Hero，本来就该在顶部。
+   */
+  window.scrollTo(0, 0)
 }
 
 function toggleReveal() {
@@ -831,7 +867,12 @@ function startHref(): string {
 
       id 与触发器的 aria-controls 对应。
     -->
-    <div v-show="revealed" :id="REVEAL_ID" :inert="!revealed">
+    <div
+      v-show="revealed"
+      :id="REVEAL_ID"
+      :inert="!revealed"
+      class="reveal-host"
+    >
       <!-- ============================================================
            2. 示例行程
 
@@ -1646,12 +1687,18 @@ function startHref(): string {
   /*
    * 滚动定位时在顶部留出的余量。
    *
-   * 没有这一条时，scrollIntoView 会把容器顶端（即它的 padding-top 起点）
-   * 对齐到视口顶部，于是紧贴其上方的引导件（箭头 + 说明）被推到顶边之外 ——
-   * 表现就是「跳下去以后箭头和文字被遮挡了」。
-   * 值 = 固定导航栏高度 + 一点呼吸空间。
+   * ⚠️ 上一轮我把这条加在了 .section--join 上，但**滚动目标是它的父容器
+   * #home-more**，属性根本没命中，所以当时那条规则毫无作用。
+   * 现在加在真正的滚动目标上（.reveal-host），作为兜底：
+   * 万一将来有人改用 scrollIntoView 或触发浏览器的默认锚点滚动，
+   * 也会自动避开固定导航栏。
    */
-  scroll-margin-top: calc(var(--nav-h, 64px) + 16px);
+  scroll-margin-top: calc(var(--nav-h, 64px) + 24px);
+}
+
+/* 可展开内容的容器（滚动目标）。解释见上 */
+.reveal-host {
+  scroll-margin-top: calc(var(--nav-h, 64px) + 24px);
 }
 
 .section--tint {
