@@ -1,0 +1,65 @@
+# ============================================================================
+# Caddy 配置：TLS 终结 + 反代到 web 容器
+#
+# 为什么用 Caddy 而不是 nginx + certbot：
+#   本项目已有 nginx 容器负责静态资源与 /api 反代（见 web/nginx.conf），
+#   再引入一套 nginx 配置只会增加维护面。Caddy 只做一件事——
+#   自动申请并续期 Let's Encrypt 证书，然后把流量原样转给 web 容器。
+#
+# 域名由环境变量 DOMAIN 注入（docker-compose.yml 里传入）。
+# 若 DOMAIN 为空，Caddy 会因为站点地址非法而启动失败——这是有意的：
+# 与其静默降级成 HTTP，不如直接报错让人发现配置没填。
+# ============================================================================
+
+{
+	# 证书与账号信息的持久化目录（compose 里挂载为命名卷）
+	storage /data
+	# 申请证书时的联系邮箱，由环境变量注入
+	email {$ACME_EMAIL}
+	# 关掉管理 API：容器内不需要，少一个暴露面
+	admin off
+	# 日志：交给容器 stdout，由 docker 收集
+	log {
+		output stdout
+		format console
+	}
+}
+
+{$DOMAIN} {
+	# 反代到 web 容器。Caddy 与 web 在同一 compose 网络内，
+	# 可直接用服务名解析——注意这里**不能写 localhost**。
+	reverse_proxy web:80 {
+		# 透传真实客户端信息，供后端 --proxy-headers 使用。
+		# X-Forwarded-Proto 由 Caddy 自动设置，无需手动添加。
+		header_up X-Real-IP {remote_host}
+
+		# ---- SSE 流式对话的关键 ----
+		# Caddy 默认会对响应做缓冲/压缩，而 AI 回复是逐字下发的流。
+		# 这里显式关闭，与 web/nginx.conf 里的 proxy_buffering off 保持一致，
+		# 两层都不能缓冲，否则前端看到的就不是逐字输出。
+		flush_interval -1
+	}
+
+	# 安全响应头。这几项不依赖证书，可直接在此统一施加。
+	header {
+		# 禁止被嵌进 iframe，防点击劫持
+		X-Frame-Options DENY
+		# 禁止浏览器猜测内容类型
+		X-Content-Type-Options nosniff
+		# 同源之间才发送来源信息
+		Referrer-Policy strict-origin-when-cross-origin
+		# 关闭不需要的浏览器能力
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		# HSTS：告诉浏览器以后强制走 HTTPS。
+		# 先设较短时间，确认 HTTPS 正常后再考虑加长——设错了很难回退。
+		Strict-Transport-Security "max-age=86400"
+		# 移除会暴露技术栈的响应头
+		-Server
+	}
+
+	# 访问日志。SSE 的长连接会产生较多的长耗时记录，属正常现象。
+	log {
+		output stdout
+		format console
+	}
+}

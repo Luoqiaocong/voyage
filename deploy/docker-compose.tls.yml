@@ -1,0 +1,53 @@
+# ============================================================================
+# HTTPS 叠加层：docker compose -f docker-compose.yml -f deploy/docker-compose.tls.yml up -d
+#
+# 为什么要拆成叠加文件而不是直接写进主 compose：
+#   本地开发不需要 TLS，而 Caddy 会去申请真实证书（需要域名已解析到本机，
+#   且 80/443 可从公网访问）。混在主文件里会让本地 `up -d` 也去拉 Caddy
+#   并因域名非法而启动失败。叠加文件让「要 HTTPS」成为一个显式选择。
+#
+# 拓扑：
+#   公网 80/443 → Caddy（自动证书）→ web 容器:80 → /api/ → backend:8000
+#
+# 主 compose 里 web 的 80 端口映射在此被**取消**（ports: !reset []）——
+# 否则 80 会被 web 直接占用，Caddy 无法接管 80 做 ACME 校验与 HTTP 跳转。
+# ============================================================================
+
+services:
+  # 主 compose 里 web 直接对外暴露 80，这里收回：80/443 都交给 Caddy。
+  # !reset 是 compose 的合并指令，用于清空继承来的列表值。
+  web:
+    ports: !reset []
+
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: voyage-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      # HTTP/3 走 UDP。可选，但开启后现代浏览器会自动升级到 QUIC。
+      - "443:443/udp"
+    environment:
+      # 域名与 ACME 邮箱从 .env 读取，避免把域名写死在版本库里
+      DOMAIN: ${DOMAIN:?DOMAIN 未设置：请在 .env 中填写你的域名，例如 DOMAIN=voyage.example.com}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL 未设置：请在 .env 中填写证书通知邮箱}
+    volumes:
+      # Caddyfile 以只读方式挂入：容器不需要写配置
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # 证书与账号信息必须持久化，否则每次重建容器都会重新申请证书，
+      # 而 Let's Encrypt 有每周签发次数上限，反复申请会触发限流。
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      # 等 web 就绪再起 Caddy：否则首次访问会拿到 502，
+      # 而证书申请本身不依赖后端，等的是「反代目标存在」这件事
+      web:
+        condition: service_started
+    networks: [voyage]
+
+volumes:
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
