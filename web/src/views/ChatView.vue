@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppNavbar from '@/components/AppNavbar.vue'
 import MessageBody from '@/components/MessageBody.vue'
@@ -802,6 +802,23 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
+/**
+ * 全局 Esc：关闭窄屏抽屉。
+ *
+ * 原先抽屉只能靠点遮罩关闭 —— 遮罩是鼠标操作，键盘用户打开抽屉后
+ * 就出不去了（Tab 会一路走到抽屉里的会话项，却找不到关闭入口）。
+ * 遮罩上补 tabindex 也只是权宜之计：遮罩不是内容，让它可聚焦本身就是
+ * 语义错误。用 Esc 才是这个交互的键盘等价操作。
+ *
+ * 挂在 window 而非某个元素：抽屉打开时焦点可能在抽屉内任意位置，
+ * 只有全局监听才能稳定捕获。
+ */
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && sideOpen.value) {
+    sideOpen.value = false
+  }
+}
+
 /** 送入渲染的列表：历史消息 + 正在流式的这一条 */
 const renderedMessages = computed<RdMsg[]>(() => {
   const list = [...messages.value]
@@ -817,6 +834,9 @@ const renderedMessages = computed<RdMsg[]>(() => {
 })
 
 onMounted(async () => {
+  // 全局 Esc：关闭窄屏抽屉（见 onGlobalKeydown 的说明）
+  window.addEventListener('keydown', onGlobalKeydown)
+
   user.fetchUserInfo().catch(() => {})
   await loadConversations()
   if (conversations.value.length > 0) {
@@ -836,6 +856,10 @@ onMounted(async () => {
   }
 })
 
+onUnmounted(() => {
+  window.removeEventListener('keydown', onGlobalKeydown)
+})
+
 watch(streaming, (v) => {
   // 生成结束时强制把最终内容带到视野：用户可能刚发完就往下翻，
   // 但结果出来时应当能看到（这是他等待的东西）。
@@ -851,7 +875,16 @@ watch(streaming, (v) => {
     <main id="main" tabindex="-1" class="chat-main">
       <!-- ==================== 侧边栏 ==================== -->
       <!-- 窄屏为抽屉，遮罩点击关闭 -->
-      <div v-if="sideOpen" class="side-backdrop" @click="sideOpen = false"></div>
+      <!--
+        窄屏抽屉遮罩：点击关闭。
+        遮罩本身不是内容，标 aria-hidden 免得读屏器把它读成一个元素。
+      -->
+      <div
+        v-if="sideOpen"
+        class="side-backdrop"
+        aria-hidden="true"
+        @click="sideOpen = false"
+      ></div>
       <aside
         class="chat-side"
         :class="{ 'chat-side--open': sideOpen, 'chat-side--folded': sideFolded }"
@@ -1251,6 +1284,7 @@ watch(streaming, (v) => {
                   "
                   :disabled="streaming"
                   @keydown="onKeydown"
+                  aria-label="输入你的旅行需求"
                 ></textarea>
 
                 <!-- 回车提示做成一枚键帽，比一行小字更易读 -->

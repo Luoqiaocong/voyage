@@ -415,11 +415,34 @@ function cancelEdit() {
               <div class="edit-grid">
                 <input id="accommodation-name" v-model="edit.accommodationName" class="input" placeholder="酒店 / 民宿名称" />
                 <div class="edit-grid edit-grid--2col">
-                  <input v-model.number="edit.accommodationDuration" class="input" type="number" min="1" step="0.5" placeholder="停留小时" />
-                  <input v-model.number="edit.accommodationCost" class="input" type="number" min="0" step="1" placeholder="单人花费 / 晚" />
+                  <input
+                    v-model.number="edit.accommodationDuration"
+                    class="input"
+                    type="number"
+                    min="1"
+                    step="0.5"
+                    placeholder="停留小时"
+                    aria-label="住宿停留小时"
+                  />
+                  <input
+                    v-model.number="edit.accommodationCost"
+                    class="input"
+                    type="number"
+                    min="0"
+                    step="1"
+                    placeholder="单人花费 / 晚"
+                    aria-label="住宿单人花费（元/晚）"
+                  />
                 </div>
               </div>
-              <textarea v-model="edit.accommodationNote" class="input" rows="2" style="margin-top:10px" placeholder="入住 / 退房日期等备注"></textarea>
+              <textarea
+                v-model="edit.accommodationNote"
+                class="input"
+                rows="2"
+                style="margin-top:10px"
+                placeholder="入住 / 退房日期等备注"
+                aria-label="住宿备注（入住与退房日期等）"
+              ></textarea>
             </div>
           </section>
 

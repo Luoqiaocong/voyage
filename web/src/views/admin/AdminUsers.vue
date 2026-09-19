@@ -217,14 +217,20 @@ onMounted(async () => {
   <div class="users">
     <!-- 工具栏 -->
     <div class="toolbar">
-      <input v-model="keyword" class="input toolbar__search" type="search" placeholder="搜索邮箱或昵称…" />
-      <select v-model="roleFilter" class="select toolbar__select">
+      <input
+        v-model="keyword"
+        class="input toolbar__search"
+        type="search"
+        placeholder="搜索邮箱或昵称…"
+        aria-label="按邮箱或昵称搜索用户"
+      />
+      <select v-model="roleFilter" class="select toolbar__select" aria-label="按角色筛选">
         <option value="">全部角色</option>
         <option value="user">普通用户</option>
         <option value="admin">普通管理员</option>
         <option value="super_admin">超级管理员</option>
       </select>
-      <select v-model="activeFilter" class="select toolbar__select">
+      <select v-model="activeFilter" class="select toolbar__select" aria-label="按启用状态筛选">
         <option value="all">全部状态</option>
         <option value="active">已启用</option>
         <option value="inactive">已禁用</option>

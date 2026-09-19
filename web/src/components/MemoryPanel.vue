@@ -180,10 +180,17 @@ onMounted(load)
                 v-if="optionsFor(m.fact_key)"
                 v-model="draftValue"
                 class="select mem__input"
+                :aria-label="`修改「${m.fact_key_label}」的取值`"
               >
                 <option v-for="o in optionsFor(m.fact_key)!" :key="o" :value="o">{{ o }}</option>
               </select>
-              <input v-else v-model="draftValue" class="input mem__input" maxlength="40" />
+              <input
+                v-else
+                v-model="draftValue"
+                class="input mem__input"
+                maxlength="40"
+                :aria-label="`修改「${m.fact_key_label}」的取值`"
+              />
               <button class="btn btn-primary btn--xs" :disabled="savingValue" @click="saveValue(m)">
                 保存
               </button>

@@ -92,7 +92,7 @@ onMounted(load)
 <template>
   <div class="audit">
     <div class="toolbar">
-      <select v-model="actionFilter" class="select toolbar__select">
+      <select v-model="actionFilter" class="select toolbar__select" aria-label="按操作类型筛选">
         <option value="">全部动作</option>
         <option v-for="[key, label] in actionOptions" :key="key" :value="key">{{ label }}</option>
       </select>
@@ -101,6 +101,7 @@ onMounted(load)
         class="input toolbar__search"
         type="search"
         placeholder="按目标用户 ID 筛选…"
+        aria-label="按目标用户 ID 筛选审计日志"
       />
       <span class="toolbar__count">共 {{ total }} 条</span>
     </div>

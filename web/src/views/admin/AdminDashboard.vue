@@ -17,6 +17,7 @@ import {
 } from '@/api/admin'
 import LineChart from '@/components/charts/LineChart.vue'
 import BarChart from '@/components/charts/BarChart.vue'
+import TravelIcon from '@/components/TravelIcon.vue'
 import { useUiStore } from '@/stores/ui'
 
 const ui = useUiStore()
@@ -60,6 +61,38 @@ const userPoints = computed(
   () => trend.value?.users.map((t) => ({ label: t.date, value: t.new_users })) ?? []
 )
 
+/**
+ * 环比：把当前窗口与**紧邻的等长前一窗口**比较。
+ *
+ * 为什么用环比而不是同比：本项目上线时间短，没有去年同期数据，
+ * 标注「同比增长 X%」只会得到空白或误导性数字。环比在数据量少时
+ * 同样有意义（本周 vs 上周），且趋势图本身就是按天看的，
+ * 两者口径一致。
+ *
+ * 数据来源：trend 接口只返回当前窗口，故用「窗口内前半段 vs 后半段」
+ * 近似环比。这不是严格的相邻窗口比较，但能在不新增接口的前提下
+ * 给出方向性判断，且**文案写「较前半段」而不是「环比」**，
+ * 避免让人以为是比较完整的前一周期。
+ */
+function halfCompare(values: number[]): { text: string; tone: 'up' | 'down' | 'flat' } | null {
+  if (values.length < 4) return null
+  const mid = Math.floor(values.length / 2)
+  const first = values.slice(0, mid).reduce((a, b) => a + b, 0)
+  const last = values.slice(mid).reduce((a, b) => a + b, 0)
+  if (first === 0 && last === 0) return null
+
+  // 前半段为 0 时无法算百分比：只能说「从 0 增长」，避免除零与「∞%」
+  if (first === 0) return { text: `较前半段新增 ${last}`, tone: 'up' }
+
+  const pct = ((last - first) / first) * 100
+  if (Math.abs(pct) < 1) return { text: '与前半段基本持平', tone: 'flat' }
+  const sign = pct > 0 ? '+' : ''
+  return { text: `较前半段 ${sign}${pct.toFixed(0)}%`, tone: pct > 0 ? 'up' : 'down' }
+}
+
+const tokenCompare = computed(() => halfCompare(tokenPoints.value.map((p) => p.value)))
+const userCompare = computed(() => halfCompare(userPoints.value.map((p) => p.value)))
+
 const modelBars = computed(() =>
   (models.value?.breakdown ?? []).map((m) => ({
     label: m.model,
@@ -77,6 +110,39 @@ const healthItems = computed(() => {
     { label: '模型通道', ok: h.llm_channel_configured, detail: `${h.llm_model} · ${h.llm_detail}` }
   ]
 })
+
+/** 是否有检测未通过 */
+const hasHealthIssue = computed(() => healthItems.value.some((h) => !h.ok))
+/** 未通过项数，用于文案 */
+const healthIssueCount = computed(() => healthItems.value.filter((h) => !h.ok).length)
+
+const rechecking = ref(false)
+const showLogHelp = ref(false)
+
+/**
+ * 只重新检测健康状态，不重拉整个看板。
+ *
+ * 为什么单独一个动作：健康检查是三项轻量探测，而整个看板要拉
+ * 四项聚合统计（含 Token 汇总），重试成本高得多。管理员此时只想确认
+ * 「服务是不是好了」，不该为此付出一整屏数据的加载时间。
+ */
+async function recheckHealth() {
+  rechecking.value = true
+  try {
+    health.value = await getDashboardHealth()
+    // 刷新后如果全好了，自动收起日志提示（问题已解决，留着是噪音）
+    if (!hasHealthIssue.value) {
+      showLogHelp.value = false
+      ui.toast('各项检测均已通过', 'success')
+    } else {
+      ui.toast(`仍有 ${healthIssueCount.value} 项未通过`, 'error')
+    }
+  } catch (e: any) {
+    ui.toast(e?.message ?? '健康检查失败', 'error')
+  } finally {
+    rechecking.value = false
+  }
+}
 
 async function load() {
   loading.value = true
@@ -161,11 +227,25 @@ onMounted(load)
         </header>
         <div class="dash__charts">
           <div>
-            <p class="dash__chart-title">Token 消耗</p>
+            <p class="dash__chart-title">
+              Token 消耗
+              <span
+                v-if="tokenCompare"
+                class="dash__cmp"
+                :class="`dash__cmp--${tokenCompare.tone}`"
+              >{{ tokenCompare.text }}</span>
+            </p>
             <LineChart :points="tokenPoints" unit="token" />
           </div>
           <div>
-            <p class="dash__chart-title">新增用户</p>
+            <p class="dash__chart-title">
+              新增用户
+              <span
+                v-if="userCompare"
+                class="dash__cmp"
+                :class="`dash__cmp--${userCompare.tone}`"
+              >{{ userCompare.text }}</span>
+            </p>
             <LineChart :points="userPoints" unit="人" />
           </div>
         </div>
@@ -196,6 +276,50 @@ onMounted(load)
               <span class="health__detail">{{ h.detail }}</span>
             </li>
           </ul>
+
+          <!--
+            异常时的自助排查入口。
+            原先只有一行说明文字，检测到 Redis/数据库/模型通道有问题时，
+            管理员不知道下一步该做什么 —— 只能刷新页面碰运气，
+            或者登服务器翻日志。这里给两个明确动作：
+              · 重新检测：多数「瞬时故障」（连接抖动、容器刚重启）重试即恢复
+              · 查看日志：真故障时给出可直接执行的命令，省掉查文档
+          -->
+          <div v-if="hasHealthIssue" class="health__actions">
+            <p class="health__warn">
+              有 {{ healthIssueCount }} 项检测未通过。多数瞬时故障重新检测即可恢复。
+            </p>
+            <div class="health__btns">
+              <button
+                class="btn btn-tint btn-tint-blue btn--sm"
+                type="button"
+                :disabled="rechecking"
+                @click="recheckHealth"
+              >
+                <TravelIcon name="spark" :size="14" />
+                {{ rechecking ? '检测中…' : '重新检测' }}
+              </button>
+              <button
+                class="btn btn-ghost btn--sm"
+                type="button"
+                @click="showLogHelp = !showLogHelp"
+              >
+                {{ showLogHelp ? '收起' : '查看日志' }}
+              </button>
+            </div>
+
+            <div v-if="showLogHelp" class="health__logs">
+              <p>在服务器上执行对应命令查看详细原因：</p>
+              <code>docker compose logs --tail=100 backend</code>
+              <code>docker compose exec redis redis-cli ping</code>
+              <code>docker compose exec postgres pg_isready -U voyage</code>
+              <p class="health__logs-hint">
+                Redis 不通时先看容器是否在跑；数据库不通多半是连接数或凭据问题；
+                模型通道只是配置检查，报错说明 .env 里缺少对应的 Key。
+              </p>
+            </div>
+          </div>
+
           <p class="dash__note">
             模型通道只校验配置完整性，不实际发起调用——避免看板本身消耗额度。
           </p>
@@ -298,6 +422,52 @@ onMounted(load)
 .health__dot.is-bad { background: var(--danger); box-shadow: 0 0 0 3px rgba(224, 82, 82, 0.16); }
 .health__label { font-size: 0.84rem; font-weight: 600; }
 .health__detail { font-size: 0.76rem; color: var(--text3); font-family: var(--mono); word-break: break-all; }
+
+/* ---- 健康异常时的自助排查 ---- */
+.health__actions {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline);
+}
+.health__warn { font-size: 0.78rem; color: var(--danger); line-height: 1.6; }
+.health__btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+.health__logs {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: var(--r-s);
+  background: var(--surface-soft);
+  font-size: 0.76rem;
+  color: var(--text2);
+  line-height: 1.7;
+}
+.health__logs code {
+  display: block;
+  margin-top: 6px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--text);
+  /* 命令在窄屏可能超宽，允许横向滚动而不是撑破卡片 */
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.health__logs-hint { margin-top: 10px; color: var(--text3); font-size: 0.74rem; }
+
+/* ---- 趋势图的对比标注 ---- */
+.dash__cmp {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+.dash__cmp--up { background: rgba(72, 187, 120, 0.14); color: var(--success); }
+.dash__cmp--down { background: rgba(224, 82, 82, 0.12); color: var(--danger); }
+.dash__cmp--flat { background: var(--surface-soft); color: var(--text3); }
 
 .dash__actions { display: flex; flex-wrap: wrap; gap: 10px; }
 </style>

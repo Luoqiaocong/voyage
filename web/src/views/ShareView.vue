@@ -150,6 +150,7 @@ onMounted(bootstrap)
             type="password"
             placeholder="请输入访问密码"
             autocomplete="off"
+            aria-label="访问密码"
           />
           <button class="btn btn-primary" type="submit" :disabled="submitting || !password.trim()">
             {{ submitting ? '校验中…' : '查看行程' }}
