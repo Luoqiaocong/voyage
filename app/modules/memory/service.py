@@ -13,13 +13,16 @@
    - 文本注入对模型更"显眼"，且不占用额外的工具调用轮次与额度。
    代价是记忆条数必须收敛，故设置了 MAX_INJECT 上限并按置信度排序截断。
 """
+import re
 from typing import Annotated, Any
 
 from fastapi import Depends
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.business import BusinessCode, UserException
 from app.shared.db import get_db
+from app.shared.db.models import UserMemory
 from app.shared.utils import TransactionMixin, log
 
 from .repo import MemoryRepo
@@ -27,6 +30,7 @@ from .schemas import (
     ALLOWED_KEYS,
     CONFIDENCE_EXPLICIT,
     KEY_LABELS,
+    MULTI_KEYS,
     VALUE_ENUMS,
     MemoryExtraction,
 )
@@ -73,6 +77,49 @@ class MemoryService(TransactionMixin):
             return None
         return key, value
 
+    @staticmethod
+    def _canonical(value: str) -> str:
+        """宽松归一：用于「同一事实的不同写法」判定。
+
+        实测的重复形态是措辞差异（「美食」与「美食 」「美食。」），
+        而库里的唯一约束是精确匹配，挡不住这些。归一只用于**查询比对**，
+        写入时仍保留模型给的原始措辞（更可读）。
+
+        去除：空白、各类中英文标点、以及结尾的「市/省」这类行政区后缀
+        （「北京市」与「北京」应当视为同一座城市）。
+        """
+        v = re.sub(r"[\s，,。.、；;：:！!？?（）()【】\[\]\"'“”‘’~·\-—_/]+", "", value)
+        v = re.sub(r"(市|省|自治州|地区)$", "", v)
+        return v.lower()
+
+    @classmethod
+    def _expand_multi(cls, key: str, value: str) -> list[str]:
+        """把一个取值拆成若干「单项」。
+
+        为什么必须拆：实测模型会把多条事实挤进一个值 ——
+        「北京、上海、广州」被存成一条，同时又单独存了「北京」「上海」「广州」。
+        不拆的话，那条合并值永远无法与单城条目比对，去重必然失效。
+
+        只在**多值键**上拆（visited_city / preference / companion / dietary）：
+        标量键（home_city、budget_level）的值本身不该含分隔符，
+        真含了说明提炼有问题，交给 _normalize 的长度与枚举校验处理。
+
+        拆分符涵盖中英文顿号、逗号、斜杠，以及「和/与/及」——
+        但「和」只在两侧都有内容时才拆（「和风」这类词不应被切断）。
+        """
+        if key not in MULTI_KEYS:
+            return [value]
+
+        # 先用标点拆，再用连接词拆（分开做，避免正则过于复杂而误伤）
+        parts = re.split(r"[、,，;；/／|]+", value)
+        expanded: list[str] = []
+        for p in parts:
+            expanded.extend(re.split(r"(?<=.)[和与及](?=.)", p))
+
+        out = [p.strip() for p in expanded if p and p.strip()]
+        # 全部拆没了（例如值就是一个分隔符）时退回原值，避免丢数据
+        return out or [value]
+
     async def upsert_facts(
         self,
         *,
@@ -92,58 +139,120 @@ class MemoryService(TransactionMixin):
                 if normalized is None:
                     stats["rejected"] += 1
                     continue
-                key, value = normalized
+                key, raw_value = normalized
 
-                # 分支一：同一事实已存在 → 命中次数 +1（说明该偏好稳定）
-                existing = await self.repo.find_exact(user_id, key, value)
-                if existing is not None:
-                    existing.hit_count = (existing.hit_count or 1) + 1
-                    # 重复出现时若这次是明确表述，提升置信度
-                    if fact.confidence > (existing.confidence or 0):
-                        existing.confidence = fact.confidence
-                    stats["deduped"] += 1
-                    continue
-
-                # 分支二：多值键 → 直接新增，与已有取值并存
-                if self.repo.is_multi_value_key(key):
-                    await self.repo.insert(
+                # 一个取值可能含多项（模型偶尔不遵守「一件事一个值」），
+                # 逐个处理，使每一项都能与已有记录正确比对
+                for value in self._expand_multi(key, raw_value):
+                    await self._upsert_one(
                         user_id=user_id,
-                        fact_key=key,
-                        fact_value=value,
+                        key=key,
+                        value=value,
                         confidence=fact.confidence,
-                        evidence=(fact.evidence or "")[:500] or None,
-                        source_conversation_id=conversation_id,
-                        hit_count=1,
+                        evidence=fact.evidence,
+                        conversation_id=conversation_id,
+                        stats=stats,
                     )
-                    stats["inserted"] += 1
-                    continue
 
-                # 分支三：标量键换值 → 覆盖当前值并留痕旧值
-                current = await self.repo.find_scalar(user_id, key)
-                if current is None:
-                    await self.repo.insert(
-                        user_id=user_id,
-                        fact_key=key,
-                        fact_value=value,
-                        confidence=fact.confidence,
-                        evidence=(fact.evidence or "")[:500] or None,
-                        source_conversation_id=conversation_id,
-                        hit_count=1,
-                    )
-                    stats["inserted"] += 1
-                else:
-                    current.previous_value = current.fact_value
-                    current.fact_value = value
-                    current.confidence = fact.confidence
-                    current.evidence = (fact.evidence or "")[:500] or None
-                    current.source_conversation_id = conversation_id
-                    current.hit_count = 1   # 换值后重新计数
-                    current.is_active = True  # 用户改主意了，重新生效
-                    stats["overwritten"] += 1
-
+            # repo.insert 内部已 flush，但标量覆盖改的是 ORM 对象属性，
+            # 需在事务提交前统一 flush 一次
             await self.db.flush()
 
         return stats
+
+    async def _upsert_one(
+        self,
+        *,
+        user_id: int,
+        key: str,
+        value: str,
+        confidence: float,
+        evidence: str | None,
+        conversation_id: str | None,
+        stats: dict[str, int],
+    ) -> None:
+        """写入单条事实（已拆分、已归一）。"""
+        # 分支一：同一事实已存在 → 命中次数 +1（说明该偏好稳定）
+        #
+        # 比对用宽松归一而非精确相等：实测重复多来自措辞差异
+        # （「美食」/「美食。」，或「北京市」/「北京」），
+        # 精确匹配挡不住，会各存一条。
+        existing = await self._find_loose(user_id, key, value)
+        if existing is not None:
+            existing.hit_count = (existing.hit_count or 1) + 1
+            # 重复出现时若这次是明确表述，提升置信度
+            if confidence > (existing.confidence or 0):
+                existing.confidence = confidence
+            stats["deduped"] += 1
+            return
+
+        # 分支二：多值键 → 直接新增，与已有取值并存
+        if self.repo.is_multi_value_key(key):
+            await self.repo.insert(
+                user_id=user_id,
+                fact_key=key,
+                fact_value=value,
+                confidence=confidence,
+                evidence=(evidence or "")[:500] or None,
+                source_conversation_id=conversation_id,
+                hit_count=1,
+            )
+            stats["inserted"] += 1
+            return
+
+        # 分支三：标量键换值 → 覆盖当前值并留痕旧值
+        # 分支三：标量键换值 → 覆盖当前值并留痕旧值
+        current = await self.repo.find_scalar(user_id, key)
+        if current is None:
+            await self.repo.insert(
+                user_id=user_id,
+                fact_key=key,
+                fact_value=value,
+                confidence=confidence,
+                evidence=(evidence or "")[:500] or None,
+                source_conversation_id=conversation_id,
+                hit_count=1,
+            )
+            stats["inserted"] += 1
+        else:
+            current.previous_value = current.fact_value
+            current.fact_value = value
+            current.confidence = confidence
+            current.evidence = (evidence or "")[:500] or None
+            current.source_conversation_id = conversation_id
+            current.hit_count = 1   # 换值后重新计数
+            current.is_active = True  # 用户改主意了，重新生效
+            stats["overwritten"] += 1
+
+    async def _find_loose(self, user_id: int, key: str, value: str) -> UserMemory | None:
+        """按宽松归一比对该键下已有的取值，命中则返回那一行。
+
+        为什么不能直接用唯一约束或精确查询：
+        库里的唯一约束是 (user_id, fact_key, fact_value) 精确匹配，
+        而实测的重复多来自措辞差异 ——「美食」与「美食。」、「北京」与「北京市」。
+        精确匹配挡不住，会各存一条，于是同一个偏好显示两遍。
+
+        这里只能把该键下的行全取出来在 Python 里比：归一后的比较无法下推到
+        SQL（要剔除标点、后缀，还要统一大小写）。单个用户的记忆条数受
+        MEMORY_MAX_ITEMS 上限约束（几十条量级），全量取出比对比代价可接受。
+        """
+        rows = list(
+            (
+                await self.db.execute(
+                    select(UserMemory).where(
+                        UserMemory.user_id == user_id,
+                        UserMemory.fact_key == key,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        target = self._canonical(value)
+        for row in rows:
+            if self._canonical(row.fact_value) == target:
+                return row
+        return None
 
     async def extract_from_text(
         self, *, user_id: int, text: str, conversation_id: str | None = None
