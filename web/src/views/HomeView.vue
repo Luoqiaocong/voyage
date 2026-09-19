@@ -24,7 +24,6 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import AppNavbar from '@/components/AppNavbar.vue'
 import AppFooter from '@/components/AppFooter.vue'
-import NavButton from '@/components/NavButton.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
 
 const user = useUserStore()
@@ -37,7 +36,7 @@ const inputEl = ref<HTMLInputElement | null>(null)
 /** 带着这句话进对话；未登录先去登录（沿用既有 example 参数约定） */
 function submitPlan() {
   const text = draft.value.trim()
-  const target = user.isLoggedIn ? '/chat' : '/login'
+  const target = startHref()
   router.push(text ? { path: target, query: { example: text } } : { path: target })
 }
 
@@ -381,6 +380,13 @@ onUnmounted(() => {
   if (revealTimer !== null) window.clearTimeout(revealTimer)
 })
 
+/**
+ * 未登录先去登录页，已登录直接进对话页。
+ *
+ * 抽成函数而不是在调用处内联三元表达式：这个判断原先写了两遍
+ * （一个已删除的「或用账号登录后再规划」入口 + submitPlan），
+ * 两处重复意味着将来改跳转规则必须记得同时改两个地方。
+ */
 function startHref(): string {
   return user.isLoggedIn ? '/chat' : '/login'
 }
@@ -780,21 +786,15 @@ function startHref(): string {
             </button>
           </form>
 
-          <!-- 与主输入框并列的次要入口。做成按钮而非一行灰字：
-               灰字在收尾区这种大面积留白里几乎不可见，也不像可点的控件。
-               这里语义是「另一种开始方式」而非「返回」，故不显示箭头。
-
-               **仅未登录时显示**：已登录用户看到「或用账号登录后再规划」
-               是自相矛盾的——他已经登录了。而且已登录时下方的输入框本就
-               可用，这行文字还会让人以为「是不是要再登录一次才能规划」。
-               原先无条件渲染，已登录用户因此产生误解。 -->
-          <NavButton
-            v-if="!user.isLoggedIn"
-            :to="startHref()"
-            label="或用账号登录后再规划"
-            :arrow="false"
-            class="closing__alt"
-          />
+          <!--
+            此处原有一个「或用账号登录后再规划」的次要入口，已彻底删除。
+            两次反馈叠加的原因：
+              1. 已登录用户看到「或用账号登录后再规划」自相矛盾 —— 他已经登录了
+              2. 它想表达的「另一种开始方式」已被上方输入框完全覆盖：
+                 那个输入框本身就调 startHref()，未登录会去登录页、
+                 已登录会带着文案进聊天页，功能重合
+            即它是冗余入口而非补充说明，删掉后收尾区更干净。
+          -->
         </div>
       </div>
     </section>
@@ -1851,11 +1851,8 @@ function startHref(): string {
   max-width: 620px;
   margin: 28px auto 0;
 }
-/* 次要入口的按钮样式来自 components/NavButton.vue，这里只补间距。
-   注意 NavButton 是 inline-flex，居中需要靠外边距而非 text-align。 */
-.closing__alt {
-  margin-top: 18px;
-}
+/* 原先此处有 .closing__alt（「或用账号登录后再规划」按钮的间距）。
+   该入口已删除，样式一并移除，避免留下无引用的规则。 */
 
 /* ============================================================
    响应式（移动端优先考量：Hero 堆叠、输入框换行、场景单列）
