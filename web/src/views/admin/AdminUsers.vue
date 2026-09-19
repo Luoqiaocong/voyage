@@ -25,6 +25,7 @@ import {
 } from '@/api/admin'
 import { useUiStore } from '@/stores/ui'
 import { useUserStore } from '@/stores/user'
+import { roleLabel } from '@/utils/role'
 
 const ui = useUiStore()
 const me = useUserStore()
@@ -53,14 +54,17 @@ function isSelf(u: AdminUserItem): boolean {
   return me.userInfo?.email === u.email
 }
 
-/** 角色 → 显示文案与样式。三级各有独立底色，超管蓝、普通管理员绿。 */
-const ROLE_META: Record<string, { label: string; cls: string }> = {
-  super_admin: { label: '超级管理员', cls: 'tag--super' },
-  admin: { label: '普通管理员', cls: 'tag--admin' },
-  user: { label: '用户', cls: 'tag--user' }
+/**
+ * 角色 → 样式类。文案取 utils/role.ts 的共享定义，不在这里再维护一份 ——
+ * 角色名称写两处，新增角色时必然漏改其中一处。
+ */
+const ROLE_CLS: Record<string, string> = {
+  super_admin: 'tag--super',
+  admin: 'tag--admin',
+  user: 'tag--user'
 }
 function roleMeta(role: string) {
-  return ROLE_META[role] ?? { label: role, cls: 'tag--user' }
+  return { label: roleLabel(role), cls: ROLE_CLS[role] ?? 'tag--user' }
 }
 
 async function load() {
@@ -349,7 +353,7 @@ onMounted(async () => {
           <div><dt>昵称</dt><dd>{{ detail.username ?? '—' }}</dd></div>
           <div>
             <dt>角色</dt>
-            <dd>{{ detail.role === 'admin' ? '管理员' : '普通用户' }}</dd>
+            <dd>{{ roleLabel(detail.role) }}</dd>
           </div>
           <div><dt>状态</dt><dd>{{ detail.is_active ? '已启用' : '已禁用' }}</dd></div>
           <div><dt>注册时间</dt><dd class="table__mono">{{ detail.created_at }}</dd></div>

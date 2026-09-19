@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useUserStore } from '@/stores/user'
+import { canAccessAdmin } from '@/utils/role'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
 
@@ -15,9 +16,16 @@ const links = [
   { label: '我的', to: '/profile', auth: true, icon: 'user' }
 ]
 
-/** 管理台入口仅对管理员展示。
- *  这只是「界面不展示」，真正的拦截在后端（/admin 统一挂了 get_current_admin）。 */
-const showAdmin = computed(() => user.userInfo?.role === 'admin')
+/**
+ * 管理台入口：**两种管理员**都展示。
+ *
+ * 原先写的是 role === 'admin'，引入 super_admin 后超管反而看不到入口 ——
+ * 后端放行而界面不给入口，表现为「我明明是管理员却没有管理台」。
+ * 判断收敛到 utils/role.ts，避免再次漏改。
+ *
+ * 这只是「界面不展示」，真正的拦截在后端（/admin 统一挂了 get_current_admin）。
+ */
+const showAdmin = computed(() => canAccessAdmin(user.userInfo?.role))
 
 function close() {
   open.value = false

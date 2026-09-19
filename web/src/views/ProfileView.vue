@@ -24,6 +24,7 @@ import { listItineraries } from '@/api/itinerary'
 import { listConversations } from '@/api/conversation'
 import { listMemories } from '@/api/memory'
 import { useUiStore } from '@/stores/ui'
+import { canAccessAdmin, roleLabel } from '@/utils/role'
 import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
@@ -78,7 +79,13 @@ const displayName = computed(
   () => user.userInfo?.username || user.userInfo?.email?.split('@')[0] || '旅行者'
 )
 const initial = computed(() => displayName.value.slice(0, 1).toUpperCase())
-const isAdmin = computed(() => user.userInfo?.role === 'admin')
+/**
+ * 是否展示「管理员」标识。
+ * 两种管理员都展示 —— 原先只认 'admin'，引入 super_admin 后超管反而没有标识。
+ * 文案区分档次，让用户一眼看出自己能不能改动数据。
+ */
+const isAdmin = computed(() => canAccessAdmin(user.userInfo?.role))
+const adminRoleLabel = computed(() => roleLabel(user.userInfo?.role))
 
 /* ---------------- 顶部数据与主操作 ---------------- */
 const heroStats = computed(() => [
@@ -261,7 +268,9 @@ async function handleDeleteAccount() {
             <div class="hero-body">
               <h1 class="hero-name">
                 {{ displayName }}
-                <span v-if="isAdmin" class="hero-role">管理员</span>
+                <!-- 标出具体档次：超管可读写、普通管理员只读。
+                     只写「管理员」会让人误以为自己能改数据。 -->
+                <span v-if="isAdmin" class="hero-role">{{ adminRoleLabel }}</span>
               </h1>
               <p class="hero-email">{{ user.userInfo?.email ?? '—' }}</p>
 

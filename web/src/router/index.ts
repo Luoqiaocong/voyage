@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { canAccessAdmin } from '@/utils/role'
 import { routeLoading, routeLoadingText } from './state'
 import HomeView from '@/views/HomeView.vue'
 
@@ -74,7 +75,10 @@ router.beforeEach(async (to) => {
       if (!user.userInfo) {
         await user.fetchUserInfo()
       }
-      if (user.userInfo?.role !== 'admin') {
+      // 两种管理员都能进：普通管理员只是没有写权限，不该被挡在门外。
+      // 判断走 utils/role.ts（原先写 role !== 'admin'，引入 super_admin 后
+      // 会把超管也一并挡掉，与后端放行矛盾）。
+      if (!canAccessAdmin(user.userInfo?.role)) {
         return { name: 'home' }
       }
     }
