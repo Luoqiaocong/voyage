@@ -11,18 +11,32 @@ const open = ref(false)
 const scrolled = ref(false)
 
 /**
- * 主导航项。
+ * 导航项配置。
  *
- * 「我的」与「管理台」已从这里移除，改由右侧的**账号菜单**承载 ——
- * 它们都是账号级入口，放在主导航里与「首页/助手/行程」这些功能入口并列，
- * 语义层级不一致；而且现在头像菜单里已经有了，留着就是两个入口指向同一处。
- * 入口本身没有消失，只是归到了更合适的位置。
+ * ## 为什么未登录时不显示「首页」
+ *
+ * Logo 本身就是「回首页」的通用入口（这也是用户点它的第一直觉）。
+ * 未登录时整条主导航只有「首页」一项，而它指向的正是当前所在的页面 ——
+ * 一个占据主导航位置、却只指向当下的链接，读起来像是导航没做完。
+ * 未登录时干脆不显示主导航，让首屏的焦点落在右侧的行动按钮上。
+ *
+ * 已登录时才出现主导航，此时「首页」是**从别的页面回到首页**的入口，
+ * 与「助手」「行程」并列有意义。
  */
 const links = [
-  { label: '首页', to: '/', icon: 'compass' },
+  { label: '首页', to: '/', auth: false, icon: 'compass' },
   { label: '助手', to: '/chat', auth: true, icon: 'chat' },
   { label: '行程', to: '/itineraries', auth: true, icon: 'map' }
 ]
+
+/**
+ * 桌面端要显示的主导航项。
+ *
+ * 未登录：一项都不显示（见上）；已登录：全部显示。
+ * 移动端抽屉另有自己的判断（未登录时改为展示行动按钮），
+ * 两处需求不同，故不用同一个 computed。
+ */
+const desktopLinks = computed(() => (user.isLoggedIn ? links : []))
 
 /**
  * 管理台入口：**两种管理员**都展示。
@@ -128,10 +142,9 @@ onUnmounted(() => {
         <span class="brand__text">Voyage <em>AI</em></span>
       </RouterLink>
 
-      <nav class="nav__links" aria-label="主导航">
+      <nav v-if="desktopLinks.length" class="nav__links" aria-label="主导航">
         <RouterLink
-          v-for="l in links"
-          v-show="!l.auth || user.isLoggedIn"
+          v-for="l in desktopLinks"
           :key="l.to"
           :to="l.to"
           @click="close"
@@ -241,10 +254,11 @@ onUnmounted(() => {
         </template>
         <template v-else>
           <!--
-            未登录时只保留一个入口。
-            原先「登录」与「开始规划」是两个按钮、指向同一个 /login，
-            既重复又让人以为有两条不同的路。登录页本身就是唯一入口，
-            进去既可以登录也可以注册。
+            未登录：只保留**一个**入口「开始规划」。
+            刻意**不放单独的「登录」按钮**：
+            两者都指向同一个登录页（那里可自由切换登录 / 注册），
+            并排放会让人以为有两条不同的路，而其实殊途同归。
+            只给一个明确的行动建议，是更干净的取舍。
           -->
           <RouterLink to="/login" class="btn btn-primary btn--sm" @click="close">
             开始规划
@@ -265,6 +279,13 @@ onUnmounted(() => {
     </div>
 
     <div v-if="open" class="nav__mobile">
+      <!--
+        抽屉里的导航项按登录态区分：
+        未登录时只列「首页」—— 与桌面端不同，抽屉是个独立面板，
+        空着会显得没内容，列一行「首页」比什么都不给更清楚；
+        而「助手」「行程」在未登录时点进去也会被守卫弹回登录页，
+        列出来只是徒增困惑，故不显示。
+      -->
       <RouterLink
         v-for="l in links"
         v-show="!l.auth || user.isLoggedIn"
@@ -356,10 +377,11 @@ onUnmounted(() => {
         </template>
         <template v-else>
           <!--
-            未登录时只保留一个入口。
-            原先「登录」与「开始规划」是两个按钮、指向同一个 /login，
-            既重复又让人以为有两条不同的路。登录页本身就是唯一入口，
-            进去既可以登录也可以注册。
+            未登录：只保留**一个**入口「开始规划」。
+            刻意**不放单独的「登录」按钮**：
+            两者都指向同一个登录页（那里可自由切换登录 / 注册），
+            并排放会让人以为有两条不同的路，而其实殊途同归。
+            只给一个明确的行动建议，是更干净的取舍。
           -->
           <RouterLink to="/login" class="btn btn-primary btn--sm" @click="close">
             开始规划
@@ -398,9 +420,15 @@ onUnmounted(() => {
 }
 
 /*
- * 品牌区：整体作为一个可点单元。
- * 悬停只在图标上做轻微反馈（上浮 + 加深阴影），文字保持不动——
- * 让整个标识一起动会显得晃。
+ * 品牌区：整体作为一个可点单元，**始终可点击回首页**（通用习惯）。
+ *
+ * 悬停反馈做了三层，都是「明显但不喧哗」的处理：
+ *   1. 图标轻微上浮 + 投影加深（原有）
+ *   2. 文字**转为主题色** —— 只靠图标 1px 上浮太含蓄，几乎看不出；
+ *      颜色变化是最容易被注意到的反馈
+ *   3. 文字下方滑出一条下划线 —— 明确「这是链接」，
+ *      与主导航项的指示线用同一套语言
+ * 不给整个标识加位移：文字与图标一起动会显得晃。
  */
 .brand {
   display: inline-flex;
@@ -412,7 +440,7 @@ onUnmounted(() => {
   border-radius: 12px;
   transition: background-color 0.2s ease;
 }
-.brand:hover { background: rgba(37, 99, 235, 0.06); }
+.brand:hover { background: rgba(37, 99, 235, 0.08); }
 .brand:focus-visible {
   outline: 2px solid var(--prim);
   outline-offset: 2px;
@@ -452,14 +480,53 @@ onUnmounted(() => {
 }
 
 .brand__text {
+  position: relative;
   font-family: var(--font-display);
   font-size: 1.06rem;
   font-weight: 800;
   /* 字距收紧一点，让「Voyage AI」读起来像一个整体标识而非两个词 */
   letter-spacing: -0.022em;
   color: var(--text);
+  transition: color 0.2s ease;
 }
+/* 「AI」始终是主题色，作为标识的一部分；悬停时整串文字转主题色 */
 .brand__text em { font-style: normal; color: var(--prim); }
+
+/* 悬停：文字转主题色 */
+.brand:hover .brand__text { color: var(--prim); }
+
+/*
+ * 悬停：文字下划线由中间向两侧展开。
+ * 只画在文字宽度内（不是整个品牌区），所以看起来是「这个名字被高亮」，
+ * 而不是「整块按钮被框住」。
+ */
+.brand__text::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--grad);
+  opacity: 0;
+  transform: scaleX(0.4);
+  transition: opacity 0.2s ease, transform 0.24s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.brand:hover .brand__text::after {
+  opacity: 1;
+  transform: scaleX(1);
+}
+/* 键盘用户同样要看到反馈：聚焦时也显示下划线 */
+.brand:focus-visible .brand__text::after {
+  opacity: 1;
+  transform: scaleX(1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand__text,
+  .brand__text::after { transition: none; }
+  .brand__text::after { transform: none; }
+}
 
 /*
  * 导航项：胶囊背景 + 底部指示线，双重标记当前页。
