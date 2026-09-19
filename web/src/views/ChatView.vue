@@ -20,6 +20,7 @@ import {
 } from '@/api/conversation'
 import { extractItinerary } from '@/api/itinerary'
 import { useUiStore } from '@/stores/ui'
+import { suggestFromContext } from '@/utils/quickSuggest'
 import { useUserStore } from '@/stores/user'
 import { PAGE_COPY } from '@/constants/copy'
 
@@ -87,12 +88,49 @@ const streamPhase = computed(() => {
   return '正在理解你的需求'
 })
 
-function scrollToBottom(smooth = false) {
+/**
+ * 用户是否已滚离底部（用于决定「要不要自动跟随」与「是否显示新消息箭头」）。
+ *
+ * 阈值 80px 而不是 0：滚动位置很难正好停在最底，留一点容差，
+ * 否则用户只是滚了一两像素就被判定为「已离开」，自动跟随会失效。
+ */
+const awayFromBottom = ref(false)
+
+/** 距底部多少像素内仍视为「在底部」 */
+const NEAR_BOTTOM_PX = 80
+
+/** 滚动容器位置变化时更新「是否在底部」 */
+function onStreamScroll() {
+  const el = scrollEl.value
+  if (!el) return
+  const gap = el.scrollHeight - el.scrollTop - el.clientHeight
+  awayFromBottom.value = gap > NEAR_BOTTOM_PX
+}
+
+/**
+ * 滚动到底部。
+ *
+ * @param smooth 是否平滑滚动
+ * @param force  是否无视「用户已滚上去」强制拉到底
+ *
+ * 默认**只在用户本来就在底部时才自动跟随**。
+ * 原先是无条件跟随：用户往回翻看历史时，新生成的内容会不断把他拽回底部，
+ * 根本读不了上面的内容 —— 这是流式输出场景的经典体验问题。
+ * 用户主动触发的操作（发送、点箭头、切换会话）则用 force 强制到底。
+ */
+function scrollToBottom(smooth = false, force = false) {
   nextTick(() => {
     const el = scrollEl.value
     if (!el) return
+    if (!force && awayFromBottom.value) return
     el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
+    awayFromBottom.value = false
   })
+}
+
+/** 点箭头：回到底部并恢复自动跟随 */
+function jumpToBottom() {
+  scrollToBottom(true, true)
 }
 
 /* ---------------- 数据加载 ---------------- */
@@ -203,7 +241,8 @@ async function openConversation(id: string) {
     // 历史没取到，摘要也补一次（独立请求，失败静默）
     void cacheSummary(id)
   }
-  scrollToBottom()
+  // 切换会话是用户主动操作，强制到底（不受「此前是否在翻历史」影响）
+  scrollToBottom(false, true)
 }
 
 function resetStream() {
@@ -433,7 +472,8 @@ async function runTurn(text: string, echoUser: boolean) {
   const myCtl = new AbortController()
   abortCtl = myCtl
   resetStream()
-  scrollToBottom()
+  // 用户刚发送，强制到底（即便他此前在翻历史）
+  scrollToBottom(false, true)
 
   let finished = false
   let aborted = false
@@ -646,12 +686,53 @@ function convTime(createdAt?: string): string {
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
-/** 快捷示例：空态与输入框上方共用，改一处即可 */
+/** 默认快捷示例：无上下文可依据时使用 */
 const QUICK_PROMPTS = [
   '帮我规划广州到北京的 3 天行程',
   '这周末去成都穿什么？',
   '查一下明天广州南到北京西的高铁'
 ]
+
+/**
+ * 空状态的引导卡片：把最常用的三类场景摆出来。
+ *
+ * 原先空态只有一行文字提示，用户不知道该从哪问起。
+ * 卡片带图标与说明，比一串示例胶囊更能说明「这个助手能做什么」。
+ */
+const EMPTY_GUIDES = [
+  {
+    icon: 'map',
+    title: '规划一次出游',
+    desc: '给出出发地、天数与预算，生成按天排布的行程',
+    prompt: '帮我规划广州到北京的 3 天行程，预算 3000'
+  },
+  {
+    icon: 'train',
+    title: '查火车票',
+    desc: '查指定日期的车次、票价与耗时',
+    prompt: '查一下明天广州南到北京西的高铁'
+  },
+  {
+    icon: 'spark',
+    title: '算预算',
+    desc: '估算一趟旅行的交通、住宿与餐饮开销',
+    prompt: '去成都玩 4 天大概要花多少钱？'
+  }
+]
+
+/**
+ * 快捷提问：优先用**当前对话的上下文**推荐，没有上下文时回退默认示例。
+ *
+ * 例如刚聊过三亚，就推「三亚这几天适合穿什么」「三亚有哪些必吃的本地菜」，
+ * 而不是永远那三条通用示例。判断逻辑全在本地（utils/quickSuggest），
+ * 不额外请求模型 —— 建议必须与对话同时出现，等一次请求会闪一下才出。
+ */
+const quickPrompts = computed(() => {
+  // 只用当前会话的消息做判断：别的会话聊过什么与本轮无关
+  const text = messages.value.map((m) => m.content).join('\n')
+  const contextual = suggestFromContext(text)
+  return contextual.length ? contextual : QUICK_PROMPTS
+})
 
 /**
  * 是否展示快捷示例。
@@ -756,7 +837,10 @@ onMounted(async () => {
 })
 
 watch(streaming, (v) => {
-  if (!v) scrollToBottom()
+  // 生成结束时强制把最终内容带到视野：用户可能刚发完就往下翻，
+  // 但结果出来时应当能看到（这是他等待的东西）。
+  // 若此时他正停在底部附近，这个调用本身也不会有副作用。
+  if (!v) scrollToBottom(false, true)
 })
 </script>
 
@@ -920,17 +1004,28 @@ watch(streaming, (v) => {
           </div>
           <h2>{{ PAGE_COPY.chatEmptyTitle }}</h2>
           <p>{{ PAGE_COPY.chatEmptyDesc }}</p>
-          <div class="chat-empty__quick">
+
+          <!--
+            引导卡片：把最常用的三类场景摆出来。
+            原先空态只有一串示例胶囊，用户不知道「这个助手到底能做什么」；
+            卡片带标题与一句说明，既回答能力范围，也给出可直接点的起点。
+          -->
+          <div class="chat-empty__guides">
             <button
-              v-for="q in QUICK_PROMPTS"
-              :key="q"
-              class="quick-chip"
-              @click="input = q; inputEl?.focus()"
+              v-for="g in EMPTY_GUIDES"
+              :key="g.title"
+              type="button"
+              class="guide-card"
+              @click="input = g.prompt; inputEl?.focus()"
             >
-              <TravelIcon name="route" :size="14" />
-              {{ q }}
+              <span class="guide-card__icon" aria-hidden="true">
+                <TravelIcon :name="g.icon" :size="18" />
+              </span>
+              <span class="guide-card__title">{{ g.title }}</span>
+              <span class="guide-card__desc">{{ g.desc }}</span>
             </button>
           </div>
+
           <button class="btn btn-primary" @click="newConversation">
             <TravelIcon name="plane" :size="17" />
             开始新的旅程
@@ -1004,7 +1099,7 @@ watch(streaming, (v) => {
           -->
 
           <!-- 消息区 -->
-          <div ref="scrollEl" class="chat-scroll">
+          <div ref="scrollEl" class="chat-scroll" @scroll.passive="onStreamScroll">
             <div class="chat-stream">
               <!-- 历史被截断时的提示：后端按轮次分页，更早的内容不在此次响应里 -->
               <p v-if="historyTruncated" class="chat-truncated">
@@ -1096,6 +1191,30 @@ watch(streaming, (v) => {
             </div>
           </div>
 
+          <!--
+            「回到底部」箭头：只在用户滚离底部时出现。
+
+            为什么需要：修正自动跟随逻辑后（用户翻历史时不再被拽走），
+            用户就不知道下面还有新内容在生成。这个箭头补上那个信号，
+            点一下就回到底部并恢复自动跟随。
+          -->
+          <Transition name="jump">
+            <button
+              v-if="awayFromBottom"
+              type="button"
+              class="jump-bottom"
+              :class="{ 'jump-bottom--live': streaming }"
+              :aria-label="streaming ? '正在生成，点击回到底部' : '回到底部'"
+              :title="streaming ? '正在生成，点击回到底部' : '回到底部'"
+              @click="jumpToBottom"
+            >
+              <TravelIcon name="arrow-right" :size="16" />
+              <span class="jump-bottom__text">
+                {{ streaming ? '正在生成' : '新消息' }}
+              </span>
+            </button>
+          </Transition>
+
           <!-- 输入区 -->
           <div class="chat-inputbar">
             <!--
@@ -1107,7 +1226,7 @@ watch(streaming, (v) => {
               <div v-if="showQuickChips" class="quick-bar">
                 <span class="quick-bar__label">试试</span>
                 <button
-                  v-for="q in QUICK_PROMPTS"
+                  v-for="q in quickPrompts"
                   :key="q"
                   type="button"
                   class="quick-chip quick-chip--sm"
@@ -1531,6 +1650,8 @@ watch(streaming, (v) => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* 让「回到底部」箭头能相对消息区绝对定位 */
+  position: relative;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--r-m);
@@ -1564,6 +1685,122 @@ watch(streaming, (v) => {
 .chat-empty__logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .chat-empty h2 { font-size: 1.45rem; }
 .chat-empty p { color: var(--text2); max-width: 30em; font-size: 0.9rem; }
+
+/* ---- 空状态的引导卡片 ----
+   比一串示例胶囊更能说明「这个助手能做什么」：
+   卡片有标题与一句说明，用户不必从示例文本里反推能力范围。 */
+.chat-empty__guides {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  width: 100%;
+  max-width: 640px;
+  margin: 8px 0 6px;
+}
+
+.guide-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 16px 16px 15px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-m);
+  background: var(--panel);
+  text-align: left;
+  transition: border-color 0.18s, background-color 0.18s, transform 0.18s,
+    box-shadow 0.18s;
+}
+.guide-card:hover {
+  border-color: var(--blue-200);
+  background: var(--blue-50);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+.guide-card:focus-visible {
+  outline: 2px solid var(--prim);
+  outline-offset: 2px;
+}
+
+.guide-card__icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--primary-soft);
+  color: var(--prim);
+  margin-bottom: 2px;
+}
+.guide-card__title { font-size: 0.92rem; font-weight: 650; color: var(--text); }
+.guide-card__desc { font-size: 0.78rem; line-height: 1.6; color: var(--text3); }
+
+@media (prefers-reduced-motion: reduce) {
+  .guide-card:hover { transform: none; }
+}
+
+/* ---- 回到底部箭头 ----
+   悬在消息区右下角。生成中把文案换成「正在生成」——
+   此时下面的内容是流动的，说「新消息」不够准确。 */
+.jump-bottom {
+  position: absolute;
+  right: 18px;
+  bottom: 84px;        /* 让开输入区高度 */
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--blue-200);
+  background: var(--panel);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--prim);
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.16);
+  transition: background-color 0.18s, transform 0.18s, box-shadow 0.18s;
+}
+.jump-bottom:hover {
+  background: var(--blue-50);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.2);
+}
+.jump-bottom:focus-visible {
+  outline: 2px solid var(--prim);
+  outline-offset: 2px;
+}
+/* 图标朝下：箭头本身是右向，转 90° 即向下，省一个图标 */
+.jump-bottom :deep(svg) { transform: rotate(90deg); }
+
+/* 生成中加一个呼吸点，表达「内容还在往下长」 */
+.jump-bottom--live::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--prim);
+  animation: jumpDot 1.2s ease-in-out infinite;
+}
+@keyframes jumpDot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .jump-bottom:hover { transform: none; }
+  .jump-bottom--live::before { animation: none; }
+}
+
+/* 箭头出入：从下方轻移淡入 */
+.jump-enter-active,
+.jump-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.jump-enter-from,
+.jump-leave-to { opacity: 0; transform: translateY(8px); }
+
+/* 窄屏隐藏文案，只留图标，避免遮挡内容 */
+@media (max-width: 640px) {
+  .jump-bottom { padding: 9px; right: 12px; bottom: 78px; }
+  .jump-bottom__text { display: none; }
+}
 
 .chat-empty__quick {
   display: flex;
