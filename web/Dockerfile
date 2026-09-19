@@ -24,7 +24,15 @@ RUN npm run build
 
 
 # ---------- 阶段 2：nginx ----------
-FROM nginx:1.27-alpine AS runtime
+# 用 stable 分支的滚动标签（1.30.x）而不是写死 patch：
+#   - stable 只收安全修复与严重 bug 修复，适合生产
+#   - mainline（1.31.x）含新特性但变更更频繁，不适合长期部署
+#   - 滚动标签会自动跟随该系列的最新 patch，无需人工盯版本
+#
+# 原先固定 1.27，而该分支已停止维护 —— 1.29 之后的安全修复都拿不到。
+# 参照 nginx 官方发布节奏（stable 与 mainline 并行发版），
+# 生产应跟随 stable。
+FROM nginx:1.30-alpine AS runtime
 
 # 用自定义配置替换默认站点（含 SPA 回退与 /api 反代）
 COPY nginx.conf /etc/nginx/conf.d/default.conf

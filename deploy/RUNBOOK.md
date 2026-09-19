@@ -221,6 +221,37 @@ docker compose exec postgres psql -U voyage -d voyage -c \
 
 ## 日常运维
 
+### 更新基础镜像
+
+本项目为可复现性固定了镜像版本（**刻意不用 `latest`**），但固定之后就没人会
+注意到上游发了带安全修复的新版——本项目就踩过：前端一直停在 nginx 1.27，
+而该分支早已停止维护，后续安全修复都拿不到。
+
+更新的正确做法是让 Docker 自己判断：
+
+```bash
+# 构建时强制拉取基础镜像的最新版本（本项目用的是 1.30-alpine 这类
+# 滚动标签，会自动解析到该系列的最新 patch）
+docker compose build --pull
+
+# 重新创建容器并清掉旧镜像
+docker compose -f docker-compose.yml -f deploy/docker-compose.tls.yml up -d
+docker image prune -f
+
+# 查看哪些镜像有更新
+docker compose pull
+```
+
+> **关于「要不要写死 patch 号」**：不要。
+> `nginx:1.30-alpine` 这类滚动标签**始终指向该系列的最新 patch**，
+> 写成 `1.30.5-alpine` 反而会错过后续的 1.30.6、1.30.7。
+> 只有**跨系列**（如 1.30 → 1.31）才需要人工决定，因为可能引入不兼容变更。
+>
+> 判断某个系列是否已停止维护，看官方发布说明，不要看版本号大小——
+> nginx 的 1.31 是 mainline、1.30 是 stable，**号大不代表更适合生产**。
+
+### 其他常用命令
+
 ```bash
 # 更新代码后重新部署
 git pull
@@ -244,6 +275,10 @@ docker compose -f docker-compose.yml -f deploy/docker-compose.tls.yml down
 > ⚠️ **不要执行 `docker compose down -v`**：`-v` 会删除数据卷，
 > 包括 `pg-data`（业务数据）与 `caddy-data`（证书）。删证书还会因
 > Let's Encrypt 的签发次数限制而暂时无法重新申请。
+
+> ⚠️ **PostgreSQL 跨大版本不能直接换镜像**。当前用的是 18，若是已有数据的
+> 实例要升到 19 之类，必须走 `pg_upgrade` 或逻辑导出导入；直接改
+> `image:` 会因数据目录版本不匹配而启动失败。
 
 ---
 

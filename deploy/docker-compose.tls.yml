@@ -20,7 +20,11 @@ services:
     ports: !reset []
 
   caddy:
-    image: caddy:2.10-alpine
+    # 滚动标签跟随 2.11 系列的最新 patch：Caddy 每个 patch 都含安全修复，
+    # 写死 patch 号会错过后续的修复。
+    # 从 2.10 升到 2.11 是以安全修复与 bug 修复为主的版本，
+    # Caddyfile 语法未变（本文件用到的 reverse_proxy / header / log 都是稳定指令）。
+    image: caddy:2.11-alpine
     container_name: voyage-caddy
     restart: unless-stopped
     ports:

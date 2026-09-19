@@ -98,7 +98,14 @@ services:
   # 若确实要用外部 PostgreSQL：注释掉上面 backend 的 DATABASE_URL 覆盖，
   # 并在 .env 里配置 DATABASE_URL 即可。此时本服务可以 `docker compose stop postgres`。
   postgres:
-    image: postgres:16-alpine
+    # 18-alpine：写作时的最新稳定大版本。
+    # psycopg 3 官方声明支持 PostgreSQL 10–18，驱动侧无兼容顾虑。
+    #
+    # ⚠️ 这是**跨大版本**升级。本项目当前无存量数据（库已清空），
+    # 因此不存在数据迁移问题；但若将来已有数据再改这里，
+    # 必须走 pg_upgrade 或逻辑导出导入，直接换镜像会因数据目录
+    # 版本不匹配而启动失败。
+    image: postgres:18-alpine
     container_name: voyage-postgres
     restart: unless-stopped
     environment:

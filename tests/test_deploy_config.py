@@ -175,6 +175,78 @@ if hardcoded:
 else:
     check("RUNBOOK 未写死部署域名（用占位符）", True)
 
+print("\n=== 12. 镜像标签不得使用 latest（可复现性）===")
+all_docker = "\n".join(
+    Path(f).read_text(encoding="utf-8")
+    for f in ("Dockerfile", "web/Dockerfile", "docker-compose.yml",
+              "deploy/docker-compose.tls.yml")
+)
+# 本地构建的镜像用 latest 是可以的（它们由本仓库的 Dockerfile 产出）；
+# 外部基础镜像用 latest 则会让构建结果随时间漂移。
+external_latest = []
+for m in re.finditer(r"(?:FROM|image:)\s+([\w./-]+):(latest)\b", all_docker):
+    repo = m.group(1)
+    if repo.startswith("voyage-"):
+        continue
+    external_latest.append(repo)
+check("外部镜像未使用 latest", not external_latest,
+      f"发现 {external_latest}" if external_latest else "")
+
+print("\n=== 13. 基础镜像版本不低于此前的下限 ===")
+# 记录一次「刻意升级」的结果，防止将来被无意改回旧版本。
+# 版本下限依据：nginx stable 分支（1.29 之前的分支已停止维护）、
+# Caddy 2.11（含安全修复）、PostgreSQL 18（psycopg3 支持到 18）。
+MINIMUMS = {
+    "nginx": (1, 30),
+    "caddy": (2, 11),
+    "postgres": (18, 0),
+    "python": (3, 12),
+    "node": (22, 0),
+    "redis": (7, 0),
+}
+
+
+def parse_version(tag: str) -> tuple[int, int]:
+    m = re.match(r"^(\d+)(?:\.(\d+))?", tag)
+    if not m:
+        return (0, 0)
+    return (int(m.group(1)), int(m.group(2) or 0))
+
+
+for name, (min_major, min_minor) in MINIMUMS.items():
+    found = re.findall(rf"(?:FROM|image:)\s+[\w./-]*{name}:([\w.\-]+)", all_docker)
+    if not found:
+        warn(f"未找到 {name} 的镜像声明")
+        continue
+    worst = None
+    for tag in found:
+        v = parse_version(tag)
+        if v < (min_major, min_minor):
+            worst = (tag, v)
+    if worst:
+        check(f"{name} 版本不低于 {min_major}.{min_minor}", False,
+              f"发现 {worst[0]}（{worst[1][0]}.{worst[1][1]}）")
+    else:
+        check(f"{name} 版本不低于 {min_major}.{min_minor}（{found[0]}）", True)
+
+print("\n=== 14. 滚动标签策略一致性 ===")
+# postgres / nginx / caddy / redis 都用「主版本[-minor]-变体」的滚动标签，
+# 好处是自动跟随该系列最新 patch。这里确认没有写死 patch 号，
+# 否则会错过后续安全修复。
+for name in ("nginx", "caddy", "postgres", "redis"):
+    found = re.findall(rf"(?:FROM|image:)\s+[\w./-]*{name}:([\w.\-]+)", all_docker)
+    if not found:
+        continue
+    tag = found[0]
+    # 形如 1.30-alpine 可以（跟随 1.30.x 最新 patch）；
+    # 形如 1.30.5-alpine 则写死了 patch
+    pinned_patch = re.match(r"^\d+\.\d+\.\d+", tag) is not None
+    if pinned_patch:
+        warn(f"{name}:{tag} 写死了 patch 号，会错过该系列后续的安全修复",
+             "建议改为 1.30-alpine 这类滚动标签")
+    else:
+        check(f"{name}:{tag} 使用滚动标签（自动跟随最新 patch）", True)
+
 print(f"\n{'=' * 60}")
 print(f"部署文件校验: {ok_n} 通过 / {fail_n} 失败 / {warn_n} 警告")
 print(f"{'=' * 60}")
