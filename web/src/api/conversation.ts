@@ -173,8 +173,19 @@ function extractReadable(node: unknown, depth = 0): string {
 /**
  * POST SSE 流式对话（fetch 实现，POST 无法用 EventSource）
  * 事件格式：event: message + data: {type, ...}；结束 event: done + data: [DONE]
+ *
+ * signal：用于**中断**。传入 AbortSignal 后，用户点「停止生成」即可让浏览器
+ * 断开连接；服务端的 SSE 生成器随之被取消，模型调用与后续工具调用都会停下，
+ * 不会继续白烧 token。
+ *
+ * 中断时会抛 AbortError —— 调用方需要识别它并当作「正常停止」处理，
+ * 而不是当成错误弹提示。
  */
-export async function* streamChat(conversationId: string, message: string): AsyncGenerator<ChatChunk> {
+export async function* streamChat(
+  conversationId: string,
+  message: string,
+  signal?: AbortSignal
+): AsyncGenerator<ChatChunk> {
   const { API_BASE_URL, getAccessToken, refreshAccessToken, clearAuthStorage } = await import('./http')
   let token = getAccessToken()
 
@@ -186,7 +197,9 @@ export async function* streamChat(conversationId: string, message: string): Asyn
         Accept: 'text/event-stream',
         Authorization: `Bearer ${token}`
       },
-      body: JSON.stringify({ message })
+      body: JSON.stringify({ message }),
+      // 把信号交给 fetch：中断会同时取消连接与 body 读取
+      signal
     })
 
   let res = await doFetch()

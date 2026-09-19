@@ -60,6 +60,14 @@ const streamTools = ref<ToolStep[]>([])
 const streamError = ref('')
 const showReasoning = ref(false)
 
+/**
+ * 当前生成的中断控制器。
+ *
+ * 放在组件作用域而非 send() 局部：停止按钮在模板里，需要够得着它。
+ * 生成结束（无论正常还是中断）都会置回 null，避免误用已失效的控制器。
+ */
+let abortCtl: AbortController | null = null
+
 /** 工具调用序号，保证 v-for key 稳定 */
 let toolSeq = 0
 
@@ -421,13 +429,17 @@ async function runTurn(text: string, echoUser: boolean) {
   const cid = activeId.value!
   if (echoUser) messages.value.push({ role: 'user', content: text })
   streaming.value = true
+  /** 本次生成的中断控制器；用户点「停止生成」时用它断开连接 */
+  const myCtl = new AbortController()
+  abortCtl = myCtl
   resetStream()
   scrollToBottom()
 
   let finished = false
+  let aborted = false
 
   try {
-    for await (const chunk of streamChat(cid, text)) {
+    for await (const chunk of streamChat(cid, text, myCtl.signal)) {
       /*
        * 事件名以 api/conversation.ts 的 SSE 解析层为准：那一层已把后端的
        * tool_call / tool_result 归一成前端的 'tool'，并带上 label / phase /
@@ -456,20 +468,55 @@ async function runTurn(text: string, echoUser: boolean) {
       }
     }
   } catch (e: any) {
-    streamError.value = e?.message ?? '对话请求失败'
-  } finally {
-    if (!finished) {
-      if (!streamText.value.trim() && !streamTools.value.length) {
-        streamError.value = streamError.value || 'AI 响应中断，请重试'
-      } else {
-        commitAssistant()
-      }
+    /*
+     * 用户主动停止时会抛 AbortError。这**不是错误**，不该弹提示吓人 ——
+     * 只需把已生成的内容保留下来即可。
+     * 其余异常才是真的失败。
+     */
+    if (e?.name === 'AbortError') {
+      aborted = true
+    } else {
+      streamError.value = e?.message ?? '对话请求失败'
     }
-    streaming.value = false
-    resetStream()
-    scrollToBottom(true)
-    inputEl.value?.focus()
+  } finally {
+    /*
+     * 竞态防护：只有当 abortCtl 仍是**本次**的控制器时才做收尾。
+     *
+     * 场景：用户点停止后立刻又发了一条（或快速连发两次）。此时旧请求的
+     * finally 会晚于新请求的初始化执行，若不加判断就会把新请求的
+     * streaming / abortCtl / 流式缓冲全部重置 —— 表现为「刚发出的消息
+     * 界面毫无反应」，且新请求再也无法被停止（控制器被置空）。
+     * 这是经典的 async 收尾竞态，只在快速操作时偶发，极易漏测。
+     */
+    const isCurrent = abortCtl === myCtl
+    if (isCurrent) {
+      if (!finished) {
+        if (!streamText.value.trim() && !streamTools.value.length) {
+          // 主动停止且一个字都没有：安静处理，不报错
+          if (!aborted) streamError.value = streamError.value || 'AI 响应中断，请重试'
+        } else {
+          // 已生成的部分照样落进消息列表，用户不会白等
+          if (aborted) ui.toast('已停止生成，保留已生成的内容', 'info')
+          commitAssistant()
+        }
+      }
+      streaming.value = false
+      abortCtl = null
+      resetStream()
+      scrollToBottom(true)
+      inputEl.value?.focus()
+    }
   }
+}
+
+/**
+ * 停止生成。
+ *
+ * 中断的连锁反应：abort() → 浏览器断开连接 → 服务端 SSE 生成器被取消 →
+ * LangGraph 停止执行、不再继续调用模型与工具，因此不会继续消耗 token。
+ */
+function stopStreaming() {
+  abortCtl?.abort()
 }
 
 /* ---------------- 消息操作 ---------------- */
@@ -661,6 +708,13 @@ function commitAssistant() {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // Esc 停止生成：长回答时用户的手通常还在键盘上，
+  // 强制去够鼠标点停止按钮是多余的
+  if (e.key === 'Escape' && streaming.value) {
+    e.preventDefault()
+    stopStreaming()
+    return
+  }
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault()
     send()
@@ -1086,25 +1140,41 @@ watch(streaming, (v) => {
                     <kbd>Enter</kbd> 发送
                     <span class="kbd-hint__sep">·</span>
                     <kbd>Shift</kbd><kbd>Enter</kbd> 换行
+                    <!-- 生成中提示可中断，否则用户不知道有这条快捷方式 -->
+                    <template v-if="streaming">
+                      <span class="kbd-hint__sep">·</span>
+                      <kbd>Esc</kbd> 停止
+                    </template>
                   </span>
                   <span v-if="input.trim()" class="charcount">{{ input.length }}</span>
                 </div>
               </div>
 
+              <!--
+                流式期间同一个按钮变为「停止生成」。
+                用同一个位置而不是新增按钮：这里本就是「提交/取消本次生成」的位置，
+                语义随状态切换比并排两个按钮更符合直觉，也不占额外宽度。
+              -->
               <button
+                v-if="streaming"
+                class="send-btn send-btn--stop"
+                type="button"
+                aria-label="停止生成"
+                title="停止生成（已生成的内容会保留）"
+                @click="stopStreaming"
+              >
+                <span class="send-btn__stop" aria-hidden="true"></span>
+              </button>
+              <button
+                v-else
                 class="send-btn"
-                :disabled="streaming || !input.trim()"
-                :aria-label="streaming ? '正在生成' : '发送消息'"
+                :disabled="!input.trim()"
+                aria-label="发送消息"
                 @click="send"
               >
-                <template v-if="streaming">
-                  <span class="send-btn__spin" aria-hidden="true"></span>
-                </template>
-                <template v-else>
-                  <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M5 12h14M13 6l6 6-6 6" />
-                  </svg>
-                </template>
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
               </button>
             </div>
           </div>
@@ -1987,6 +2057,30 @@ watch(streaming, (v) => {
   box-shadow: none;
   cursor: not-allowed;
 }
+
+/*
+ * 生成中的「停止」状态。
+ *
+ * 刻意用中性深灰而不是红色：中断是正常操作（用户改主意、发现需求说错了），
+ * 不是危险动作。红色会让人以为「点下去会丢失什么」而不敢用。
+ * 同时去掉渐变与光晕 —— 生成期间焦点应落在内容上，按钮不该持续发光吸引注意。
+ */
+.send-btn--stop {
+  background: var(--slate-700);
+  box-shadow: 0 4px 12px rgba(16, 24, 40, 0.18);
+}
+.send-btn--stop:hover {
+  background: var(--slate-800);
+  transform: translateY(-1px);
+}
+/* 方块＝停止，是播放器的通用符号，无需文字说明 */
+.send-btn__stop {
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  background: #fff;
+}
+
 /* 生成中的转圈：用边框缺口旋转，比三点更安静 */
 .send-btn__spin {
   width: 17px;
@@ -2001,6 +2095,7 @@ watch(streaming, (v) => {
 }
 @media (prefers-reduced-motion: reduce) {
   .send-btn__spin { animation: none; }
+  .send-btn--stop:hover { transform: none; }
 }
 
 /* ---- 快捷示例条 ---- */
