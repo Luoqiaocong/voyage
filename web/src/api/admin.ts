@@ -319,8 +319,15 @@ export async function listConversations(params: {
 // ==================== 审计日志 ====================
 export interface AuditLogItem {
   id: number
-  operator_id: number
-  operator_email: string
+  /**
+   * 操作者的**角色标识**（user / admin / super_admin）。
+   *
+   * 刻意不下发操作者邮箱：普通管理员能读全部审计日志，而日志里几乎都是
+   * 超级管理员的操作 —— 返回邮箱等于绕过「普通管理员看不到更高层级账号」
+   * 这条约束，泄露的正是那批账号。
+   * 需要区分具体是谁时，可用 ip 字段辅助对账。
+   */
+  operator_role: string
   action: string
   target_type: string
   target_id: string

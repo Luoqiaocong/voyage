@@ -8,6 +8,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { AUDIT_ACTION_LABEL, listAuditLogs, type AuditLogItem } from '@/api/admin'
 import { formatDateTime } from '@/utils/datetime'
+import { roleLabel } from '@/utils/role'
 import { useUiStore } from '@/stores/ui'
 
 const ui = useUiStore()
@@ -123,7 +124,17 @@ onMounted(load)
           <tbody>
             <tr v-for="log in items" :key="log.id">
               <td class="table__mono table__date">{{ formatDateTime(log.created_at) }}</td>
-              <td class="table__email">{{ log.operator_email }}</td>
+              <!--
+                只显示角色，不显示邮箱：普通管理员能读全部审计日志，
+                若这里放出邮箱，其中绝大多数是超级管理员的账号，
+                等于绕过「普通管理员看不到更高层级账号」的约束。
+                具体是哪一位可用来源 IP 辅助对账。
+              -->
+              <td>
+                <span class="oprole" :class="`oprole--${log.operator_role || 'unknown'}`">
+                  {{ roleLabel(log.operator_role) }}
+                </span>
+              </td>
               <td>
                 <span class="tag">{{ actionText(log.action) }}</span>
               </td>
@@ -186,7 +197,40 @@ onMounted(load)
 .table td { padding: 12px 14px; border-bottom: 1px solid var(--hairline); }
 .table__mono { font-family: var(--mono); font-size: 0.78rem; }
 .table__date { color: var(--text3); white-space: nowrap; }
-.table__email { color: var(--text2); }
+
+/*
+ * 操作者角色标签。
+ * 用底色区分两种管理员：审计日志里几乎都是超管操作，
+ * 一眼能分辨层级比读文字更快；未知角色用中性灰，不伪装成已知角色。
+ */
+.oprole {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 650;
+  white-space: nowrap;
+  background: var(--surface-soft);
+  color: var(--text2);
+}
+.oprole--super_admin {
+  background: rgba(37, 99, 235, 0.10);
+  color: var(--prim);
+}
+.oprole--admin {
+  background: rgba(72, 187, 120, 0.14);
+  color: #2f855a;
+}
+.oprole--user {
+  background: var(--surface-soft);
+  color: var(--text3);
+}
+.oprole--unknown {
+  background: var(--surface-soft);
+  color: var(--text3);
+  font-style: italic;
+}
+
 .table__change { color: var(--prim); }
 .table__empty { text-align: center; color: var(--text3); padding: 32px 0; }
 

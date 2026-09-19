@@ -16,6 +16,7 @@
 from typing import Annotated, Any
 
 from fastapi import Depends
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import config
@@ -419,6 +420,29 @@ class AdminService(TransactionMixin):
             operator_id=operator_id,
             target_id=target_id,
         )
+
+        # 取操作者的**当前角色**用于展示，不返回邮箱。
+        #
+        # 为什么不下发 operator_email：普通管理员能读全部审计日志，
+        # 而日志里几乎都是超级管理员的操作 —— 直接把邮箱放出去，
+        # 等于绕过了「普通管理员看不到更高层级账号」这条约束
+        # （见 repo.list_users 的 viewer_rank 过滤），泄露的正是那批账号。
+        #
+        # 为什么取当前角色而不是日志里冗余存的那个：operator_email 是写入时
+        # 快照、不含角色；而角色可能已变更。审计要回答的是「这条操作是谁做的」，
+        # 用当前角色更贴近实际权限（且日志里没有任何角色快照可选）。
+        # 局限：若同一角色有多人，只显示「超级管理员」无法区分具体是哪一位。
+        # 这是隐私与可追溯性之间的取舍，取隐私；ip 字段仍可用于辅助对账。
+        roles: dict[int, str] = {}
+        operator_ids = {r.operator_id for r in rows}
+        if operator_ids:
+            found = (
+                await self.db.execute(
+                    select(User.id, User.role).where(User.id.in_(operator_ids))
+                )
+            ).all()
+            roles = {row[0]: row[1] for row in found}
+
         return {
             "total": total,
             "page": page,
@@ -426,8 +450,8 @@ class AdminService(TransactionMixin):
             "items": [
                 {
                     "id": r.id,
-                    "operator_id": r.operator_id,
-                    "operator_email": r.operator_email,
+                    # 只给角色标识（前端渲染成中文），不下发邮箱
+                    "operator_role": roles.get(r.operator_id, ""),
                     "action": r.action,
                     "target_type": r.target_type,
                     "target_id": r.target_id,
