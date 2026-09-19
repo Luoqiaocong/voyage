@@ -43,16 +43,15 @@ const currentTitle = computed(
         </nav>
 
         <!--
-          「返回助手」做成有边框的按钮，并加一道分隔线与上方导航区分开。
-          原先是一行 0.82rem 的灰色纯文字：既不像可点的控件，也与站内其它
-          按钮不一致（用户反馈「怎么没框」）。
-          它与导航项性质不同——导航是「在管理端内切换」，这是「离开管理端」，
-          故用分隔线区分，而不是混进上方那份导航列表里。
+          指向站点首页的次要按钮，加一道分隔线与上方导航区分开。
+          文案用「访问前端」而不是「返回助手」：管理端与用户端是两个平行的
+          面向，管理员未必是从对话页过来的，说「返回」并不准确；
+          也不该默认把管理员带进某个具体功能页。
         -->
         <div class="admin__back-wrap">
-          <RouterLink to="/chat" class="admin__back">
+          <RouterLink to="/" class="admin__back">
             <TravelIcon name="arrow-left" :size="15" />
-            返回助手
+            访问前端
           </RouterLink>
         </div>
       </aside>
