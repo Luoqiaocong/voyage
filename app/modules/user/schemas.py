@@ -2,7 +2,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, EmailStr, Field, field_serializer, field_validator
 
-from .auth import get_hashed_id
+from .auth import get_hashed_id, password_weak_reason
 
 
 class UserIdentity(BaseModel):
@@ -10,9 +10,32 @@ class UserIdentity(BaseModel):
     email: Annotated[EmailStr, Field(description="邮箱地址")]
 
 class UserBaseRequest(BaseModel):
+    """登录/注册共用的请求基类。
+
+    密码这里**不写 min_length**，改为调用 password_weak_reason：
+      · 写了 min_length 只能表达「长度不够」，而实际规则还有大小写与数字；
+        长度够但缺大写时，Pydantic 放行，错误要等到 service 层才报，
+        两条路径的提示不一致。
+      · 更要紧的是：Pydantic 的报错会先被 422 处理器接管，
+        而那个处理器原先一律返回 "Param Error"，用户完全不知道该怎么改。
+      · 现在这里统一走同一条规则函数，异常消息即具体原因
+        （「密码长度至少 8 位」/「密码需要包含大写字母」），
+        前端直接展示 message 即可。
+    """
     email: Annotated[EmailStr, Field(description="邮箱地址")]
-    password: Annotated[str, Field(description="用户密码", min_length=8)] 
-    
+    password: Annotated[str, Field(description="用户密码：至少 8 位，含大小写字母与数字")]
+
+    @field_validator("password")
+    @classmethod
+    def _check_password(cls, v: str) -> str:
+        reason = password_weak_reason(v)
+        if reason:
+            # ValueError 的消息会被 Pydantic 放进 errors()[0]["msg"]，
+            # 但不是我们想要的展示文案；真正的文案由 422 处理器按
+            # value_error 分支给出。这里只负责「拦住」。
+            raise ValueError(reason)
+        return v
+
 class UserProfileBase(BaseModel):
     """昵称/头像的**共用字段定义**，刻意不带长度约束。
 

@@ -26,30 +26,33 @@ class PasswordManager:
             return False
 
 
-def validate_password_strength(password: str) -> None:
-    """检查密码强度：至少8位，包含大小写字母和数字"""
-    rules = [
-        (len(password) >= 8, "密码长度至少8位"),
-        (bool(re.search(r'[a-z]', password)), "密码需要包含小写字母"),
-        (bool(re.search(r'[A-Z]', password)), "密码需要包含大写字母"),
-        (bool(re.search(r'[0-9]', password)), "密码需要包含数字"),
-    ]
-    
-    for passed, msg in rules:
-        if not passed:
-            raise UserException(code=BusinessCode.USER_PWD_WEAK, msg=msg)
+def password_weak_reason(password: str) -> str | None:
+    """返回密码不合规的**具体原因**；合规返回 None。
 
-# def validate_password_strength(password: str) -> None:
-#     """检查密码强度：至少8位，包含大小写字母和数字"""
-#     conditions = [
-#         len(password) >= 8,
-#         bool(re.search(r'[a-z]', password)),
-#         bool(re.search(r'[A-Z]', password)),
-#         bool(re.search(r'[0-9]', password)),
-#     ]
-    
-#     if not all(conditions):
-#         raise UserException(code=BusinessCode.USER_PWD_WEAK)
+    抽成纯函数的原因：同一条规则要在两处生效——
+      · schema 层：请求体校验阶段就拦下，避免无效请求进入业务逻辑
+      · service 层（validate_password_strength）：兜住绕过 schema 的调用
+        （CLI 脚本、内部调用）
+    若两处各写一套，早晚漂移（一边说「至少 8 位」另一边还多要求大小写，
+    用户就会遇到「前端校验通过、后端却拒绝」）。
+    """
+    if len(password) < 8:
+        return "密码长度至少 8 位"
+    if not re.search(r"[a-z]", password):
+        return "密码需要包含小写字母"
+    if not re.search(r"[A-Z]", password):
+        return "密码需要包含大写字母"
+    if not re.search(r"[0-9]", password):
+        return "密码需要包含数字"
+    return None
+
+
+def validate_password_strength(password: str) -> None:
+    """检查密码强度；不合规抛业务异常，消息即具体原因。"""
+    reason = password_weak_reason(password)
+    if reason:
+        raise UserException(code=BusinessCode.USER_PWD_WEAK, msg=reason)
+
 
 hashids = Hashids(salt=config.HASH_SALT, min_length=12)
 
