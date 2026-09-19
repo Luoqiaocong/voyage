@@ -6,7 +6,7 @@
  * 交互：登录/注册滑动切换、忘记密码分步、第三方登录入口、记住我。
  * 移动端：场景退化为顶部画面，表单上滑成「底部抽屉」。
  */
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { login, register, sendCode } from '@/api/user'
 import { useUserStore } from '@/stores/user'
@@ -78,6 +78,11 @@ const regForm = reactive({ email: '', username: '', password: '', code: '' })
 const countdown = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
 
+/** 验证码输入框：发出验证码后自动聚焦到它，省掉一次手动点击 */
+const codeInputEl = ref<HTMLInputElement | null>(null)
+/** 「收不到验证码」的自助排查列表是否展开 */
+const showCodeHelp = ref(false)
+
 const showLoginPwd = ref(false)
 const showRegPwd = ref(false)
 const errors = reactive<Record<string, string>>({})
@@ -87,6 +92,9 @@ function clearError(k: string) {
 }
 watch(mode, () => {
   Object.keys(errors).forEach((k) => delete errors[k])
+  // 切换登录/注册时收起排查列表：它只对注册流程有意义，
+  // 留着会让切换后的表单多出一块无关内容
+  showCodeHelp.value = false
 })
 
 /** 恢复上次登录的邮箱 */
@@ -142,6 +150,13 @@ async function handleSendCode() {
     await sendCode(email)
     ui.toast(AUTH_COPY.codeSent, 'success')
     startCountdown()
+    /*
+     * 发码成功后把焦点移到验证码输入框。
+     * 用户的下一步必然是「看邮件 → 输验证码」，自动聚焦省掉一次点击；
+     * 移动端还会顺带唤起数字键盘（inputmode=numeric），少切一次输入法。
+     */
+    await nextTick()
+    codeInputEl.value?.focus()
   } catch (e: any) {
     ui.toast(e?.message ?? '验证码发送失败', 'error')
   }
@@ -509,6 +524,7 @@ function handleThirdParty() {
                       <TravelIcon name="shield" />
                       <input
                         id="reg-code"
+                        ref="codeInputEl"
                         v-model="regForm.code"
                         class="input"
                         maxlength="6"
@@ -518,15 +534,45 @@ function handleThirdParty() {
                         @input="clearError('code')"
                       />
                     </div>
+                    <!--
+                      倒计时用醒目色（琥珀）而不是沿用幽灵按钮的灰：
+                      灰色倒计时看起来像「禁用状态」，用户不知道还要等多久、
+                      也不知道到点后能重发。琥珀是「等待中」的惯用表达。
+                    -->
                     <button
                       type="button"
-                      class="btn btn-ghost btn--sm code-btn"
+                      class="btn btn--sm code-btn"
+                      :class="countdown > 0 ? 'code-btn--waiting' : 'btn-ghost'"
                       :disabled="countdown > 0 || mode !== 'register'"
                       @click="handleSendCode"
                     >
-                      {{ countdown > 0 ? countdown + 's 后重发' : '获取验证码' }}
+                      {{ countdown > 0 ? countdown + 's 后可重发' : '获取验证码' }}
                     </button>
                   </div>
+
+                  <!--
+                    「收不到验证码」的自助排查入口。
+                    验证码收不到是注册最常见的卡点，而原因多数在用户侧
+                    （进了垃圾箱、邮箱写错、被拦截）。把这些讲清楚，
+                    比让用户干等或直接放弃要好。
+                  -->
+                  <button
+                    v-if="mode === 'register'"
+                    type="button"
+                    class="code-help"
+                    @click="showCodeHelp = !showCodeHelp"
+                  >
+                    {{ showCodeHelp ? '收起' : '收不到验证码？' }}
+                  </button>
+                  <ul v-if="showCodeHelp" class="code-help__list">
+                    <li>先翻一下<strong>垃圾邮件</strong>与<strong>广告邮件</strong>文件夹，验证码邮件最常被投到这里。</li>
+                    <li>确认邮箱没写错——已发出的验证码只对<strong>当时填的地址</strong>有效。</li>
+                    <li>发信可能需要十几秒到一分钟，稍等再刷新收件箱。</li>
+                    <li v-if="countdown > 0">仍没收到就等倒计时结束（剩 {{ countdown }} 秒）后重新获取。</li>
+                    <li v-else>仍未收到可以点上方<strong>获取验证码</strong>重发一次。</li>
+                    <li>若始终收不到，可能是邮箱服务商拦截了发信域名，可换一个邮箱注册。</li>
+                  </ul>
+
                   <p v-if="errors.code" class="form-err">
                     <TravelIcon name="alert" :size="14" />{{ errors.code }}
                   </p>
@@ -604,6 +650,7 @@ function handleThirdParty() {
             :key="p.name"
             type="button"
             class="oauth__btn"
+            :class="`oauth__btn--${p.name}`"
             :aria-label="`使用 ${p.label} 登录`"
             @click="handleThirdParty"
           >
@@ -970,6 +1017,17 @@ function handleThirdParty() {
 
 .oauth { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 
+/*
+ * 第三方登录按钮：按品牌色区分。
+ *
+ * 原先三个按钮完全同款（白底灰字），用户扫过去分不出哪个是哪个，
+ * 得逐个读文字。用品牌色能让人一眼认出，这是第三方登录按钮的通行做法
+ * （微信绿 / Apple 黑 / Google 蓝）。
+ *
+ * 配色取舍：用「品牌色描边 + 品牌色文字 + 极淡底色」而不是整块实心填充。
+ * 实心三色并排会形成三个抢眼的色块，压过上方的主登录按钮，主次就乱了；
+ * 描边方案既保留了品牌辨识度，视觉重量又低于主按钮。
+ */
 .oauth__btn {
   display: flex;
   flex-direction: column;
@@ -977,21 +1035,86 @@ function handleThirdParty() {
   gap: 6px;
   padding: 13px 6px 11px;
   border-radius: 13px;
-  border: 1px solid var(--border);
   background: var(--panel);
   color: var(--text2);
   font-size: 0.76rem;
   font-weight: 600;
   transition: 0.2s;
+  /* 默认边框在下面按品牌覆盖；先给个兜底值 */
+  border: 1px solid var(--border);
 }
-.oauth__btn:hover {
+
+/* 微信：官方绿 #07C160 */
+.oauth__btn--wechat { border-color: rgba(7, 193, 96, 0.35); color: #07883f; background: rgba(7, 193, 96, 0.06); }
+.oauth__btn--wechat:hover {
+  border-color: #07C160;
+  background: rgba(7, 193, 96, 0.12);
+  color: #046b31;
   transform: translateY(-2px);
-  border-color: var(--blue-400);
-  color: var(--blue-800);
-  box-shadow: var(--shadow-sm);
-  background: var(--blue-50);
+  box-shadow: 0 6px 16px rgba(7, 193, 96, 0.18);
 }
-:root[data-theme='dark'] .oauth__btn:hover { color: var(--blue-300); background: var(--blue-900); border-color: var(--blue-700); }
+
+/* Apple：品牌黑（深色主题下必须反转为白，否则与背景糊在一起） */
+.oauth__btn--apple { border-color: rgba(17, 17, 17, 0.3); color: #111; background: rgba(17, 17, 17, 0.05); }
+.oauth__btn--apple:hover {
+  border-color: #111;
+  background: rgba(17, 17, 17, 0.1);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(17, 17, 17, 0.14);
+}
+:root[data-theme='dark'] .oauth__btn--apple {
+  border-color: rgba(255, 255, 255, 0.34);
+  color: #f5f7fa;
+  background: rgba(255, 255, 255, 0.07);
+}
+:root[data-theme='dark'] .oauth__btn--apple:hover {
+  border-color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.13);
+}
+
+/* Google：官方蓝 #4285F4 */
+.oauth__btn--google { border-color: rgba(66, 133, 244, 0.35); color: #1a5fd0; background: rgba(66, 133, 244, 0.06); }
+.oauth__btn--google:hover {
+  border-color: #4285F4;
+  background: rgba(66, 133, 244, 0.12);
+  color: #1450b4;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(66, 133, 244, 0.2);
+}
+
+/* 验证码倒计时：琥珀＝等待中（灰色会被读成「禁用」） */
+.code-btn--waiting {
+  border-color: rgba(214, 158, 46, 0.4);
+  background: var(--gold-soft);
+  color: var(--gold-600);
+  font-variant-numeric: tabular-nums;   /* 秒数变化时宽度不跳 */
+}
+
+/* 「收不到验证码？」入口 */
+.code-help {
+  margin-top: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--prim);
+  cursor: pointer;
+  align-self: flex-start;
+}
+.code-help:hover { text-decoration: underline; }
+
+.code-help__list {
+  margin: 8px 0 0;
+  padding: 11px 14px 11px 28px;
+  list-style: disc;
+  border-radius: 10px;
+  background: var(--surface-soft);
+  font-size: 0.78rem;
+  line-height: 1.75;
+  color: var(--text2);
+}
+.code-help__list strong { color: var(--text); font-weight: 650; }
 
 .auth__foot {
   margin-top: 22px;
@@ -1024,25 +1147,37 @@ function handleThirdParty() {
     min-height: 100vh;
   }
 
+  /*
+   * 移动端场景图高度。
+   *
+   * 原先固定 min-height: 246px，在 667px 高的手机屏上占 37%；
+   * 一旦软键盘弹出（可视区常降到 350px 左右），表单区域几乎被挤没，
+   * 用户填验证码时要反复收起键盘才能看到输入框。
+   *
+   * 改为按视口高度自适应并整体下调：
+   *   - 普通手机：约 180px，比原先矮四分之一，仍保留场景氛围
+   *   - 矮屏（如 iPhone SE，667px）：进一步压到 140px
+   *   - 极矮屏（横屏手机，约 375px 高）：直接隐藏场景，把空间全给表单
+   */
   .auth__scene {
     display: flex;
     position: relative;
-    min-height: 246px;
+    min-height: min(180px, 24vh);
     flex: 0 0 auto;
-    padding: 26px 22px 30px;
+    padding: 20px 22px 24px;
     border-radius: 0 0 26px 26px;
   }
 
   .auth__brand { position: static; margin-bottom: auto; }
-  .scene-copy__title { font-size: 1.45rem; }
-  .scene-copy__desc { font-size: 0.85rem; margin-top: 8px; }
-  .scene-dots { margin-top: 18px; }
+  .scene-copy__title { font-size: 1.3rem; }
+  .scene-copy__desc { font-size: 0.82rem; margin-top: 6px; }
+  .scene-dots { margin-top: 14px; }
 
   .auth__panel {
     flex: 1;
     align-items: flex-start;
-    margin-top: -22px;
-    padding: 26px 20px 40px;
+    margin-top: -18px;
+    padding: 24px 20px 40px;
     background: var(--bg);
     border-radius: 24px 24px 0 0;
     position: relative;
@@ -1053,5 +1188,21 @@ function handleThirdParty() {
   .auth__bar { margin-bottom: 20px; }
   .auth__head { min-height: 0; }
   .auth__title { font-size: 1.35rem; }
+}
+
+/* 矮屏手机（如 iPhone SE 的 667px）：场景再压一档 */
+@media (max-width: 720px) and (max-height: 700px) {
+  .auth__scene { min-height: 140px; padding: 16px 22px 20px; }
+  .scene-copy__desc { display: none; }   /* 优先保住表单，说明文案可省 */
+  .scene-copy__title { font-size: 1.15rem; }
+}
+
+/*
+ * 横屏手机等极矮视口：直接不显示场景图。
+ * 这类屏幕高度通常不到 400px，任何图片都是在与表单抢空间。
+ */
+@media (max-width: 720px) and (max-height: 460px) {
+  .auth__scene { display: none; }
+  .auth__panel { margin-top: 0; border-radius: 0; }
 }
 </style>
