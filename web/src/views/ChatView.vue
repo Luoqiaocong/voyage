@@ -281,17 +281,10 @@ function onRenameKey(e: KeyboardEvent, conv: Conversation) {
 }
 
 /**
- * 工具条的「重命名」：重命名是就地编辑，输入框在侧栏里。
- * 所以这里要先把侧栏备好——桌面端若已折叠就展开，
- * 窄屏则唤出抽屉，否则用户点了按钮却看不到任何反应。
+ * 注意：原先此处有 renameFromToolbar()，供工具条的「重命名」按钮调用——
+ * 它会先展开侧栏再把焦点移到标题输入框。该按钮已移除（侧栏点标题即可就地
+ * 编辑，工具条是重复入口，且焦点跳走会让用户困惑），故此函数一并删除。
  */
-function renameFromToolbar() {
-  const conv = activeConversation.value
-  if (!conv) return
-  if (window.matchMedia('(max-width: 860px)').matches) sideOpen.value = true
-  else sideFolded.value = false
-  startRename(conv)
-}
 
 async function handleDelete(conv: Conversation) {
   /*
@@ -926,6 +919,14 @@ watch(streaming, (v) => {
             </div>
 
             <div class="chat-toolbar__ops">
+              <!--
+                工具条只保留「提取行程」这一个动作。
+                原先还有两个按钮，均已移除：
+                  · 重命名 —— 侧栏会话项点标题即可就地编辑，这里是重复入口，
+                    而且它只是把焦点移到侧栏，用户看到光标跳走反而困惑
+                  · 分享 / 导出 —— 它并不分享对话内容，只是跳到「行程」页，
+                    属于「看起来有用但点进去还要再来一遍」的伪入口
+              -->
               <button
                 class="tool-btn tool-btn--accent"
                 :disabled="streaming || !canExtract"
@@ -935,25 +936,6 @@ watch(streaming, (v) => {
                 <TravelIcon name="luggage" :size="15" />
                 提取行程
               </button>
-              <button
-                class="tool-btn"
-                :disabled="streaming"
-                title="在左侧会话列表中就地修改标题"
-                @click="renameFromToolbar"
-              >
-                <TravelIcon name="edit" :size="15" />
-                重命名
-              </button>
-              <!-- 分享与导出统一在「行程详情」里操作（那边有完整的权限与格式选择），
-                   这里只做入口，避免两处各实现一套 -->
-              <RouterLink
-                to="/itineraries"
-                class="tool-btn"
-                title="分享与导出请到「行程」页打开对应行程"
-              >
-                <TravelIcon name="route" :size="15" />
-                分享 / 导出
-              </RouterLink>
             </div>
           </div>
 
