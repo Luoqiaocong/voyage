@@ -64,6 +64,16 @@ export const PAGE_COPY = {
   itinerariesLoading: '正在翻找你的旅行手账…',
   chatEmptyTitle: '准备好出发了吗？',
   chatEmptyDesc: '说出目的地、天数与预算，Voyage 会替你查好车次与天气，排成可以落地的日程。',
+  /*
+   * 草稿态（点过「新会话」、还没开口）的问候语。
+   *
+   * 与 chatEmptyTitle 的分工：
+   *   chatEmptyTitle 用于**无会话 / 当天首次**的欢迎屏，是介绍页的开场；
+   *   这一句用于老用户点「新会话」后的空白窗 —— 不必再介绍产品，
+   *   只需一句「我在听」，让用户知道这个空窗口是等他说话的，而不是坏了。
+   */
+  chatDraftGreeting: '想去哪儿？说给我听听',
+  chatDraftHint: '目的地、天数、预算，写一句就行',
   chatLoading: '正在收拾行囊…',
   profileLoading: '正在读取你的旅行档案…'
 }

@@ -1631,6 +1631,21 @@ watch(streaming, (v) => {
             @touchmove.passive="onTouchMoveIntent"
           >
             <div class="chat-stream">
+              <!--
+                草稿态的问候。
+                点「新会话」后消息区是空的，只有一个输入框会显得冷清、
+                也让人不确定「这里是不是坏了、能不能说话」。
+                一句问候把这件事说清楚，语气与欢迎屏一致（不说教、不堆字）。
+
+                位置刻意放在**消息区**而不是输入框里：
+                与欢迎屏同处一栏，视觉上前后连贯；输入区保持轻，
+                不被一行文字压得拥挤。
+              -->
+              <div v-if="isDraft" class="draft-hello">
+                <h2 class="draft-hello__title">{{ PAGE_COPY.chatDraftGreeting }}</h2>
+                <p class="draft-hello__hint">{{ PAGE_COPY.chatDraftHint }}</p>
+              </div>
+
               <!-- 历史被截断时的提示：后端按轮次分页，更早的内容不在此次响应里 -->
               <p v-if="historyTruncated" class="chat-truncated">
                 仅显示最近 {{ HISTORY_ROUNDS }} 轮对话
@@ -2972,6 +2987,39 @@ watch(streaming, (v) => {
    避免留下永不命中的死样式。 */
 
 /* ---- 消息区 ---- */
+/* ============================================================
+   草稿态的问候
+   ------------------------------------------------------------
+   点「新会话」后消息区是空的，只给一个输入框会显得冷清，
+   用户也不确定「这里能不能说话」。一句问候把这件事讲清楚。
+
+   与欢迎屏（.chat-empty）的分工：欢迎屏是介绍页（logo + 引导卡），
+   这里是「我已经在了，你说」—— 所以只用两行字，不加图形与卡片。
+   ============================================================ */
+.draft-hello {
+  /*
+   * 垂直居中：草稿态下它是消息区里唯一的元素，贴顶会像一条被遗忘的提示。
+   * 靠上下 auto 外边距居中，一旦有消息进来（v-if 变假）它就消失，
+   * 不影响正常排版。
+   */
+  margin: auto 0;
+  text-align: center;
+  padding: 40px 16px;
+}
+.draft-hello__title {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 1.32rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.draft-hello__hint {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.7;
+  color: var(--text3);
+}
+
 .chat-scroll {
   flex: 1;
   overflow-y: auto;
@@ -2979,7 +3027,12 @@ watch(streaming, (v) => {
   scroll-behavior: smooth;
 }
 
-.chat-stream { max-width: 820px; margin-inline: auto; display: flex; flex-direction: column; gap: 22px; }
+/*
+ * min-height: 100% 是草稿态问候能垂直居中所需：
+ * .draft-hello 用上下 auto 外边距居中，前提是父容器有富余高度。
+ * 没有这一条时它只按内容高度撑开，问候会贴在顶部。
+ */
+.chat-stream { max-width: 820px; margin-inline: auto; min-height: 100%; display: flex; flex-direction: column; gap: 22px; }
 
 /* 历史截断提示：居中细字，不抢消息的视觉重心 */
 .chat-truncated {
