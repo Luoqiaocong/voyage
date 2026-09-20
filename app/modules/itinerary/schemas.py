@@ -1,9 +1,110 @@
 from datetime import datetime
 from typing import Annotated, Literal, Optional
+import json
+import re
 
-from pydantic import BaseModel, Field, field_serializer, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, field_serializer, model_validator
 
 from app.shared.utils import to_local_display
+
+
+# ---------------------------------------------------------------------------
+# 类型容错
+#
+# 工具调用（function_calling）模式下，模型只是「参考」JSON schema，并不强制类型。
+# 实测 glm-4.5-air 会稳定地给出不合 schema 的输出，例如：
+#   - cost: 44.5（schema 是 int，Pydantic 默认拒绝带小数的 float）
+#   - tips: "一整段话"（schema 是 list[str]）
+#   - accommodation: "{\"time_slot\": ...}"（嵌套对象被序列化成字符串）
+# 任何一条都会让整份行程校验失败并触发重试，既慢又可能仍失败（用户侧表现为超时）。
+# 这里在字段级做「尽力还原」，把模型的小偏差吸收掉，而不是靠重试赌下一次输出。
+# ---------------------------------------------------------------------------
+def _to_int(value):
+    """把 float / 数字字符串 / 带单位文本（如「150元」）还原为 int。"""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(round(value))
+    if isinstance(value, str):
+        match = re.search(r"-?\d+(?:\.\d+)?", value)
+        if match:
+            return int(round(float(match.group())))
+    return value
+
+
+def _to_float(value):
+    """把数字字符串 / 带单位文本还原为 float。"""
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        match = re.search(r"-?\d+(?:\.\d+)?", value)
+        if match:
+            return float(match.group())
+    return value
+
+
+def _to_str_list(value):
+    """把字符串按换行/分号拆成列表；已是列表则逐项转字符串。"""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        parts = [p.strip() for p in re.split(r"[\n；;]+", text) if p.strip()]
+        return parts or [text]
+    if isinstance(value, (list, tuple)):
+        return [v if isinstance(v, str) else str(v) for v in value]
+    return [str(value)]
+
+
+# 复用别名，避免在字段上到处写 Annotated[...]
+CoercedInt = Annotated[int, BeforeValidator(_to_int)]
+CoercedFloat = Annotated[float, BeforeValidator(_to_float)]
+StrList = Annotated[list[str], BeforeValidator(_to_str_list)]
+
+
+def _maybe_parse_json(value):
+    """模型偶尔会把嵌套对象/数组序列化成 JSON 字符串再放进工具参数。
+
+    Pydantic 不会自动把字符串还原成对象，于是整个提取因一条嵌套字段而校验失败、
+    转走更慢且更不稳的回退路径。这里只做「能解析成 dict/list 就还原」的兼容处理：
+    解析失败或本来就是对象时原样返回，不改变任何合法输入的语义。
+    """
+    if not isinstance(value, str):
+        return value
+    try:
+        parsed = json.loads(value)
+    except (ValueError, TypeError):
+        return value
+    return parsed if isinstance(parsed, (dict, list)) else value
+
+
+def _coerce_stringified_nested(data):
+    """把 ItineraryPlan 里被字符串化的嵌套字段还原为对象/数组。"""
+    if not isinstance(data, dict):
+        return data
+    data = dict(data)
+
+    if "accommodation" in data:
+        data["accommodation"] = _maybe_parse_json(data["accommodation"])
+
+    daily = data.get("daily_plans")
+    if isinstance(daily, list):
+        for day in daily:
+            if not isinstance(day, dict):
+                continue
+            acts = day.get("activities")
+            if isinstance(acts, str):
+                day["activities"] = _maybe_parse_json(acts)
+            elif isinstance(acts, list):
+                day["activities"] = [_maybe_parse_json(a) for a in acts]
+
+    return data
 
 
 # ============================================================
@@ -28,12 +129,12 @@ class ItineraryActivity(BaseModel):
         description="一句话说明为什么安排这里。包含：亮点 + 注意点（如有）。长度控制在 20-40 字。"
     )
 
-    duration_hours: float = Field(
+    duration_hours: CoercedFloat = Field(
         default=2.0,
         description="预计停留时长（小时）。景点一般 2-4 小时，餐厅 1-2 小时。攻略中没提则使用默认值 2.0。"
     )
 
-    cost: int = Field(
+    cost: CoercedInt = Field(
         default=0,
         description="预估单人花费（元）。没提到则填 0（表示未知或免费）。"
     )
@@ -50,7 +151,7 @@ class ItineraryActivity(BaseModel):
 class ItineraryDay(BaseModel):
     """一天的具体安排。"""
 
-    day_no: int = Field(
+    day_no: CoercedInt = Field(
         description="第几天，从 1 开始编号。"
     )
 
@@ -71,6 +172,20 @@ class ItineraryDay(BaseModel):
         description="当天行程一句话总结，用 20-40 字概述。包含：今日核心亮点 + 节奏感。"
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def _restore_stringified_activities(cls, data):
+        """单独校验某一天时，也把被字符串化的 activities 还原为数组。"""
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        acts = data.get("activities")
+        if isinstance(acts, str):
+            data["activities"] = _maybe_parse_json(acts)
+        elif isinstance(acts, list):
+            data["activities"] = [_maybe_parse_json(a) for a in acts]
+        return data
+
 
 # ============================================================
 # 层级 3：完整行程（LLM 输出用）
@@ -82,16 +197,16 @@ class ItineraryPlan(BaseModel):
         description="目的地城市或地区，使用正式名称。示例：「北京」「杭州」。从攻略中提取，不要编造。"
     )
 
-    days: int = Field(
+    days: CoercedInt = Field(
         description="行程总天数。必须等于 daily_plans 列表的长度。"
     )
 
-    budget: Optional[int] = Field(
+    budget: Optional[CoercedInt] = Field(
         default=None,
         description="总预算（元）。仅当攻略中明确提到时填写。"
     )
 
-    preferences: list[str] = Field(
+    preferences: StrList = Field(
         default_factory=list,
         description="旅行偏好标签，如：美食、亲子、穷游、摄影、历史文化、自然风光、购物、休闲、探险。"
     )
@@ -110,10 +225,19 @@ class ItineraryPlan(BaseModel):
         description="每天的详细安排，按 day_no 从小到大排列。长度必须等于 days。"
     )
 
-    tips: list[str] = Field(
+    tips: StrList = Field(
         default_factory=list,
         description="出行提醒，3-5 条。每条是一句完整的句子，末尾加句号。"
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _restore_stringified_nested(cls, data):
+        """校验前先把被字符串化的 accommodation / activities 还原成对象。
+
+        见 _coerce_stringified_nested 的说明：这是应对模型工具调用输出的兼容层。
+        """
+        return _coerce_stringified_nested(data)
 
     @model_validator(mode="after")
     def check_days_consistency(self) -> "ItineraryPlan":

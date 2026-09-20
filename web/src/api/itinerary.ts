@@ -55,7 +55,10 @@ export async function getItinerary(id: number): Promise<ItineraryDetail> {
 }
 
 export async function extractItinerary(conversationId: string): Promise<ItineraryDetail> {
-  return (await http.post(`/itineraries/extract/${conversationId}`)) as unknown as ItineraryDetail
+  // 提取是一次同步 LLM 调用，耗时可达数十秒；http 实例默认 20s 会误判超时。
+  return (await http.post(`/itineraries/extract/${conversationId}`, undefined, {
+    timeout: 120000
+  })) as unknown as ItineraryDetail
 }
 
 export async function updateItinerary(id: number, plan: ItineraryPlan): Promise<ItineraryDetail> {
