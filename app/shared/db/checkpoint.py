@@ -25,7 +25,17 @@ from app.config import config
 from app.shared.db.config import ASYNC_DATABASE_URL, IS_POSTGRES
 from app.shared.utils import log
 
-SQLITE_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "exports" / "checkpoints.sqlite"
+# SQLite 回退模式下检查点文件的路径（仅在不配 DATABASE_URL 时使用）。
+#
+# 路径层数：本文件在 app/shared/db/ 下，回到项目根需要 **4** 层 parent
+# （parent×1=app/shared/db, ×2=app/shared, ×3=app, ×4=项目根）。
+# 原本是 ×3，会把检查点写到 app/data/exports/ 而不是项目根的 data/exports/
+# —— 与 app/shared/db/config.py 里 DB_PATH 的落点不一致（那边用的是 ×4），
+# 导致同一个 data 目录下出现两份分离的 SQLite 数据。
+SQLITE_PATH = (
+    Path(__file__).resolve().parent.parent.parent.parent
+    / "data" / "exports" / "checkpoints.sqlite"
+)
 
 
 def _to_psycopg_url(url: str) -> str:
