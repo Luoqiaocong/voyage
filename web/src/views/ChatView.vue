@@ -193,6 +193,8 @@ async function loadConversations() {
     ui.toast(e?.message ?? '会话列表加载失败', 'error')
   } finally {
     loadingList.value = false
+    // 无论成功失败都标记「已加载」：失败时不该永远停在空白等待态
+    listLoaded.value = true
   }
 }
 
@@ -326,11 +328,21 @@ function resetStream() {
 async function newConversation() {
   if (streaming.value) return
   /*
+   * 点「新会话」就等于告诉系统：欢迎屏的使命结束了。
+   *
+   * 必须显式记这一笔。无会话时 shouldShowWelcome 由
+   * 「conversations.length === 0」直接判真，**不看 lastWelcomeAt** ——
+   * 只清 activeId 的话欢迎屏会原地不动，用户看到的是「点了没反应」
+   * （这正是之前那个 bug 的成因之一）。
+   */
+  markWelcomeShown()
+
+  /*
    * 已经在草稿态：无需重来，把焦点交回输入框即可。
    *
    * 判据用 isDraft 而不是 `!activeId` —— 后者在**欢迎屏**上也为真，
    * 那时若不进入草稿态，输入框根本不在 DOM 里（欢迎屏分支没有 composer），
-   * 后面那句 focus() 会静默失败，用户点了按钮看不到任何变化。
+   * 后面那句 focus() 会静默失败。
    */
   if (isDraft.value) {
     await nextTick()
@@ -705,16 +717,13 @@ function toggleFold() {
 }
 
 /**
- * 从折叠图标列点「搜索」：先展开侧栏，再打开搜索弹窗。
+ * 折叠图标列里的「搜索」。
  *
- * 展开侧栏不是必须的（弹窗是浮层），但用户点的是「侧栏里的搜索」，
- * 收起状态下展开一下更符合预期，也能让结果列表与侧栏上下文对齐。
- * 注意这里**不再依赖 convKeyword / 内联搜索框** —— 搜索已改为弹窗，
- * 且支持内容搜索（见 searchOpen / searchResults）。
+ * ⚠️ 这里**不能**展开侧栏。搜索是屏幕中央的弹窗，与侧栏宽度无关；
+ * 原先写了 sideFolded = false，于是折叠状态下点搜索会把侧栏又推开 ——
+ * 用户明确报告过这个 bug：他折叠侧栏就是为了腾出宽度，结果一点搜索就弹回来。
  */
-async function focusSearch() {
-  sideFolded.value = false
-  await nextTick()
+function focusSearch() {
   openSearch()
 }
 
@@ -909,7 +918,30 @@ const lastWelcomeAt = ref('')
  *   欢迎屏兼作「今天想去哪儿」的起手式。但同一天内反复点「新会话」
  *   就不该反复看到 —— 那才是打扰。
  */
+/**
+ * 会话列表是否已经加载过一次。
+ *
+ * ⚠️ 没有它就会**闪一遍欢迎屏**：挂载那一刻 conversations 还是空数组
+ * （loadConversations 尚未返回），shouldShowWelcome 会先判为 true 并把
+ * logo + 引导卡整屏渲染出来，等列表回来才切走 —— 用户看到的就是一闪。
+ * 所以在「还没加载完」期间一律不显示欢迎屏与草稿态，宁可短暂空着。
+ */
+const listLoaded = ref(false)
+
+/**
+ * 这次进入是否该显示欢迎屏。
+ *
+ * 用户要求：只在**没有会话历史**、或**当天首次打开对话页**时出现。
+ * 点「新会话」时不该再看到它（那是要开始打字，不是要看介绍）。
+ *
+ * 注意这里的两个「不显示」来源不同，别混：
+ *   listLoaded=false  数据还没到，先不判断（防闪烁）
+ *   有会话且今天已显示过  用户今天已经见过，不必再看
+ */
 const shouldShowWelcome = computed(() => {
+  // 加载完成前不下结论：此时 conversations 为空只是「还没拿到」，
+  // 不是「用户没有会话」
+  if (!listLoaded.value) return false
   if (conversations.value.length === 0) return true
   return !isToday(lastWelcomeAt.value)
 })
@@ -1510,11 +1542,6 @@ watch(streaming, (v) => {
             <TravelIcon name="map" :size="16" />
             我的会话
           </button>
-          <div class="chat-empty__logo" aria-hidden="true">
-            <!-- 这里显示 64px（3 倍屏需 192px），故用 512 的版本。
-                 缩小到 128 在这个尺寸会发虚，与导航栏的取舍不同。 -->
-            <img src="/voyage-mark-2.png" alt="" />
-          </div>
           <h2>{{ PAGE_COPY.chatEmptyTitle }}</h2>
           <p>{{ PAGE_COPY.chatEmptyDesc }}</p>
 
@@ -2679,19 +2706,10 @@ watch(streaming, (v) => {
   padding: 24px;
 }
 
-.chat-empty__logo {
-  width: 64px;
-  height: 64px;
-  display: grid;
-  place-items: center;
-  border-radius: 18px;
-  /* 去掉渐变底：新图标本身是完整方形图，再套一层渐变会变成「渐变框套方块」 */
-  background: var(--panel);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-sm);
-  overflow: hidden;
-}
-.chat-empty__logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/*
+ * 原 .chat-empty__logo（64px 圆角方块 + logo）已移除 —— 用户要求欢迎屏不要 logo。
+ * 去掉后标题成为第一眼内容，视觉重心也从「品牌」回到了「开始对话」。
+ */
 .chat-empty h2 { font-size: 1.45rem; }
 .chat-empty p { color: var(--text2); max-width: 30em; font-size: 0.9rem; }
 

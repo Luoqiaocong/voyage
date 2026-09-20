@@ -2314,7 +2314,8 @@ function startHref(): string {
   position: relative;
   overflow: hidden;
   text-align: center;
-  background: linear-gradient(160deg, #eef4ff 0%, #f8fafc 52%, #eff9ff 100%);
+  /* 与个人主页顶部沉浸区共用同一份浅色水洗底，见 main.css 的 --grad-wash */
+  background: var(--grad-wash);
   border: 1px solid var(--border);
   border-radius: 24px;
   padding: 64px 40px 56px;

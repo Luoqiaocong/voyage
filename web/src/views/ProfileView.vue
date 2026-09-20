@@ -18,7 +18,6 @@ import AppNavbar from '@/components/AppNavbar.vue'
 import BackToTop from '@/components/BackToTop.vue'
 import MemoryPanel from '@/components/MemoryPanel.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
-import MapTexture from '@/components/MapTexture.vue'
 import { AVATAR_BASE_URL } from '@/constants'
 import { changePassword, deleteAccount, getAvatars, updateProfile } from '@/api/user'
 import { listItineraries } from '@/api/itinerary'
@@ -253,9 +252,13 @@ async function handleDeleteAccount() {
     <main id="main" tabindex="-1">
       <div class="container page">
         <!-- ==================== 1. 顶部沉浸区 ==================== -->
+        <!--
+          原先这里铺了一层 MapTexture（抽象大陆弧线 + 虚线航线 + 圆点站点 +
+          经纬网格，并在右上角用径向遮罩渐隐）。用户要求去掉这些装饰线：
+          顶部这块改用**纯色渐变**承担视觉身份（见 .hero-card），
+          不再叠任何图形 —— 背景干净，内容自然更突出。
+        -->
         <section class="hero-card">
-          <MapTexture class="hero-card__map" routes />
-
           <div class="hero-card__inner">
             <!-- 大头像：点击更换 -->
             <button
@@ -541,21 +544,23 @@ async function handleDeleteAccount() {
   border-radius: var(--r-l);
   padding: 30px 32px;
   margin-bottom: 22px;
-  /* 浅色旅行感渐变：冷雾蓝到白，不走高饱和 */
-  background: linear-gradient(135deg, #eef4ff 0%, #f7f9fc 46%, #f0f9ff 100%);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-sm);
+  /*
+   * 配色向首页靠齐。
+   *
+   * 原先这里是一条 1px 边框 + 投影，后来改成「浅蓝 → 浅粉」渐变 ——
+   * 粉色与中间的过渡色（#f4f0fd）叠起来整体偏紫，与首页的冷蓝体系打架。
+   * 现在与首页收尾区共用同一个 token --grad-wash：蓝 → 近白 → 极浅青，
+   * 全程冷色、无紫。中段落在近白上而不是某一端的彩色，所以看起来是
+   * 「浅底略微透蓝」而不是「一块颜色」，也就不发飘。
+   *
+   * 仍不加边框与阴影：顶部这块靠渐变自身与下方白卡片区分。
+   */
+  background: var(--grad-wash);
 }
-.hero-card__map {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  color: var(--blue-600);
-  opacity: 0.85;
-  mask-image: radial-gradient(ellipse 70% 120% at 88% 10%, #000 6%, transparent 68%);
-  -webkit-mask-image: radial-gradient(ellipse 70% 120% at 88% 10%, #000 6%, transparent 68%);
-}
+/*
+ * 原 .hero-card__map（MapTexture 的绝对定位 + 右上角径向渐隐遮罩）已随元素移除。
+ * MapTexture 组件本身仍被 ForgotView 使用，故保留组件文件不动。
+ */
 
 .hero-card__inner {
   position: relative;
@@ -786,9 +791,18 @@ a.hero-stat:hover {
   background: var(--surface-soft);
   transition: background-color 0.24s;
 }
+/*
+ * 密码强度：四级必须用四种颜色 —— **颜色本身承载「强度」这个信息**，
+ * 统一成一种蓝就等于把语义删掉了。
+ *
+ * 但中段（lv-3）原先用青色，在整页的冷蓝体系里显得杂。收进蓝系：
+ *   弱=红（危险） → 中=金（提醒） → 强=蓝（正常，回归主色） → 很强=绿（通过）
+ * 这样既保留了「一眼看出强弱」的能力，又让页面只多出红/金/绿三个
+ * 语义色，而它们都有明确含义，不是装饰。
+ */
 .pf-strength__bars i.on.lv-1 { background: var(--danger); }
 .pf-strength__bars i.on.lv-2 { background: var(--gold-500); }
-.pf-strength__bars i.on.lv-3 { background: var(--cyan-500); }
+.pf-strength__bars i.on.lv-3 { background: var(--blue-500); }
 .pf-strength__bars i.on.lv-4 { background: var(--success); }
 .pf-strength__text { font-size: 0.73rem; color: var(--text3); }
 
