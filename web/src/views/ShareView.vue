@@ -17,6 +17,7 @@ import {
   type SharedItinerary
 } from '@/api/share'
 import type { ItineraryActivity } from '@/api/itinerary'
+import BackToTop from '@/components/BackToTop.vue'
 import { useUserStore } from '@/stores/user'
 import { useUiStore } from '@/stores/ui'
 
@@ -232,6 +233,12 @@ onMounted(bootstrap)
         <p class="share__foot">由 Voyage 生成 · 内容以分享者保存的版本为准</p>
       </template>
     </div>
+
+    <!--
+      返回顶部：多天行程的分享页会很长，浏览者常需要回到顶部看概要。
+      这里是**公开页面**，没有导航栏 —— 组件用 fixed 定位，不依赖任何上层结构。
+    -->
+    <BackToTop />
   </div>
 </template>
 

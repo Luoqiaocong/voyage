@@ -15,6 +15,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppNavbar from '@/components/AppNavbar.vue'
+import BackToTop from '@/components/BackToTop.vue'
 import MemoryPanel from '@/components/MemoryPanel.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
 import MapTexture from '@/components/MapTexture.vue'
@@ -486,6 +487,9 @@ async function handleDeleteAccount() {
         </div>
       </div>
     </main>
+
+    <!-- 返回顶部：资料页含表单、偏好、记忆面板等多个区块，长度可观 -->
+    <BackToTop />
 
     <!-- ==================== 头像选择弹窗 ==================== -->
     <div v-if="pickerOpen" class="picker" @click.self="pickerOpen = false">
