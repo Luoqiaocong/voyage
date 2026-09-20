@@ -660,9 +660,53 @@ const sideOpen = ref(false)
  */
 const sideFolded = ref(false)
 
+/** 侧栏搜索框元素：展开后聚焦用 */
+const searchEl = ref<HTMLInputElement | null>(null)
+
+/**
+ * 搜索框是否展开。
+ *
+ * 默认隐藏：侧栏顶部只放三个图标，视觉上干净；搜索是低频动作，
+ * 常驻一个输入框会让顶部一直占两行。
+ * 收起时机有两个（用户指定的交互）：再次点搜索图标、或输入框失去焦点。
+ * 失焦时**一并清空关键词** —— 否则会出现「框收起来了、列表却还在过滤」
+ * 的幽灵状态：用户看不到关键词，只觉得会话莫名其妙变少了。
+ */
+const searchOpen = ref(false)
+
 /** 侧栏宽度由 CSS 变量控制，折叠时主区自动铺满，无需 JS 参与布局 */
 function toggleFold() {
   sideFolded.value = !sideFolded.value
+}
+
+async function toggleSearch() {
+  if (searchOpen.value) {
+    closeSearch()
+    return
+  }
+  searchOpen.value = true
+  await nextTick()
+  searchEl.value?.focus()
+}
+
+function closeSearch() {
+  searchOpen.value = false
+  convKeyword.value = ''
+}
+
+/**
+ * 从折叠图标列点「搜索」：先展开侧栏，再展开搜索框并聚焦。
+ *
+ * 搜索本身早已实现（convKeyword + filteredConversations），
+ * 这里不重复造一套 —— 折叠状态下没有地方展示输入框与结果，
+ * 所以这个动作的职责只有「展开侧栏 + 展开搜索」。
+ */
+async function focusSearch() {
+  sideFolded.value = false
+  await nextTick()
+  searchOpen.value = true
+  await nextTick()
+  searchEl.value?.focus()
 }
 
 /**
@@ -982,7 +1026,12 @@ watch(streaming, (v) => {
   <div class="chat-page">
     <AppNavbar />
 
-    <main id="main" tabindex="-1" class="chat-main">
+    <main
+      id="main"
+      tabindex="-1"
+      class="chat-main"
+      :class="{ 'chat-main--folded': sideFolded }"
+    >
       <!-- ==================== 侧边栏 ==================== -->
       <!-- 窄屏为抽屉，遮罩点击关闭 -->
       <!--
@@ -1000,42 +1049,135 @@ watch(streaming, (v) => {
         :class="{ 'chat-side--open': sideOpen, 'chat-side--folded': sideFolded }"
         aria-label="会话列表"
       >
-        <div class="chat-side__head">
-          <span class="chat-side__title">我的会话</span>
-          <span v-if="conversations.length" class="chat-side__count">{{ conversations.length }}</span>
-          <!-- 折叠：会话多时把侧栏收起，给对话区让出宽度 -->
+        <!--
+          折叠图标列（仅在侧栏折叠时可见，见 .chat-side--folded）。
+          收起后留一条窄竖列，把顶部那三个动作原样保留下来 ——
+          收起侧栏不该等于失去功能。
+
+          三个动作与展开态顶部操作栏一一对应，顺序也一致：
+            展开会话列表 ←→ .side-act（折叠按钮，同一个 panel 图标）
+            搜索会话     ←→ .side-act（搜索按钮，focusSearch 展开并聚焦）
+            创建新会话   ←→ .side-act--new
+        -->
+        <div class="side-rail">
           <button
-            class="side-fold"
+            class="rail-btn"
             type="button"
-            :aria-label="sideFolded ? '展开会话列表' : '收起会话列表'"
-            :title="sideFolded ? '展开' : '收起'"
+            aria-label="展开会话列表"
+            aria-expanded="false"
+            title="展开会话列表"
             @click="toggleFold"
           >
-            <TravelIcon :name="sideFolded ? 'arrow-right' : 'arrow-left'" :size="15" />
+            <!-- 与展开态顶部同一个面板图标，保证是同一个动作的同一种表示 -->
+            <TravelIcon name="panel" :size="17" />
           </button>
-        </div>
-
-        <!-- 新建：主操作，占满整行比挤在标题旁更好点 -->
-        <button class="side-new" type="button" :disabled="streaming" @click="newConversation">
-          <span class="side-new__icon" aria-hidden="true">
-            <TravelIcon name="plane" :size="15" />
-          </span>
-          开始新会话
-        </button>
-
-        <!-- 会话搜索：会话一多就必须能找回来 -->
-        <div v-if="conversations.length" class="chat-side__search">
-          <TravelIcon name="compass" :size="14" />
-          <input
-            v-model="convKeyword"
-            type="search"
-            placeholder="搜索标题或内容…"
+          <button
+            class="rail-btn"
+            type="button"
+            :disabled="!conversations.length"
             aria-label="搜索会话"
-          />
-          <button v-if="convKeyword" class="chat-side__clear" aria-label="清除搜索" @click="convKeyword = ''">
-            ✕
+            title="搜索会话"
+            @click="focusSearch"
+          >
+            <TravelIcon name="search" :size="17" />
+          </button>
+          <button
+            class="rail-btn"
+            type="button"
+            :disabled="streaming"
+            aria-label="创建新会话"
+            title="创建新会话"
+            @click="newConversation"
+          >
+            <TravelIcon name="plus" :size="17" />
           </button>
         </div>
+
+        <div class="chat-side__head">
+          <!--
+            顶部操作区：三个图标按钮，从左到右依次是
+              ① 折叠/展开侧栏   ② 搜索会话   ③ 新建会话
+            顺序按使用频率与「从整体到具体」排：先控制这块区域本身，
+            再在其中查找，最后是创建新内容。
+
+            只用图标不配文字（每个都有 title 与 aria-label）：
+            三个按钮横排已经很紧凑，加文字会把标题行挤掉。
+          -->
+          <div class="side-acts">
+            <button
+              class="side-act"
+              type="button"
+              :aria-label="sideFolded ? '展开会话列表' : '折叠会话列表'"
+              :aria-expanded="!sideFolded"
+              :title="sideFolded ? '展开会话列表' : '折叠会话列表'"
+              @click="toggleFold"
+            >
+              <!-- 面板图标（矩形 + 左竖线），不是箭头：箭头会被读成「返回」 -->
+              <TravelIcon name="panel" :size="17" />
+            </button>
+
+            <button
+              class="side-act"
+              type="button"
+              :disabled="!conversations.length"
+              :aria-expanded="searchOpen"
+              aria-label="搜索会话"
+              title="搜索会话"
+              @click="toggleSearch"
+            >
+              <TravelIcon name="search" :size="17" />
+            </button>
+
+            <button
+              class="side-act side-act--new"
+              type="button"
+              :disabled="streaming"
+              aria-label="创建新会话"
+              title="创建新会话"
+              @click="newConversation"
+            >
+              <TravelIcon name="plus" :size="17" />
+            </button>
+
+            <span class="side-acts__spacer"></span>
+            <span v-if="conversations.length" class="chat-side__count">
+              {{ conversations.length }}
+            </span>
+          </div>
+
+          <div class="chat-side__title-row">
+            <span class="chat-side__title">我的会话</span>
+          </div>
+        </div>
+
+        <!--
+          会话搜索：默认隐藏，点搜索图标后展开（在原位下方，不挤掉图标行）。
+          按标题或已缓存摘要实时过滤 —— 过滤逻辑复用已有的
+          filteredConversations，这里只负责显隐与聚焦。
+        -->
+        <Transition name="search">
+          <div v-if="searchOpen" class="chat-side__search">
+            <TravelIcon name="search" :size="14" />
+            <input
+              ref="searchEl"
+              v-model="convKeyword"
+              type="search"
+              placeholder="搜索会话标题…"
+              aria-label="搜索会话"
+              @blur="closeSearch"
+              @keydown.esc.prevent="closeSearch"
+            />
+            <button
+              v-if="convKeyword"
+              class="chat-side__clear"
+              aria-label="清除关键词"
+              @mousedown.prevent
+              @click="convKeyword = ''"
+            >
+              ✕
+            </button>
+          </div>
+        </Transition>
 
         <div v-if="loadingList" class="chat-side__loading">
           <span class="skel skel--line"></span>
@@ -1126,6 +1268,13 @@ watch(streaming, (v) => {
           </li>
         </ul>
       </aside>
+
+      <!--
+        极细分割线。只占 1px 的独立网格列，折叠时该列归零自动消失。
+        背景色差本身已能区分左右，这条线是给「浅色主题下两者差异较小」
+        兜底，让边界更明确。
+      -->
+      <div class="chat-divider" aria-hidden="true"></div>
 
       <!-- ==================== 主区域 ==================== -->
       <section class="chat-body">
@@ -1493,6 +1642,22 @@ watch(streaming, (v) => {
     radial-gradient(circle at 88% 72%, rgba(14, 165, 233, 0.045), transparent 45%);
 }
 
+/* ============================================================
+   对话页主容器
+   ------------------------------------------------------------
+   原先左侧会话列表与右侧对话区是**两个独立的圆角卡片**并排：
+   各自带 border / border-radius / background，中间隔着 16px 的 gap
+   —— 视觉上是「两块拼在一起」，切换视线时会有明显的断裂感。
+
+   现在改为**一个整体面板**：
+     · 容器自身承担边框与圆角，内部两块不再各画边框
+     · 去掉 gap，两块紧邻，靠**背景色差**区分左右
+       侧栏 --bg2（比页面底色略深一档）/ 主区 --panel（白）
+       这两个变量在设计系统里本就是这个层级关系，直接拿来用
+     · 两者之间只留 1px 极细分割线（--hairline 太淡、--border 更清楚）
+     · 分割线宽度用变量 --divider-w 控制：折叠侧栏时归零，
+       既不用改 border-width（那会跳变），也不用条件类
+   ============================================================ */
 .chat-main {
   flex: 1;
   min-height: 0;
@@ -1500,17 +1665,23 @@ watch(streaming, (v) => {
   /* 侧栏宽度用变量控制：折叠时只改变量，主区自动铺满，
      不必让 JS 参与布局计算 */
   --side-w: 272px;
-  grid-template-columns: var(--side-w) 1fr;
+  --divider-w: 1px;
+  grid-template-columns: var(--side-w) var(--divider-w) 1fr;
   margin: 0 16px 16px;
-  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-m);
+  background: var(--panel);
   position: relative;
   z-index: 1;
   transition: grid-template-columns 0.26s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
-/* 折叠态：侧栏让位，间隔也收掉，否则会留一条空缝 */
-.chat-main:has(.chat-side--folded) {
-  grid-template-columns: 0 1fr;
-  gap: 0;
+/* 折叠态：侧栏让位，分割线一并归零，否则会留一条孤立的竖线。
+   用容器自身的修饰类而不是 :has(.chat-side--folded)：
+   折叠会连带影响工具栏内边距，把状态放在容器上、由一处决定全部后果，
+   比让多条规则各自去 :has() 里猜更清楚，也少一层嵌套选择器。 */
+.chat-main--folded {
+  --side-w: 0px;
+  --divider-w: 0px;
 }
 @media (prefers-reduced-motion: reduce) {
   .chat-main { transition: none; }
@@ -1518,13 +1689,106 @@ watch(streaming, (v) => {
 
 /* ==================== 侧边栏 ==================== */
 .chat-side {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-m);
+  /*
+   * 不再是独立卡片：边框与圆角交给外层容器，这里只负责背景。
+   * 用 --bg2 而不是 --panel —— 比主区的白底深一档，
+   * 于是左右两侧靠**背景色差**自然分开，而不需要两条边框。
+   * 左侧圆角仍需自己画：容器没有 overflow:hidden（见 .chat-main 注释）。
+   */
+  background: var(--bg2);
+  border-radius: var(--r-m) 0 0 var(--r-m);
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+  /* ::after / 折叠按钮的绝对定位以它为参照 */
+  position: relative;
+  /* min-width:0 是折叠所必需：否则内容的最小宽度会把网格列撑住，
+     即使轨道被设为 0 也收不回去（flex/grid 的经典坑） */
+  min-width: 0;
+}
+
+/*
+ * 折叠态。
+ *
+ * ## 为什么不能只把宽度收成 0
+ *
+ * 折叠/展开的按钮**就在侧栏内部**。把整块收成 0 之后按钮也跟着消失 ——
+ * 结果是「收得起来、展不开」，用户被锁在折叠状态里。
+ * （实测：toggleFold 原本全项目只有一个调用点，且在该按钮上。）
+ *
+ * ## 做法
+ *
+ *   1. 侧栏内容整体淡出（`:not(.side-rail)` —— **必须排除图标列**，
+ *      否则连展开按钮一起淡掉，等于没修）
+ *   2. 图标列改为绝对定位，脱离「宽度归零」的影响，钉在面板左侧
+ */
+.chat-side--folded > *:not(.side-rail) {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+
+/* ============================================================
+   折叠图标列
+   ------------------------------------------------------------
+   收起侧栏后留一条窄竖列，把顶部操作栏那三个动作原样保留 ——
+   收起不该等于失去功能，也不该让用户失去找回它的入口。
+   与容器左边缘对齐、从工具栏那一行开始往下排。
+   ============================================================ */
+.side-rail {
+  display: none;   /* 展开态不显示，避免与顶部操作栏重复 */
+}
+.chat-side--folded .side-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /*
+   * 绝对定位：侧栏宽度此时为 0，只有脱离文档流才能显示出来。
+   * 左边缘留 9px、顶部留 9px，与顶部操作栏的第一行大致齐平
+   * （.chat-side__head 的 padding 是 12px）。
+   */
+  position: absolute;
+  top: 9px;
+  left: 9px;
+  z-index: 3;
+}
+/* 与 .side-act 同一套外观，让「同一个动作」在两种形态下长得一样 */
+.rail-btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text2);
+  transition: background-color 0.18s, border-color 0.18s, color 0.18s,
+    transform 0.18s;
+}
+.rail-btn:hover:not(:disabled) {
+  background: var(--panel);
+  border-color: var(--border);
+  color: var(--prim);
+}
+.rail-btn:active:not(:disabled) { transform: translateY(0); }
+.rail-btn:disabled { opacity: 0.38; cursor: not-allowed; }
+.rail-btn:focus-visible {
+  outline: 2px solid var(--prim);
+  outline-offset: 2px;
+}
+
+/*
+ * 分割线：占据 .chat-main 的中间那一列（见 grid-template-columns）。
+ * 独立成元素而不是给侧栏画 border-right，原因：
+ *   · 侧栏需要保留自己的 overflow:hidden（内部列表要滚动裁剪），
+ *     边框画在它身上会在折叠时随宽度变化而跳变
+ *   · 折叠时该列宽度归零，线条自然消失，不会留下孤立竖线
+ */
+.chat-divider {
+  width: 100%;
+  height: 100%;
+  background: var(--border);
 }
 /* 折叠时整栏淡出并收窄；不给 width 是因为宽度已由网格控制 */
 .chat-side--folded {
@@ -1536,14 +1800,71 @@ watch(streaming, (v) => {
   pointer-events: none;
 }
 
+/* ============================================================
+   侧栏顶部操作区
+   ------------------------------------------------------------
+   结构：一行三图标（折叠 / 搜索 / 新建）+ 会话计数，下面一行标题。
+   图标按钮统一 30px 方形、圆角 9px、透明底，悬停才浮出底色 ——
+   三个按钮视觉上等权，不靠颜色抢注意力。
+   「新建」默认带一点主色：它是这一行里唯一会「产生内容」的动作。
+   ============================================================ */
 .chat-side__head {
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 12px 10px;
+}
+.side-acts {
+  display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 14px 14px 12px;
+  gap: 4px;
+}
+/* 把计数推到最右，三个按钮自然靠左成为一组 */
+.side-acts__spacer { flex: 1; }
+
+.side-act {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text2);
+  transition: background-color 0.18s, border-color 0.18s, color 0.18s,
+    transform 0.18s;
+}
+.side-act:hover:not(:disabled) {
+  background: var(--panel);
+  border-color: var(--border);
+  color: var(--prim);
+  transform: translateY(-1px);
+}
+.side-act:active:not(:disabled) { transform: translateY(0); }
+.side-act:disabled { opacity: 0.38; cursor: not-allowed; }
+.side-act:focus-visible {
+  outline: 2px solid var(--prim);
+  outline-offset: 2px;
+}
+/* 搜索展开时按钮保持「按下」态，让用户知道它对应下面那个输入框 */
+.side-act[aria-expanded='true'] {
+  background: var(--primary-soft);
+  border-color: var(--blue-300);
+  color: var(--prim);
+}
+.side-act--new { color: var(--prim); }
+
+.chat-side__title-row {
+  display: flex;
+  align-items: center;
+  padding: 0 2px;
 }
 
-.chat-side__title { font-family: var(--font-display); font-size: 1rem; font-weight: 700; }
+.chat-side__title {
+  font-family: var(--font-display);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
 
 /* 会话条数：让用户对「攒了多少」有概念 */
 .chat-side__count {
@@ -1556,54 +1877,16 @@ watch(streaming, (v) => {
   padding: 1px 7px;
 }
 
-/* 折叠按钮：靠右，悬停才明显，避免与标题抢注意力 */
-.side-fold {
-  margin-left: auto;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text3);
-  transition: background-color 0.18s, color 0.18s, border-color 0.18s;
-}
-.side-fold:hover {
-  background: var(--panel2);
-  border-color: var(--border);
-  color: var(--prim);
-}
-
-/* ---- 新建会话：主操作占满整行 ---- */
-.side-new {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin: 0 10px 10px;
-  padding: 10px 14px;
-  border-radius: 11px;
-  background: var(--grad);
-  color: #fff;
-  font-size: 0.88rem;
-  font-weight: 650;
-  box-shadow: 0 6px 16px var(--glow);
-  transition: transform 0.2s, filter 0.2s, box-shadow 0.2s;
-}
-.side-new:hover:not(:disabled) {
-  transform: translateY(-1px);
-  filter: saturate(1.08);
-  box-shadow: 0 10px 22px var(--glow);
-}
-.side-new:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-.side-new__icon {
-  display: grid;
-  place-items: center;
-}
+/*
+ * 旧样式已清理：
+ *   .side-fold         → 并入 .side-act（三个图标按钮共用一套外观）
+ *   .side-new          → 并入 .side-act--new
+ *     「新建」原本是一个占满整行、实心渐变的按钮，现在收进顶部操作栏
+ *     变成图标按钮。代价是少了一句文字标签，收益是顶部只占一行、
+ *     且与「折叠/搜索」处在同一视觉层级（它俩也不该被一个实心大按钮压住）。
+ *     可发现性由 title + aria-label 兜底。
+ * 保留说明是为了下次改这块时知道东西搬到哪了。
+ */
 
 /* ---- 会话摘要 ----
    两行截断：一行放不下多少信息，三行又会让每项太高、列表变长 */
@@ -1668,6 +1951,21 @@ watch(streaming, (v) => {
   outline: none;
 }
 .chat-side__search input::placeholder { color: var(--text3); }
+
+/* 搜索框展开 / 收起：淡入 + 轻微下移，避免相邻的会话列表瞬移 */
+.search-enter-active,
+.search-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.search-enter-from,
+.search-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .search-enter-active,
+  .search-leave-active { transition: none; }
+}
 .chat-side__clear {
   color: var(--text3);
   font-size: 0.75rem;
@@ -1824,10 +2122,25 @@ watch(streaming, (v) => {
   min-height: 0;
   /* 让「回到底部」箭头能相对消息区绝对定位 */
   position: relative;
+  /*
+   * 不再是独立卡片：不再画自己的边框与圆角，那些由外层 .chat-main 统一承担。
+   * 背景保持 --panel（白）—— 与侧栏的 --bg2 形成色差，左右自然分开。
+   * 右侧圆角仍需自己画：容器没有 overflow:hidden。
+   */
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-m);
+  border-radius: 0 var(--r-m) var(--r-m) 0;
   overflow: hidden;
+}
+
+/*
+ * 折叠时给图标列让位。
+ *
+ * 图标列被绝对定位钉在侧栏左上角（此时侧栏宽度为 0），
+ * 会压在工具栏左端（会话标题）上面。这里把工具栏标题推开
+ * —— 34px 按钮 + 左右各 6px 余量。
+ */
+.chat-main--folded .chat-toolbar {
+  padding-left: 52px;
 }
 
 /* ---- 空状态 ---- */
@@ -2662,7 +2975,45 @@ watch(streaming, (v) => {
 .chat-empty__toggle { width: auto; gap: 7px; padding: 0 13px; font-size: 0.82rem; }
 
 @media (max-width: 860px) {
-  .chat-main { grid-template-columns: 1fr; margin: 0 10px 10px; gap: 10px; }
+  /* 窄屏只有一列：侧栏变成浮层抽屉，不再占据网格轨道，
+     所以分割线那一列也要去掉（否则会多出一条 1px 的空列） */
+  .chat-main {
+    grid-template-columns: 1fr;
+    margin: 0 10px 10px;
+  }
+  .chat-divider { display: none; }
+  /*
+   * 抽屉态下侧栏是固定定位的浮层，圆角与「左圆右直」的贴边样式都不适用，
+   * 改成右侧圆角（从左边滑出）；背景仍用 --bg2，与浮层的身份一致。
+   */
+  .chat-side {
+    position: fixed;
+    z-index: 70;
+    top: var(--nav-h);
+    bottom: 0;
+    left: 0;
+    width: min(300px, 84vw);
+    border-radius: 0 var(--r-m) var(--r-m) 0;
+    transform: translateX(-102%);
+    transition: transform 0.28s cubic-bezier(0.2, 0.7, 0.2, 1);
+    box-shadow: var(--shadow-lift);
+  }
+  .chat-side--open { transform: none; }
+  /*
+   * 窄屏不用「折叠」这套：侧栏本就是抽屉（用 sideOpen 控制），
+   * 折叠态若也生效会让抽屉内容整体透明、无法使用。故全部还原。
+   */
+  .chat-side--folded > *:not(.side-rail) {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  /* 图标列是宽屏折叠态的专属形态；窄屏由抽屉 + 工具栏按钮承担 */
+  .chat-side--folded .side-rail,
+  .side-rail { display: none; }
+  /* 「给浮出按钮让位」只针对宽屏折叠，窄屏下不适用 */
+  .chat-main--folded .chat-toolbar {
+    padding-left: 0;
+  }
 
   .side-toggle {
     display: inline-flex;
@@ -2679,20 +3030,6 @@ watch(streaming, (v) => {
   }
   .chat-empty__toggle { width: auto; padding: 0 13px; margin: 0 0 4px; }
   .side-toggle:active { transform: scale(0.96); }
-
-  .chat-side {
-    position: fixed;
-    z-index: 70;
-    top: var(--nav-h);
-    bottom: 0;
-    left: 0;
-    width: min(300px, 84vw);
-    border-radius: 0 var(--r-m) var(--r-m) 0;
-    transform: translateX(-102%);
-    transition: transform 0.28s cubic-bezier(0.2, 0.7, 0.2, 1);
-    box-shadow: var(--shadow-lift);
-  }
-  .chat-side--open { transform: none; }
 
   /* 抽屉打开时的遮罩，点击关闭 */
   .side-backdrop {

@@ -174,6 +174,28 @@ defineProps<{ name: string; size?: number }>()
       <path d="M12 3.4l2.6 5.6 6.1.8-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6L3.3 9.8l6.1-.8z" />
     </template>
 
+    <!--
+      侧边栏 / 面板：一个矩形框 + 左侧竖线，表示「可收起/展开的侧边面板」。
+      刻意**不用左箭头**充当折叠标识 —— 箭头在界面语汇里是「返回上一页」，
+      用户会误以为点它要离开当前对话。面板图标表达的是「这块区域本身」，
+      语义上没有歧义。
+    -->
+    <template v-else-if="name === 'panel'">
+      <rect x="3" y="4.5" width="18" height="15" rx="2.6" />
+      <path d="M9.2 4.5v15" />
+    </template>
+
+    <!-- 放大镜：会话搜索。与其它图标同一套 24 格描边风格 -->
+    <template v-else-if="name === 'search'">
+      <circle cx="10.8" cy="10.8" r="6.3" />
+      <path d="M15.4 15.4 20 20" />
+    </template>
+
+    <!-- 加号：新建。竖笔略短于横笔，视觉重心更稳 -->
+    <template v-else-if="name === 'plus'">
+      <path d="M12 5.5v13M5.5 12h13" />
+    </template>
+
     <!-- 床铺：住宿信息块。与其它图标同一套 24 格描边风格 -->
     <template v-else-if="name === 'bed'">
       <path d="M3 18.5V11M3 14h18v4.5M21 14v-2.2a2.3 2.3 0 0 0-2.3-2.3H10V14" />
