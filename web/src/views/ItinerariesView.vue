@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppNavbar from '@/components/AppNavbar.vue'
+import BackToTop from '@/components/BackToTop.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
 import { listItineraries, type ItineraryDetail } from '@/api/itinerary'
 import { useUiStore } from '@/stores/ui'
@@ -117,6 +118,9 @@ onMounted(async () => {
         </div>
       </div>
     </main>
+
+    <!-- 返回顶部：行程多时列表很长，符合「已滚过一屏」才出现的自身判断 -->
+    <BackToTop />
   </div>
 </template>
 

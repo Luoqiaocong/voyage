@@ -90,22 +90,71 @@ const streamPhase = computed(() => {
 })
 
 /**
- * 用户是否已滚离底部（用于决定「要不要自动跟随」与「是否显示新消息箭头」）。
+ * 用户是否**主动**滚离了底部。
  *
- * 阈值 80px 而不是 0：滚动位置很难正好停在最底，留一点容差，
- * 否则用户只是滚了一两像素就被判定为「已离开」，自动跟随会失效。
+ * 它同时决定两件事：「要不要自动跟随流式输出」与「是否显示回到底部按钮」。
+ *
+ * ## 为什么必须是「用户意图」而不是「容器位置」
+ *
+ * 原实现是在容器的 scroll 事件里按间距判断（gap > 80px 即视为离开底部），
+ * 看起来合理，但**在流式输出下必然失效**：
+ *
+ *   AI 每吐一段字，内容就变长 → 容器位置被动改变 → 触发 scroll 事件
+ *   → 重新计算 gap → 一旦落回 80px 内就把本标志置回 false
+ *   → 自动跟随恢复 → 用户刚拉上去又被拽回底部
+ *
+ * 也就是说，用户想往上读时，只要 AI 还在输出，就永远「甩不掉」底部。
+ *
+ * 现在改为：**只有用户的滚动动作才能把它置为 true**（滚轮向上、触摸下拉、
+ * 键盘上翻）。程序性的内容增长不再影响它。
+ * 复位只发生在两个明确的时刻：用户点「回到底部」、或用户发送新消息。
  */
 const awayFromBottom = ref(false)
 
-/** 距底部多少像素内仍视为「在底部」 */
+/** 距底部多少像素内仍视为「在底部」（仅用于判断按钮显隐，不再用于自动复位） */
 const NEAR_BOTTOM_PX = 80
 
-/** 滚动容器位置变化时更新「是否在底部」 */
+/**
+ * 容器滚动时只维护一个事实：**用户如果已经滚回最底，就恢复自动跟随**。
+ *
+ * 注意方向是单向的 —— 这里只可能把 true 变 false，绝不由位置把 false 变 true。
+ * 置 true 只由下面的用户意图处理函数负责。
+ */
 function onStreamScroll() {
   const el = scrollEl.value
   if (!el) return
   const gap = el.scrollHeight - el.scrollTop - el.clientHeight
-  awayFromBottom.value = gap > NEAR_BOTTOM_PX
+  // 已到底（容差内）→ 视为用户回到了跟随状态
+  if (awayFromBottom.value && gap <= NEAR_BOTTOM_PX) {
+    awayFromBottom.value = false
+  }
+}
+
+/** 用户往上滚 → 停止自动跟随 */
+function markUserScrolledUp() {
+  awayFromBottom.value = true
+}
+
+/** 滚轮：只认向上的滚动（往下滚交给 onStreamScroll 的到底复位） */
+function onWheelIntent(e: WheelEvent) {
+  if (e.deltaY < 0) markUserScrolledUp()
+}
+
+let touchStartY: number | null = null
+function onTouchStartIntent(e: TouchEvent) {
+  touchStartY = e.touches[0]?.clientY ?? null
+}
+/** 触摸：手指下拉（y 变大）表示在看上面的内容 */
+function onTouchMoveIntent(e: TouchEvent) {
+  if (touchStartY === null) return
+  const y = e.touches[0]?.clientY
+  if (y === undefined) return
+  if (y - touchStartY > 12) markUserScrolledUp()
+}
+
+/** 键盘：PageUp / 方向键上 / Home 都是「往上读」的明确意图 */
+function onKeyIntent(e: KeyboardEvent) {
+  if (['PageUp', 'ArrowUp', 'Home'].includes(e.key)) markUserScrolledUp()
 }
 
 /**
@@ -817,6 +866,8 @@ function onGlobalKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && sideOpen.value) {
     sideOpen.value = false
   }
+  // 键盘翻页同样算「用户主动往上读」，用于停止自动跟随（见 onKeyIntent）
+  onKeyIntent(e)
 }
 
 /** 送入渲染的列表：历史消息 + 正在流式的这一条 */
@@ -1132,7 +1183,14 @@ watch(streaming, (v) => {
           -->
 
           <!-- 消息区 -->
-          <div ref="scrollEl" class="chat-scroll" @scroll.passive="onStreamScroll">
+          <div
+            ref="scrollEl"
+            class="chat-scroll"
+            @scroll.passive="onStreamScroll"
+            @wheel.passive="onWheelIntent"
+            @touchstart.passive="onTouchStartIntent"
+            @touchmove.passive="onTouchMoveIntent"
+          >
             <div class="chat-stream">
               <!-- 历史被截断时的提示：后端按轮次分页，更早的内容不在此次响应里 -->
               <p v-if="historyTruncated" class="chat-truncated">

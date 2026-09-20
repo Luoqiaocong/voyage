@@ -179,6 +179,12 @@ defineProps<{ name: string; size?: number }>()
       <path d="M4.5 12h15M13 5.5l6.5 6.5-6.5 6.5" />
     </template>
 
+    <!-- 箭头上：返回顶部按钮。与 arrow-right 同一套笔画与端点风格，
+         保证两个方向放在一起时粗细、箭头开口一致 -->
+    <template v-else-if="name === 'arrow-up'">
+      <path d="M12 19.5v-15M5.5 11 12 4.5 18.5 11" />
+    </template>
+
     <!-- 返回 -->
     <template v-else-if="name === 'arrow-left'">
       <path d="M19.5 12h-15M11 5.5 4.5 12 11 18.5" />

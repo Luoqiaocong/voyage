@@ -54,11 +54,18 @@ router.beforeEach(async (to) => {
   // 整个守卫包在 try/catch 里：守卫一旦抛错，导航会被中止、页面渲染成空白。
   // 任何意外都退化为「按未登录处理」——宁可多跳一次登录页，也不要白屏。
   try {
-    // 过期的令牌先清掉再判断。否则会进入一种坏状态：守卫认为「已登录」
-    // （localStorage 里有令牌），而任何请求都拿到 401——访问 /login 会被
-    // guestOnly 弹到 /chat，/chat 又取不到数据，用户看到的就是一片空白。
+    /*
+     * access token 过期时**先尝试续期**，而不是直接登出。
+     *
+     * 原实现是「过期就 clearAuth()」—— 那等于把 7 天有效期的 refresh token
+     * 当摆设：用户每 30 分钟（access token 寿命）就被登出一次，
+     * 明明还能续，却要重新输密码。这正是「登录很快就过期」的直接原因。
+     *
+     * ensureValidToken 内部会：令牌仍有效 → 直接用；过期 → 用 refresh
+     * token 换新的；换不到才清登录态。它自己吞掉异常，不会中断导航。
+     */
     if (user.isLoggedIn && !user.hasUsableToken) {
-      user.clearAuth()
+      await user.ensureValidToken()
     }
 
     if (to.meta.requiresAuth && !user.isLoggedIn) {

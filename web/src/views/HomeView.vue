@@ -25,6 +25,7 @@ import { useUserStore } from '@/stores/user'
 import { useRotatingPlaceholder, useTypewriter } from '@/composables/useTypewriter'
 import AppNavbar from '@/components/AppNavbar.vue'
 import AppFooter from '@/components/AppFooter.vue'
+import BackToTop from '@/components/BackToTop.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
 
 const user = useUserStore()
@@ -1124,6 +1125,13 @@ function startHref(): string {
   </main>
 
   <AppFooter />
+
+  <!--
+    返回顶部。放在 main 之外：它是 fixed 定位的浮层，
+    不属于页面内容流，也不该被 .home 的入场动画影响。
+    自身按滚动距离决定显隐，无需外部传参。
+  -->
+  <BackToTop />
 </template>
 
 <style scoped>

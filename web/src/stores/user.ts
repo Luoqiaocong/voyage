@@ -69,16 +69,29 @@ export const useUserStore = defineStore('user', () => {
   }
 
   /**
-   * 确保有可用 access token；过期则尝试 refresh。
+   * 确保有**可用**的 access token；过期则用 refresh token 换新的。
    *
-   * 关键：这里必须自己吞掉异常。刷新令牌是网络请求，后端重启、网络抖动
-   * 或刷新令牌失效都可能让它抛错。此前异常会一路冒泡到路由守卫，
-   * 导致导航被中止、页面渲染成空白——表现就是「首次打开空白，刷新才好」。
-   * 返回 false 让调用方按「未登录」处理，永不抛错。
+   * ⚠️ 这里原先写的是 `if (accessToken.value) return true` —— 只判断
+   * 「localStorage 里有没有一个字符串」，**不看它是否过期**。
+   * 后果是整个刷新机制形同虚设：
+   *
+   *   access token 30 分钟后过期，但本函数仍返回 true
+   *   → 路由守卫认为登录有效，放行进入页面
+   *   → 页面里的请求全部拿到 10102「登录已过期」
+   *   → 用户既进不去、也没被引导去登录，卡在页面上
+   *
+   * 而 7 天有效的 refresh token 就这样一直躺在 localStorage 里没被用过。
+   * 现在改为先判断过期（isTokenExpired 已有，此前没被调用），
+   * 过期才去刷新 —— 这样「用户 30 分钟没操作就被登出」才会真正消失。
    */
   async function ensureValidToken(): Promise<boolean> {
-    if (accessToken.value) return true
-    if (!refreshToken.value) return false
+    // 令牌存在且看起来仍有效 → 直接用
+    if (accessToken.value && !isTokenExpired(accessToken.value)) return true
+    // 没有 refresh token 就没得续，只能按未登录处理
+    if (!refreshToken.value) {
+      if (accessToken.value) clearAuth()
+      return false
+    }
     try {
       if (await refreshAccessToken()) {
         // refreshAccessToken 内部已写入 localStorage，这里同步内存中的值
