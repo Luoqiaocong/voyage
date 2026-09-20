@@ -22,6 +22,7 @@ import { extractItinerary } from '@/api/itinerary'
 import { useUiStore } from '@/stores/ui'
 import { suggestFromContext } from '@/utils/quickSuggest'
 import { formatRelative } from '@/utils/datetime'
+import { groupByTime } from '@/utils/conversationGroup'
 import { useUserStore } from '@/stores/user'
 import { PAGE_COPY } from '@/constants/copy'
 
@@ -660,53 +661,23 @@ const sideOpen = ref(false)
  */
 const sideFolded = ref(false)
 
-/** 侧栏搜索框元素：展开后聚焦用 */
-const searchEl = ref<HTMLInputElement | null>(null)
-
-/**
- * 搜索框是否展开。
- *
- * 默认隐藏：侧栏顶部只放三个图标，视觉上干净；搜索是低频动作，
- * 常驻一个输入框会让顶部一直占两行。
- * 收起时机有两个（用户指定的交互）：再次点搜索图标、或输入框失去焦点。
- * 失焦时**一并清空关键词** —— 否则会出现「框收起来了、列表却还在过滤」
- * 的幽灵状态：用户看不到关键词，只觉得会话莫名其妙变少了。
- */
-const searchOpen = ref(false)
-
 /** 侧栏宽度由 CSS 变量控制，折叠时主区自动铺满，无需 JS 参与布局 */
 function toggleFold() {
   sideFolded.value = !sideFolded.value
 }
 
-async function toggleSearch() {
-  if (searchOpen.value) {
-    closeSearch()
-    return
-  }
-  searchOpen.value = true
-  await nextTick()
-  searchEl.value?.focus()
-}
-
-function closeSearch() {
-  searchOpen.value = false
-  convKeyword.value = ''
-}
-
 /**
- * 从折叠图标列点「搜索」：先展开侧栏，再展开搜索框并聚焦。
+ * 从折叠图标列点「搜索」：先展开侧栏，再打开搜索弹窗。
  *
- * 搜索本身早已实现（convKeyword + filteredConversations），
- * 这里不重复造一套 —— 折叠状态下没有地方展示输入框与结果，
- * 所以这个动作的职责只有「展开侧栏 + 展开搜索」。
+ * 展开侧栏不是必须的（弹窗是浮层），但用户点的是「侧栏里的搜索」，
+ * 收起状态下展开一下更符合预期，也能让结果列表与侧栏上下文对齐。
+ * 注意这里**不再依赖 convKeyword / 内联搜索框** —— 搜索已改为弹窗，
+ * 且支持内容搜索（见 searchOpen / searchResults）。
  */
 async function focusSearch() {
   sideFolded.value = false
   await nextTick()
-  searchOpen.value = true
-  await nextTick()
-  searchEl.value?.focus()
+  openSearch()
 }
 
 /**
@@ -753,7 +724,10 @@ async function cacheSummary(id: string) {
   }
 }
 
-/** 按标题或已缓存摘要过滤会话；空关键词返回全部 */
+/**
+ * 按标题或已缓存摘要过滤会话；空关键词返回全部。
+ * 侧栏列表用这一份（只匹配标题与首条消息摘要，不额外打接口）。
+ */
 const filteredConversations = computed(() => {
   const kw = convKeyword.value.trim().toLowerCase()
   if (!kw) return conversations.value
@@ -763,6 +737,124 @@ const filteredConversations = computed(() => {
     return title.includes(kw) || sum.includes(kw)
   })
 })
+
+/* ==================== 搜索弹窗 ==================== */
+
+/**
+ * 搜索弹窗是否打开。
+ *
+ * 与侧栏内联搜索不同：弹窗支持**搜索对话内容**（用户要求），
+ * 而内容不在列表接口里 —— 必须按会话逐条拉取消息。
+ * 弹窗形态给了这件事空间：有标题栏、有结果区、有加载提示，
+ * 内联在侧栏里做这些会把列表挤得没法看。
+ */
+const searchOpen = ref(false)
+const searchEl = ref<HTMLInputElement | null>(null)
+/** 弹窗里的关键词。与侧栏内联搜索用的 convKeyword 分开 ——
+ *  两者生命周期不同：弹窗关闭即清空，侧栏那份是列表过滤态 */
+const searchKeyword = ref('')
+
+/**
+ * 会话内容缓存：{ 会话 id -> 全部消息文本（小写，便于匹配） }。
+ * 首次打开弹窗时按需拉取，之后复用；切换会话不影响它。
+ */
+const convContent = ref<Record<string, string>>({})
+/** 内容是否已拉过（避免重复请求；空内容也要记，否则会反复重试） */
+const contentLoaded = ref<Set<string>>(new Set())
+const contentLoading = ref(false)
+
+/**
+ * 并行拉取所有会话的消息内容。
+ *
+ * 为什么不做后端搜索：消息存在 langgraph 的 checkpointer 表里
+ * （会话表只有 id/title/created_at），要后端搜就得查它的内部结构，
+ * 与第三方实现细节耦合。而会话量级是「几十条」，
+ * 并发拉取 + 前端过滤足够快，改动面也小得多。
+ *
+ * 并发上限 6：一次性打几十个请求会把浏览器与服务端都压住，
+ * 而这个量级下 6 并发已经能在 1~2 秒内跑完。
+ */
+const CONTENT_CONCURRENCY = 6
+
+async function loadContents() {
+  const todo = conversations.value.filter((c) => !contentLoaded.value.has(c.id))
+  if (!todo.length) return
+  contentLoading.value = true
+  let cursor = 0
+  const worker = async () => {
+    while (cursor < todo.length) {
+      const conv = todo[cursor++]
+      try {
+        const page = (await getMessagesPage(conv.id)) as MessagesPage
+        // 只保留纯文本消息：多模态消息的 content 是数组，没有可搜的文本
+        const text = (page.messages ?? [])
+          .map((m) => (typeof m.content === 'string' ? m.content : ''))
+          .join('\n')
+          .toLowerCase()
+        convContent.value = { ...convContent.value, [conv.id]: text }
+      } catch {
+        // 单条失败不该影响整体搜索：记为「已拉过、内容为空」
+        convContent.value = { ...convContent.value, [conv.id]: '' }
+      } finally {
+        contentLoaded.value = new Set(contentLoaded.value).add(conv.id)
+      }
+    }
+  }
+  try {
+    await Promise.all(Array.from({ length: Math.min(CONTENT_CONCURRENCY, todo.length) }, worker))
+  } finally {
+    contentLoading.value = false
+  }
+}
+
+/** 弹窗搜索结果：标题或**内容**命中 */
+const searchResults = computed(() => {
+  const kw = searchKeyword.value.trim().toLowerCase()
+  if (!kw) return conversations.value
+  return conversations.value.filter((c) => {
+    const title = (c.title ?? '').toLowerCase()
+    if (title.includes(kw)) return true
+    return (convContent.value[c.id] ?? '').includes(kw)
+  })
+})
+
+/** 命中片段：把内容里关键词周围的一小段截出来做预览 */
+function hitSnippet(id: string, kw: string): string {
+  const text = convContent.value[id] ?? ''
+  const k = kw.trim().toLowerCase()
+  if (!k) return ''
+  const i = text.indexOf(k)
+  if (i < 0) return ''
+  const start = Math.max(0, i - 24)
+  const raw = text.slice(start, i + k.length + 40).replace(/\s+/g, ' ').trim()
+  return (start > 0 ? '…' : '') + raw + '…'
+}
+
+function openSearch() {
+  searchOpen.value = true
+  void loadContents()
+  void nextTick(() => searchEl.value?.focus())
+}
+
+function closeSearchModal() {
+  searchOpen.value = false
+  searchKeyword.value = ''
+}
+
+/** 点搜索结果：打开该会话并关掉弹窗 */
+function pickResult(id: string) {
+  closeSearchModal()
+  void openConversation(id)
+}
+
+/* ==================== 时间分组 ==================== */
+
+/** 侧栏列表按时间分组（今天/昨天/7 天内/30 天内/更早） */
+const groupedConversations = computed(() => groupByTime(filteredConversations.value))
+
+/** 弹窗结果同样分组，便于在长列表里定位 */
+const groupedResults = computed(() => groupByTime(searchResults.value))
+
 
 /** 会话项显示的时间：今天显示时刻，更早显示日期，避免一长串相同日期 */
 /**
@@ -1077,23 +1169,11 @@ watch(streaming, (v) => {
               class="side-act"
               type="button"
               :disabled="!conversations.length"
-              :aria-expanded="searchOpen"
               aria-label="搜索会话"
-              title="搜索会话"
-              @click="toggleSearch"
+              title="搜索会话（可按对话内容搜索）"
+              @click="openSearch"
             >
               <TravelIcon name="search" :size="17" />
-            </button>
-
-            <button
-              class="side-act side-act--new"
-              type="button"
-              :disabled="streaming"
-              aria-label="创建新会话"
-              title="创建新会话"
-              @click="newConversation"
-            >
-              <TravelIcon name="plus" :size="17" />
             </button>
 
             <span class="side-acts__spacer"></span>
@@ -1101,40 +1181,29 @@ watch(streaming, (v) => {
               {{ conversations.length }}
             </span>
           </div>
-
-          <div class="chat-side__title-row">
-            <span class="chat-side__title">我的会话</span>
-          </div>
         </div>
 
         <!--
-          会话搜索：默认隐藏，点搜索图标后展开（在原位下方，不挤掉图标行）。
-          按标题或已缓存摘要实时过滤 —— 过滤逻辑复用已有的
-          filteredConversations，这里只负责显隐与聚焦。
+          新建会话：展开态的主操作，占满整行、实心主色。
+          刻意**不用「+」图标** —— 用户明确要求它与折叠态的那个 + 区分开：
+          展开时有足够横向空间，一句话说清动作比一个符号好认；
+          折叠成窄竖列时才退回 + 图标（见 .side-rail 里的第三个按钮）。
         -->
-        <Transition name="search">
-          <div v-if="searchOpen" class="chat-side__search">
-            <TravelIcon name="search" :size="14" />
-            <input
-              ref="searchEl"
-              v-model="convKeyword"
-              type="search"
-              placeholder="搜索会话标题…"
-              aria-label="搜索会话"
-              @blur="closeSearch"
-              @keydown.esc.prevent="closeSearch"
-            />
-            <button
-              v-if="convKeyword"
-              class="chat-side__clear"
-              aria-label="清除关键词"
-              @mousedown.prevent
-              @click="convKeyword = ''"
-            >
-              ✕
-            </button>
-          </div>
-        </Transition>
+        <button
+          class="side-new"
+          type="button"
+          :disabled="streaming"
+          @click="newConversation"
+        >
+          <TravelIcon name="plane" :size="16" />
+          开始新会话
+        </button>
+
+        <!--
+          原侧栏内联搜索框已移除：搜索改为屏幕中央的弹窗（见页面末尾的
+          .search-modal），因为要支持**按对话内容搜索** —— 那需要拉取
+          各会话的消息并展示命中片段，侧栏这点宽度放不下。
+        -->
 
         <div v-if="loadingList" class="chat-side__loading">
           <span class="skel skel--line"></span>
@@ -1160,70 +1229,87 @@ watch(streaming, (v) => {
           <span>换个关键词，或清空搜索</span>
         </div>
 
-        <ul v-else class="chat-side__list">
-          <li v-for="conv in filteredConversations" :key="conv.id">
-            <!--
-              用 button 而非可点击的 li：原生支持 Tab 聚焦与回车/空格触发，
-              读屏器也能正确播报为可操作项。li 保留在外层维持列表语义。
-            -->
-            <button
-              type="button"
-              class="conv-item"
-              :class="{ 'conv-item--active': conv.id === activeId }"
-              :aria-current="conv.id === activeId ? 'true' : undefined"
-              @click="openConversation(conv.id); sideOpen = false"
-            >
-              <span class="conv-item__pin" aria-hidden="true"></span>
-              <span class="conv-item__main">
-                <!-- 编辑态：标题原地变成输入框，不弹窗 -->
-                <input
-                  v-if="editingId === conv.id"
-                  ref="renameInputEl"
-                  v-model="editingTitle"
-                  class="conv-item__edit"
-                  type="text"
-                  maxlength="64"
-                  aria-label="会话标题"
-                  @click.stop
-                  @keydown="onRenameKey($event, conv)"
-                  @blur="commitRename(conv)"
-                />
-                <span v-else class="conv-item__title">{{ conv.title || '新会话' }}</span>
+        <!--
+          会话列表：按时间分组（今天 / 昨天 / 7 天内 / 30 天内 / 更早）。
+          每组一个小标题，空组由 groupByTime 剔除（不显示只有标题的空段落）。
 
-                <!-- 摘要取该会话首条用户消息，比标题更能说明聊了什么 -->
-                <span v-if="convSummary[conv.id] && editingId !== conv.id" class="conv-item__sum">
-                  {{ convSummary[conv.id] }}
-                </span>
-                <span class="conv-item__meta">
-                  <span class="conv-item__time">{{ convTime(conv.created_at) }}</span>
-                  <span v-if="!conv.title" class="conv-item__wip">待命名</span>
-                </span>
-              </span>
-              <span class="conv-item__ops" @click.stop>
-                <span
-                  class="icon-btn"
-                  role="button"
-                  tabindex="0"
-                  title="重命名"
-                  aria-label="重命名会话"
-                  @click="startRename(conv)"
-                  @keydown.enter.prevent="startRename(conv)"
-                  @keydown.space.prevent="startRename(conv)"
-                >✎</span>
-                <span
-                  class="icon-btn icon-btn--danger"
-                  role="button"
-                  tabindex="0"
-                  title="删除"
-                  aria-label="删除会话"
-                  @click="handleDelete(conv)"
-                  @keydown.enter.prevent="handleDelete(conv)"
-                  @keydown.space.prevent="handleDelete(conv)"
-                >✕</span>
-              </span>
-            </button>
-          </li>
-        </ul>
+          语义：外层用 div，**每组各一个 ul 并带 aria-label**。
+          若把组标题塞进同一个 ul 里，读屏器会把它当成一个列表项播报，
+          与「这是个分组」的事实不符。
+        -->
+        <div v-else class="conv-groups">
+          <section
+            v-for="g in groupedConversations"
+            :key="g.key"
+            class="conv-group"
+          >
+            <h3 class="conv-group__label">{{ g.label }}</h3>
+            <ul class="chat-side__list" :aria-label="g.label">
+              <li v-for="conv in g.items" :key="conv.id">
+                <!--
+                  用 button 而非可点击的 li：原生支持 Tab 聚焦与回车/空格触发，
+                  读屏器也能正确播报为可操作项。li 保留在外层维持列表语义。
+                -->
+                <button
+                  type="button"
+                  class="conv-item"
+                  :class="{ 'conv-item--active': conv.id === activeId }"
+                  :aria-current="conv.id === activeId ? 'true' : undefined"
+                  @click="openConversation(conv.id); sideOpen = false"
+                >
+                  <span class="conv-item__pin" aria-hidden="true"></span>
+                  <span class="conv-item__main">
+                    <!-- 编辑态：标题原地变成输入框，不弹窗 -->
+                    <input
+                      v-if="editingId === conv.id"
+                      ref="renameInputEl"
+                      v-model="editingTitle"
+                      class="conv-item__edit"
+                      type="text"
+                      maxlength="64"
+                      aria-label="会话标题"
+                      @click.stop
+                      @keydown="onRenameKey($event, conv)"
+                      @blur="commitRename(conv)"
+                    />
+                    <span v-else class="conv-item__title">{{ conv.title || '新会话' }}</span>
+
+                    <!-- 摘要取该会话首条用户消息，比标题更能说明聊了什么 -->
+                    <span v-if="convSummary[conv.id] && editingId !== conv.id" class="conv-item__sum">
+                      {{ convSummary[conv.id] }}
+                    </span>
+                    <span class="conv-item__meta">
+                      <span class="conv-item__time">{{ convTime(conv.created_at) }}</span>
+                      <span v-if="!conv.title" class="conv-item__wip">待命名</span>
+                    </span>
+                  </span>
+                  <span class="conv-item__ops" @click.stop>
+                    <span
+                      class="icon-btn"
+                      role="button"
+                      tabindex="0"
+                      title="重命名"
+                      aria-label="重命名会话"
+                      @click="startRename(conv)"
+                      @keydown.enter.prevent="startRename(conv)"
+                      @keydown.space.prevent="startRename(conv)"
+                    >✎</span>
+                    <span
+                      class="icon-btn icon-btn--danger"
+                      role="button"
+                      tabindex="0"
+                      title="删除"
+                      aria-label="删除会话"
+                      @click="handleDelete(conv)"
+                      @keydown.enter.prevent="handleDelete(conv)"
+                      @keydown.space.prevent="handleDelete(conv)"
+                    >✕</span>
+                  </span>
+                </button>
+              </li>
+            </ul>
+          </section>
+        </div>
       </aside>
 
       <!--
@@ -1627,6 +1713,98 @@ watch(streaming, (v) => {
         </template>
       </section>
     </main>
+
+    <!--
+      搜索弹窗（屏幕中央 + 背景遮罩）。
+
+      为什么做成弹窗而不是侧栏内联：
+        · 用户要求「点击搜索后在屏幕中央弹出」
+        · 更重要的是它要**搜索对话内容** —— 那需要展示命中片段，
+          侧栏那点宽度放不下；弹窗有完整的宽度与结果区。
+      遮罩同时承担两件事：视觉上把背后的对话区淡化（聚焦搜索本身），
+      以及点击空白处关闭。
+    -->
+    <Transition name="modal">
+      <div
+        v-if="searchOpen"
+        class="search-mask"
+        role="dialog"
+        aria-modal="true"
+        aria-label="搜索会话"
+        @click.self="closeSearchModal"
+      >
+        <div class="search-box">
+          <div class="search-box__head">
+            <TravelIcon name="search" :size="17" />
+            <input
+              ref="searchEl"
+              v-model="searchKeyword"
+              class="search-box__input"
+              type="search"
+              placeholder="搜索会话标题或对话内容…"
+              aria-label="搜索会话标题或对话内容"
+              @keydown.esc.prevent="closeSearchModal"
+            />
+            <button
+              v-if="searchKeyword"
+              class="search-box__clear"
+              type="button"
+              aria-label="清除关键词"
+              @click="searchKeyword = ''"
+            >
+              ✕
+            </button>
+            <kbd class="search-box__esc">Esc</kbd>
+          </div>
+
+          <div class="search-box__body">
+            <!-- 内容仍在拉取时给提示：否则用户以为「内容搜不到」 -->
+            <p v-if="contentLoading" class="search-box__hint">
+              正在读取对话内容…
+            </p>
+            <p v-else-if="!searchKeyword.trim()" class="search-box__hint">
+              输入关键词，可搜索会话标题与对话内容
+            </p>
+
+            <p
+              v-if="searchKeyword.trim() && !groupedResults.length && !contentLoading"
+              class="search-box__empty"
+            >
+              没有匹配的会话
+            </p>
+
+            <div class="search-box__results">
+              <section
+                v-for="g in groupedResults"
+                :key="g.key"
+                class="search-group"
+              >
+                <h3 class="search-group__label">{{ g.label }}</h3>
+                <ul class="search-group__list" :aria-label="g.label">
+                  <li v-for="conv in g.items" :key="conv.id">
+                    <button
+                      type="button"
+                      class="search-hit"
+                      @click="pickResult(conv.id)"
+                    >
+                      <span class="search-hit__title">{{ conv.title || '新会话' }}</span>
+                      <span class="search-hit__meta">
+                        {{ convTime(conv.created_at) }}
+                      </span>
+                      <!-- 命中内容时给出片段；只命中标题时没有片段 -->
+                      <span
+                        v-if="hitSnippet(conv.id, searchKeyword)"
+                        class="search-hit__snippet"
+                      >{{ hitSnippet(conv.id, searchKeyword) }}</span>
+                    </button>
+                  </li>
+                </ul>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -1816,6 +1994,230 @@ watch(streaming, (v) => {
  */
 
 /* ============================================================
+   新建会话（展开态）
+   ------------------------------------------------------------
+   用户明确要求它与折叠态的「+」图标区分开：
+   展开时有整行宽度，用**实心主色 + 文字**说清动作，比一个符号好认；
+   折叠成窄竖列时空间只够放「+」图标（见 .side-rail 的第三个按钮）。
+   所以这里是「实心大按钮」，不是图标按钮 —— 它也是侧栏里唯一的主操作。
+   ============================================================ */
+.side-new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  /* 左右与顶部操作栏对齐；下方留出与列表的间隔 */
+  margin: 0 12px 10px;
+  padding: 10px 14px;
+  border-radius: 11px;
+  background: var(--grad);
+  color: #fff;
+  font-size: 0.88rem;
+  font-weight: 650;
+  box-shadow: 0 6px 16px var(--glow);
+  transition: transform 0.2s, filter 0.2s, box-shadow 0.2s;
+}
+.side-new:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: saturate(1.08);
+  box-shadow: 0 10px 22px var(--glow);
+}
+.side-new:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+@media (prefers-reduced-motion: reduce) {
+  .side-new { transition: none; }
+  .side-new:hover:not(:disabled) { transform: none; }
+}
+
+/* ============================================================
+   会话列表：按时间分组
+   ============================================================ */
+.conv-groups {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 10px;
+}
+.conv-group + .conv-group {
+  /* 组间留白比组内项距更大，读起来才是「一组一组」而不是一长条 */
+  margin-top: 14px;
+}
+/*
+ * 组标题：小、灰、不抢视线，但要在滚动时能当锚点用。
+ * 用 sticky 吸在滚动容器顶部 —— 会话多时用户滚到一半仍知道当前在哪一组。
+ * 背景必须与侧栏底色一致，否则吸顶时会透出下面的列表项。
+ */
+.conv-group__label {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 6px 14px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text3);
+  background: var(--bg2);
+}
+
+/* ============================================================
+   搜索弹窗
+   ------------------------------------------------------------
+   居中浮层 + 半透明遮罩：遮罩把背后的对话区淡化（用户要求的
+   「背后淡化/遮罩处理」），同时点击空白可关闭。
+   ============================================================ */
+.search-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  /* 顶部对齐而非正中：键盘弹出时（移动端）居中会让输入框被顶出视野 */
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12vh 20px 20px;
+  background: rgba(15, 23, 42, 0.36);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+.search-box {
+  width: min(620px, 100%);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+  overflow: hidden;
+}
+.search-box__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--hairline);
+  color: var(--text3);
+}
+.search-box__input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font-size: 0.98rem;
+  color: var(--text);
+  outline: none;
+}
+.search-box__input::placeholder { color: var(--text3); }
+.search-box__clear {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: none;
+  background: var(--panel2);
+  color: var(--text3);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.search-box__clear:hover { color: var(--prim); }
+/* Esc 键帽：告诉用户还有这条退出路径 */
+.search-box__esc {
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  padding: 3px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text3);
+}
+
+.search-box__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 0 12px;
+}
+.search-box__hint,
+.search-box__empty {
+  padding: 18px 18px;
+  font-size: 0.84rem;
+  color: var(--text3);
+  text-align: center;
+}
+.search-group + .search-group { margin-top: 10px; }
+.search-group__label {
+  margin: 0;
+  padding: 6px 18px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text3);
+}
+.search-group__list { list-style: none; margin: 0; padding: 0; }
+
+.search-hit {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 9px 18px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.16s;
+}
+.search-hit:hover,
+.search-hit:focus-visible {
+  background: var(--primary-soft);
+  outline: none;
+}
+.search-hit__title {
+  font-size: 0.9rem;
+  font-weight: 650;
+  color: var(--text);
+}
+.search-hit__meta {
+  font-size: 0.72rem;
+  color: var(--text3);
+}
+/* 命中片段：让用户看到「为什么这条匹配」，而不是只给一个标题 */
+.search-hit__snippet {
+  margin-top: 2px;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: var(--text2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 弹窗进出：淡入 + 轻微上浮 */
+.modal-enter-active,
+.modal-leave-active { transition: opacity 0.18s ease; }
+.modal-enter-active .search-box,
+.modal-leave-active .search-box {
+  transition: transform 0.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.modal-enter-from,
+.modal-leave-to { opacity: 0; }
+.modal-enter-from .search-box,
+.modal-leave-to .search-box { transform: translateY(-8px) scale(0.99); }
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-enter-active,
+  .modal-leave-active,
+  .modal-enter-active .search-box,
+  .modal-leave-active .search-box { transition: none; }
+  .modal-enter-from .search-box,
+  .modal-leave-to .search-box { transform: none; }
+}
+
+/* ============================================================
    侧栏顶部操作区
    ------------------------------------------------------------
    结构：一行三图标（折叠 / 搜索 / 新建）+ 会话计数，下面一行标题。
@@ -1869,17 +2271,7 @@ watch(streaming, (v) => {
 }
 .side-act--new { color: var(--prim); }
 
-.chat-side__title-row {
-  display: flex;
-  align-items: center;
-  padding: 0 2px;
-}
 
-.chat-side__title {
-  font-family: var(--font-display);
-  font-size: 0.92rem;
-  font-weight: 700;
-}
 
 /* 会话条数：让用户对「攒了多少」有概念 */
 .chat-side__count {
@@ -1938,35 +2330,6 @@ watch(streaming, (v) => {
 .chat-side__hint { padding: 18px 16px; color: var(--text3); font-size: 0.82rem; line-height: 1.6; }
 
 /* ---- 会话搜索 ---- */
-.chat-side__search {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 10px 8px;
-  padding: 0 12px;
-  height: 36px;
-  border-radius: 10px;
-  background: var(--panel2);
-  border: 1px solid transparent;
-  transition: border-color 0.2s, background-color 0.2s;
-}
-.chat-side__search:focus-within {
-  background: var(--panel);
-  border-color: var(--blue-300);
-}
-.chat-side__search :deep(svg) { color: var(--text3); flex-shrink: 0; }
-.chat-side__search input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  background: transparent;
-  font-size: 0.82rem;
-  color: var(--text);
-  outline: none;
-}
-.chat-side__search input::placeholder { color: var(--text3); }
-
 /* 搜索框展开 / 收起：淡入 + 轻微下移，避免相邻的会话列表瞬移 */
 .search-enter-active,
 .search-leave-active {
@@ -1981,14 +2344,6 @@ watch(streaming, (v) => {
   .search-enter-active,
   .search-leave-active { transition: none; }
 }
-.chat-side__clear {
-  color: var(--text3);
-  font-size: 0.75rem;
-  padding: 2px 4px;
-  border-radius: 4px;
-}
-.chat-side__clear:hover { color: var(--text); background: var(--surface-soft); }
-
 /* ---- 加载骨架：比「加载中…」更能表达结构 ---- */
 .chat-side__loading { padding: 12px 18px; display: flex; flex-direction: column; gap: 10px; }
 .skel {
