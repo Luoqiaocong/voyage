@@ -174,6 +174,12 @@ defineProps<{ name: string; size?: number }>()
       <path d="M12 3.4l2.6 5.6 6.1.8-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6L3.3 9.8l6.1-.8z" />
     </template>
 
+    <!-- 床铺：住宿信息块。与其它图标同一套 24 格描边风格 -->
+    <template v-else-if="name === 'bed'">
+      <path d="M3 18.5V11M3 14h18v4.5M21 14v-2.2a2.3 2.3 0 0 0-2.3-2.3H10V14" />
+      <circle cx="6.8" cy="11.9" r="1.9" />
+    </template>
+
     <!-- 箭头右 -->
     <template v-else-if="name === 'arrow-right'">
       <path d="M4.5 12h15M13 5.5l6.5 6.5-6.5 6.5" />

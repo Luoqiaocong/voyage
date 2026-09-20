@@ -18,6 +18,8 @@ import {
 } from '@/api/itinerary'
 import { useUiStore } from '@/stores/ui'
 import { groupBySlot, sortGroupsBySlot } from '@/utils/messageParse'
+import { preferenceTone } from '@/utils/preferenceTone'
+import { parseTransport } from '@/utils/transportParse'
 
 const route = useRoute()
 const router = useRouter()
@@ -26,6 +28,15 @@ const ui = useUiStore()
 const id = Number(route.params.id)
 const detail = ref<ItineraryDetail | null>(null)
 const loading = ref(true)
+
+/**
+ * 往返交通的结构化解析。
+ *
+ * 与行程列表页卡片共用同一个解析器与同一套票据样式，
+ * 两处展示必须一致 —— 用户在列表看到的车次信息，
+ * 点进来不该换一种写法。
+ */
+const detailTransport = computed(() => parseTransport(detail.value?.plan.transport))
 const saving = ref(false)
 
 /** 分享面板默认收起：它不是高频操作，展开会挤掉行程正文 */
@@ -238,7 +249,7 @@ function cancelEdit() {
 </script>
 
 <template>
-  <div class="it-page">
+  <div>
     <AppNavbar />
     <main id="main" tabindex="-1">
       <div class="container page">
@@ -351,24 +362,124 @@ function cancelEdit() {
           <!-- 分享面板：默认收起，展开时置于概览之上 -->
           <SharePanel v-if="showShare" :itinerary-id="id" />
 
-          <section class="card it-overview">
-            <div class="it-overview__item">
-              <span class="it-overview__label">目的地</span>
-              <strong>{{ detail.plan.destination }}</strong>
+          <!--
+            概览卡片组。四块共用一套「小标题 + 内容」的语言，
+            视觉上与列表页的卡片保持一致（同样的标签配色、同样的票据块）。
+            目的地块承载天数与预算 —— 它们是对目的地的定量描述，
+            与列表页头部「城市名 + N 天 · 预算」的层级完全一致。
+          -->
+          <section class="ov">
+            <!-- 目的地 -->
+            <div class="ov__card ov__card--dest ov__card--center">
+              <p class="ov__label">
+                <TravelIcon name="compass" :size="14" />目的地
+              </p>
+              <p class="ov__dest">{{ detail.plan.destination }}</p>
+              <p class="ov__meta">
+                <span class="ov__days">{{ detail.plan.days }} 天</span>
+                <template v-if="detail.plan.budget != null">
+                  <span class="ov__dot" aria-hidden="true">·</span>
+                  <span>预算 ¥{{ detail.plan.budget }}</span>
+                </template>
+              </p>
             </div>
-            <div class="it-overview__item">
-              <span class="it-overview__label">往返交通</span>
-              <strong>{{ detail.plan.transport || '未指定' }}</strong>
+
+            <!--
+              往返交通：与列表页卡片同一套票据结构。
+              解析不出车次时退回纯文本 —— transport 是自由文本，
+              字段完整度无法保证，不能因为解析失败就什么都不显示。
+            -->
+            <div class="ov__card">
+              <p class="ov__label">
+                <TravelIcon name="train" :size="14" />往返交通
+              </p>
+
+              <template v-if="detailTransport.primary">
+                <div class="ticket">
+                  <div class="ticket__route">
+                    <span v-if="detailTransport.primary.from" class="ticket__station">
+                      {{ detailTransport.primary.from }}
+                    </span>
+                    <TravelIcon name="arrow-right" :size="13" class="ticket__arrow" />
+                    <span v-if="detailTransport.primary.to" class="ticket__station">
+                      {{ detailTransport.primary.to }}
+                    </span>
+                    <span v-if="detailTransport.primary.trainNo" class="ticket__no">
+                      {{ detailTransport.primary.trainNo }}
+                    </span>
+                    <span
+                      v-if="detailTransport.primary.recommended"
+                      class="ticket__rec"
+                    >推荐</span>
+                  </div>
+                  <div class="ticket__facts">
+                    <span
+                      v-if="detailTransport.primary.depart"
+                      class="ticket__time"
+                    >{{ detailTransport.primary.depart }} – {{ detailTransport.primary.arrive }}</span>
+                    <span v-if="detailTransport.primary.seat" class="ticket__seat">
+                      {{ detailTransport.primary.seat }}
+                    </span>
+                    <span v-if="detailTransport.primary.price" class="ticket__price">
+                      {{ detailTransport.primary.price }}
+                    </span>
+                  </div>
+
+                  <ul v-if="detailTransport.alternatives.length" class="ticket__alts">
+                    <li
+                      v-for="(alt, ai) in detailTransport.alternatives"
+                      :key="ai"
+                      class="ticket__alt"
+                    >
+                      <span class="ticket__alt-label">备选</span>
+                      <span v-if="alt.trainNo" class="ticket__alt-no">{{ alt.trainNo }}</span>
+                      <span v-if="alt.depart" class="ticket__alt-time">
+                        {{ alt.depart }}–{{ alt.arrive }}
+                      </span>
+                      <span v-if="alt.to" class="ticket__alt-to">{{ alt.to }}</span>
+                      <span v-if="alt.price" class="ticket__alt-price">{{ alt.price }}</span>
+                    </li>
+                  </ul>
+                </div>
+              </template>
+              <p v-else class="ov__plain">
+                {{ detail.plan.transport || '未指定' }}
+              </p>
             </div>
-            <div v-if="detail.plan.accommodation" class="it-overview__item">
-              <span class="it-overview__label">住宿</span>
-              <strong>{{ detail.plan.accommodation.name }}</strong>
+
+            <!-- 住宿 -->
+            <div v-if="detail.plan.accommodation" class="ov__card">
+              <p class="ov__label">
+                <TravelIcon name="bed" :size="14" />住宿
+              </p>
+              <p class="ov__stay-name">{{ detail.plan.accommodation.name }}</p>
+              <p v-if="detail.plan.accommodation.description" class="ov__stay-desc">
+                {{ detail.plan.accommodation.description }}
+              </p>
+              <p class="ov__stay-facts">
+                <span
+                  v-if="detail.plan.accommodation.cost"
+                  class="ov__cost"
+                >¥{{ detail.plan.accommodation.cost }} / 晚</span>
+                <span v-if="detail.plan.accommodation.note" class="ov__stay-note">
+                  {{ detail.plan.accommodation.note }}
+                </span>
+              </p>
             </div>
-            <div v-if="detail.plan.preferences?.length" class="it-overview__item it-overview__item--wide">
-              <span class="it-overview__label">偏好</span>
-              <span class="it-overview__chips">
-                <span v-for="p in detail.plan.preferences" :key="p" class="chip">{{ p }}</span>
-              </span>
+
+            <!-- 偏好：与列表页同一套语义配色 -->
+            <div v-if="detail.plan.preferences?.length" class="ov__card">
+              <p class="ov__label">
+                <TravelIcon name="star" :size="14" />偏好
+              </p>
+              <div class="ov__tags">
+                <span
+                  v-for="p in detail.plan.preferences"
+                  :key="p"
+                  class="ptag"
+                  :class="`ptag--${preferenceTone(p)}`"
+                >{{ p }}</span>
+              </div>
             </div>
           </section>
 
@@ -663,18 +774,292 @@ function cancelEdit() {
   }
 }
 
-.it-overview {
+/* ============================================================
+   概览卡片组：两列，四块排成 2×2
+   ------------------------------------------------------------
+   迭代过程（记下来避免再走一遍）：
+     v1 auto-fit minmax(240px) → 视口下排出 3 列 + 1 块换行，不齐
+     v2 固定四列               → 排成一行了，但每张仅约 250px，
+                                 内容（车次 + 时刻 + 座别 + 价格）挤在一起
+     v3 两列（当前）           → 每张约 540px，四块形成规整的 2×2，
+                                 卡片内不再有大片空白，也不显拥挤
+
+   响应式只递减列数，不改变「同级并列」的语义：
+     宽屏 ≥760   两列（2×2）
+     窄屏 <760   单列堆叠
+   ------------------------------------------------------------ */
+.ov {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 20px;
-  padding: 20px 24px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /*
+   * 两行等高。默认每行各自按内容撑高，实测第一行 212px、第二行 218px ——
+   * 六像素的差看起来像没对齐，而两行等高后四块形成规整的 2×2。
+   */
+  grid-auto-rows: 1fr;
+  gap: 14px;
   margin-bottom: 24px;
 }
+@media (max-width: 760px) {
+  .ov { grid-template-columns: minmax(0, 1fr); }
+}
+.ov__card {
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  /*
+   * 同行的卡片会被 grid 拉到等高（这是好事，四块才看起来齐），
+   * 但内容少的块（目的地只有一行城市名、偏好只有几个标签）
+   * 就会在底部留出一片空白。用纵向 flex + 居中把内容在卡片内
+   * 垂直居中，空白被均分到上下 —— 读起来是「留白」而非「没写完」。
+   *
+   * ⚠️ 这里必须显式声明 display: flex。块级容器上写 align-content
+   * 对普通流子元素**不生效**（它只作用于 flex/grid 容器），
+   * 只加 align-content 等于没改 —— 实测确认过。
+   */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+/* 注：原先把交通/住宿/偏好设成各占整行（grid-column: 1 / -1），
+   四块因此排成四行。现在四块等宽并列，不再需要占位修饰类。 */
+/* 目的地是整组里唯一的「标题级」信息：加左侧强调条与淡蓝底，
+   让它在四块里第一眼被看到 */
+.ov__card--dest {
+  position: relative;
+  padding-left: 22px;
+  background: linear-gradient(180deg, var(--blue-50), var(--panel) 70%);
+}
+/*
+ * 内容居中的变体：给「目的地」这种内容很短（一行城市名 + 一行元信息）
+ * 的卡片用。小标题已经居中，若内容仍左对齐会显得上下不搭；
+ * 而且短内容左对齐时右侧空一大片，比居中更空。
+ * 长文本块（交通票据、住宿描述）不适用，故不做成默认。
+ */
+.ov__card--center {
+  text-align: center;
+}
+.ov__card--center .ov__label,
+.ov__card--center .ov__meta {
+  justify-content: center;
+}
+.ov__card--dest::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--grad);
+}
+:root[data-theme='dark'] .ov__card--dest {
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.12), var(--panel) 70%);
+}
 
-.it-overview__item { display: flex; flex-direction: column; gap: 4px; }
-.it-overview__item--wide { grid-column: 1 / -1; }
-.it-overview__label { font-size: 0.8rem; color: var(--ink-soft); }
-.it-overview__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ov__label {
+  display: flex;
+  align-items: center;
+  justify-content: center;   /* 居中 */
+  gap: 7px;
+  font-size: 0.92rem;        /* 由 0.76rem 加大 */
+  font-weight: 750;          /* 由 700 加粗 */
+  letter-spacing: 0.02em;
+  color: var(--text2);       /* 由 text3 提亮一档，与加粗后的字重匹配 */
+}
+.ov__label :deep(svg) { color: var(--blue-600); }
+:root[data-theme='dark'] .ov__label :deep(svg) { color: var(--blue-400); }
+
+.ov__dest {
+  margin-top: 8px;
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  line-height: 1.2;
+}
+.ov__meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  font-size: 0.84rem;
+  color: var(--text2);
+}
+/* 与列表页的天数徽标同款，两处保持一致 */
+.ov__days {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--blue-50);
+  color: var(--blue-700);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+:root[data-theme='dark'] .ov__days {
+  background: rgba(37, 99, 235, 0.18);
+  color: var(--blue-300);
+}
+.ov__dot { color: var(--text3); }
+
+/* 住宿 */
+.ov__stay-name {
+  margin-top: 8px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.ov__stay-desc {
+  margin-top: 5px;
+  font-size: 0.85rem;
+  line-height: 1.65;
+  color: var(--text2);
+}
+.ov__stay-facts {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 9px;
+  font-size: 0.78rem;
+  color: var(--text3);
+}
+.ov__cost {
+  font-weight: 750;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+.ov__stay-note { line-height: 1.6; }
+
+.ov__plain {
+  margin-top: 8px;
+  font-size: 0.86rem;
+  line-height: 1.7;
+  color: var(--text2);
+}
+.ov__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+  /* 与居中的小标题对齐；标签数量少时也不会靠左显得空 */
+  justify-content: center;
+}
+
+/* ---- 票据块（与 ItinerariesView 的样式保持一致）----
+   行程列表与详情两处展示同一份车票信息，样式必须一致；
+   scoped 样式无法跨组件共享，故在此重复一份并保持同步。
+   若将来要改，两处都要改（已在两边注释中互相标注）。 */
+.ticket {
+  position: relative;
+  margin-top: 10px;
+  padding: 12px 14px 12px 16px;
+  border-radius: 12px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+}
+.ticket::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--grad);
+  opacity: 0.85;
+}
+.ticket__route {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: var(--text);
+}
+.ticket__station { letter-spacing: -0.01em; }
+.ticket__arrow { color: var(--text3); flex-shrink: 0; }
+.ticket__no {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--blue-700);
+  letter-spacing: 0.02em;
+}
+:root[data-theme='dark'] .ticket__no { color: var(--blue-300); }
+.ticket__rec {
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--gold-soft);
+  color: var(--gold-600);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+:root[data-theme='dark'] .ticket__rec {
+  background: rgba(214, 158, 46, 0.18);
+  color: var(--gold-400);
+}
+.ticket__facts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 7px;
+  font-size: 0.79rem;
+  color: var(--text2);
+}
+.ticket__time { font-family: var(--mono); font-size: 0.78rem; letter-spacing: 0.01em; }
+.ticket__seat {
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  font-size: 0.72rem;
+}
+.ticket__price {
+  margin-left: auto;
+  font-weight: 750;
+  font-size: 0.86rem;
+  color: var(--text);
+}
+.ticket__alts {
+  list-style: none;
+  margin: 9px 0 0;
+  padding: 9px 0 0;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ticket__alt {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.76rem;
+  color: var(--text3);
+}
+.ticket__alt-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+.ticket__alt-no { font-family: var(--mono); font-weight: 650; }
+.ticket__alt-time { font-family: var(--mono); font-size: 0.74rem; }
+.ticket__alt-to { color: var(--text2); font-weight: 550; }
+.ticket__alt-price { margin-left: auto; }
 
 .edit-panel { padding: 22px 24px; margin-bottom: 24px; }
 .edit-panel__title { font-size: 1.1rem; margin-bottom: 16px; }

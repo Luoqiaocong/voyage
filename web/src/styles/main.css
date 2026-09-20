@@ -39,6 +39,18 @@
   --green-500: #38a169;
   --green-400: #48bb78;
 
+  /* ---------- 藤紫：主题标签的第五个色相 ----------
+     为什么必须再开一族：行程标签有「美食 / 自然风光 / 休闲 / 历史文化 /
+     购物」五类语义，而原有可用色相只有 blue / cyan / gold / green 四族。
+     只有四族时必然有两类撞色，标签的「一眼区分」就失效了。
+     取紫而非红：红在本站承载错误语义（.btn-danger / 表单报错），
+     拿来做中性标签会让人误读成警示。
+     饱和度与绿/金同一档，保持整体克制。 */
+  --purple-600: #6d47c4;
+  --purple-500: #8b5cf6;
+  --purple-400: #a78bfa;
+  --purple-soft: rgba(139, 92, 246, 0.12);
+
   /* ---------- 中性：冷灰（无色偏，不打黄） ---------- */
   --slate-50: #f7f9fc;
   --slate-100: #f0f4f8;
@@ -411,6 +423,46 @@ img, svg { display: block; max-width: 100%; }
 .empty h3 { font-size: 1.2rem; color: var(--text); margin-bottom: 8px; }
 
 .hl { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* ============================================================
+   主题标签（偏好）：浅底 + 深字，按语义着色
+   ------------------------------------------------------------
+   放在全局而不是某个组件的 scoped 里，因为行程**列表页**与**详情页**
+   都要用同一套。写在两处必然漂移 —— 改了一处忘了另一处，
+   同一个「美食」在两个页面会是两个颜色。
+
+   配色规则（与 utils/preferenceTone.ts 的映射一一对应）：
+     历史文化 → 蓝   沉稳、有分量，贴合古都与博物馆
+     自然风光 → 绿   最直观的联想
+     美食     → 金   暖色，与「吃」的联想最近
+     购物     → 紫   本站新开的第五色相（红已承载错误语义，不能借用）
+     休闲等   → 青   与蓝拉开，避免与「历史文化」撞色
+     未识别   → 灰   中性兜底，不报错、不显示成未定义样式
+
+   统一「*-50 级浅底 + *-700 深字」，饱和度压得很低以保持清爽。
+   ============================================================ */
+.ptag {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+}
+.ptag--history { background: var(--blue-50); color: var(--blue-700); border-color: var(--blue-100); }
+.ptag--nature { background: #eefaf1; color: var(--green-600); border-color: #d6f0de; }
+.ptag--food { background: #fdf6e7; color: var(--gold-600); border-color: #f5e6c8; }
+.ptag--shopping { background: #f5f1fe; color: var(--purple-600); border-color: #e6dcfb; }
+.ptag--leisure { background: #eaf7fb; color: var(--cyan-600); border-color: #cdeaf3; }
+.ptag--plain { background: var(--panel2); color: var(--text2); border-color: var(--border); }
+
+/* 深色主题：浅底深字在暗背景上发闷，改为半透明底 + 提亮文字 */
+:root[data-theme='dark'] .ptag--history { background: rgba(37, 99, 235, 0.16); color: var(--blue-300); border-color: rgba(37, 99, 235, 0.28); }
+:root[data-theme='dark'] .ptag--nature { background: rgba(56, 161, 105, 0.16); color: var(--green-400); border-color: rgba(56, 161, 105, 0.28); }
+:root[data-theme='dark'] .ptag--food { background: rgba(214, 158, 46, 0.16); color: var(--gold-400); border-color: rgba(214, 158, 46, 0.28); }
+:root[data-theme='dark'] .ptag--shopping { background: rgba(139, 92, 246, 0.16); color: var(--purple-400); border-color: rgba(139, 92, 246, 0.28); }
+:root[data-theme='dark'] .ptag--leisure { background: rgba(14, 165, 233, 0.16); color: var(--cyan-400); border-color: rgba(14, 165, 233, 0.28); }
 
 /* ---- 滚动入场 ---- */
 .rv {
