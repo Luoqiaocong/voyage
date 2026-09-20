@@ -69,7 +69,7 @@ class ConversationService(TransactionMixin):
                     ai_text += chunk.get("content", "")
                 yield chunk
         except Exception as exc:
-            # 流中途异常（模型/工具报错）：告知前端后正常收尾，避免连接悬挂
+            # 流中途异常（模型/工具失败）：告知前端后正常收尾，避免连接悬挂
             log.error(f"[send_message] stream failed: {exc}")
             yield {"type": "error", "content": "AI 服务暂时不可用，请稍后重试"}
             return

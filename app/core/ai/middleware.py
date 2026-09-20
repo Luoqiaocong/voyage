@@ -70,9 +70,9 @@ CUSTOM_MIDDLEWARE = [
         ],
     ),
     # ---------- 模型韧性：同模型指数退避重试 ----------
-    # 说明：原先的 ModelFallbackMiddleware 已移除——本平台全任务统一使用
-    # deepseek-v4.1-flash（OpenCode Go），没有可降级的第二模型；且原降级链指向
-    # DashScope 已耗尽额度的模型，实际只会把故障放大。失败交由重试中间件处理。
+    # 说明：本平台全任务统一使用 deepseek-v4.1-flash（OpenCode Go），
+    # 没有可降级的第二模型，故不使用 ModelFallbackMiddleware，
+    # 失败一律交由重试中间件处理。
     ModelRetryMiddleware(
         max_retries=3,
         backoff_factor=2.0,

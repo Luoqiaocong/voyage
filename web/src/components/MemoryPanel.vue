@@ -64,22 +64,20 @@ function bubbleTone(index: number): string {
  *
  * ## 为什么不用 CSS 多列（columns）
  *
- * 需求是「多列 + 限高 + 区域内竖向滚动」。实测过三种多列写法
- * （max-height / 固定 height / 加 contain），结果一致：
+ * 需求是「多列 + 限高 + 区域内竖向滚动」，而多列布局在受限高度下
  * **内容不会竖向滚动，而是继续向右生成第 3、4 列**——
  * 容器高度被限住后，多列布局把放不下的内容排到右侧的可滚动溢出区，
- * 而不是往下排。于是出现「右半部分看不见、纵向又没得滚」。
- * 这是多列布局在受限高度下的固有行为，不是写法问题。
+ * 而不是往下排。这是多列布局在受限高度下的固有行为，与具体写法无关。
  *
  * CSS 也做不出横向的多列瀑布流（fixed 高度会破坏等高列的外观）。
- * 所以改为**受控分列**：自己把条目分到两个列容器里，列内是普通文档流，
+ * 所以采用**受控分列**：自己把条目分到两个列容器里，列内是普通文档流，
  * 外层限高滚动 —— 这时竖向滚动才是真的竖向滚动。
  *
  * ## 分配算法
  *
  * 贪心：按顺序把每个条目放进当前**较矮**的那一列。
  * 先用文字长度估高排序一次（拿不到真实高度时的近似），
- * 挂载后再按**实测高度**重排一次 —— 一次就足够接近最优，
+ * 挂载后再按**量得的高度**重排一次 —— 一次就足够接近最优，
  * 反复迭代的收益很小，还会引入抖动。
  */
 const colA = ref<MemoryItem[]>([])
@@ -87,7 +85,7 @@ const colB = ref<MemoryItem[]>([])
 const colARef = ref<HTMLElement | null>(null)
 const colBRef = ref<HTMLElement | null>(null)
 
-/** 无实测高度时的估值：标题一行 + 正文按字数折行 + 间距 */
+/** 拿不到真实高度时的估值：标题一行 + 正文按字数折行 + 间距 */
 function estimateH(m: MemoryItem): number {
   const lines = Math.max(1, Math.ceil(m.fact_value.length / 14))
   return 62 + lines * 21 + (m.hit_count > 1 ? 14 : 0)
@@ -111,7 +109,7 @@ function distribute(getH: (m: MemoryItem) => number) {
   colB.value = b
 }
 
-/** 按实测高度再平衡：把较高列末尾的项搬给较低列，直到搬不动为止 */
+/** 按量得的高度再平衡：把较高列末尾的项搬给较低列，直到搬不动为止 */
 async function rebalance() {
   await nextTick()
   const ha = colARef.value?.offsetHeight ?? 0
@@ -126,7 +124,7 @@ async function rebalance() {
   /*
    * 逐个搬末尾项，直到「再搬一项反而更不均衡」为止。
    * 只搬一项是不够的：两列差 250px 时搬一项只补上约 60~100px，
-   * 差值仍然明显（实测 A=659 / B=403 就是这么来的）。
+   * 差值仍然明显。
    */
   while (taller.value.length > 1) {
     const last = taller.value[taller.value.length - 1]
@@ -602,7 +600,7 @@ onMounted(load)
    ------------------------------------------------------------
    列由 JS 分配（见 script 的 distribute），这里只负责排布与滚动。
    不用 CSS 多列的原因见 script 注释：受限高度下多列会向右溢出、
-   不会竖向滚动，实测三种写法都不行。
+   不会竖向滚动。
    ============================================================ */
 .bubbles {
   display: flex;

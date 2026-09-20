@@ -64,9 +64,8 @@ const kindLabel: Record<string, string> = {
   rest: '休整'
 }
 
-// 原先此处有一份 timeLabel（morning→上午…）用于每条活动前的时段标签。
-// 改为按时段归组后，标签由 groupBySlot 统一从 messageParse 的 SLOT_TEXT 生成，
-// 本文件不再需要自己维护一份映射，故删除以免两处不一致。
+// 时段标签由 groupBySlot 统一从 messageParse 的 SLOT_TEXT 生成，
+// 本文件不再自己维护一份映射，避免两处不一致。
 
 /**
  * 导出下拉的选项。
@@ -260,10 +259,7 @@ function cancelEdit() {
         <template v-else-if="detail">
           <div class="page-head">
             <div class="it-head">
-              <!--
-                原先是一行纯文字「← 全部行程」，看起来不像可点的控件。
-                改用统一的 NavButton（次要按钮形态）。
-              -->
+              <!-- 用统一的 NavButton（次要按钮形态）：纯文字链接看起来不像可点的控件 -->
               <NavButton to="/itineraries" label="全部行程" />
               <h1 class="page-title">{{ detail.plan.destination }}</h1>
               <div class="it-head__chips">
@@ -297,8 +293,7 @@ function cancelEdit() {
 
                   <!--
                     导出：三个格式（日历 / Markdown / PDF）收进一个下拉。
-                    原先三个并列按钮占了操作区一半宽度，而导出是低频动作，
-                    不配占这么多位置；合并后主次更清楚。
+                    导出是低频动作，不配占操作区一半宽度；收进下拉后主次更清楚。
                   -->
                   <div ref="exportWrap" class="exp">
                     <button
@@ -593,9 +588,8 @@ function cancelEdit() {
                         <span v-if="act.duration_hours">约 {{ act.duration_hours }} 小时</span>
                         <!--
                           cost 是整数、单位元，0 表示免费。
-                          原先写 v-if="act.cost"，而 0 是假值，导致免费活动
-                          整个费用位不渲染 —— 看起来像数据缺失，实际是免费的。
-                          故改为始终渲染，0 显示「免费」。
+                          必须始终渲染这一位：写成 v-if="act.cost" 时 0 是假值，
+                          免费活动的费用位会整个消失，看起来像数据缺失。
                         -->
                         <span :class="{ 'act__free': !act.cost }">
                           {{ act.cost ? `¥${act.cost}` : '免费' }}
@@ -655,8 +649,7 @@ function cancelEdit() {
 }
 
 /* ---- 导出下拉 ----
-   把三个格式收进一个菜单：导出是低频动作，原先三个并列按钮
-   占了操作区一半宽度，与「编辑行程」抢位置。 */
+   把三个格式收进一个菜单：导出是低频动作，不该与「编辑行程」抢位置。 */
 .exp { position: relative; }
 
 /* 按钮里的箭头转一下当作下拉指示，避免再加一个图标 */
@@ -743,8 +736,8 @@ function cancelEdit() {
 }
 
 /* ---- 删除：弱化为文字按钮 ----
-   原先用 .btn-danger（实心红底），在浅色页面里是最刺眼的一个，
-   而它恰恰是最不该被误点的操作。改为默认只有灰字，悬停才转为红色。
+   删除是最不该被误点的操作，故默认只有灰字，悬停才转为红色；
+   实心红底在浅色页面里过于刺眼。
    仍然放在最右——位置固定，需要时一眼能找到。 */
 .delbtn {
   padding: 7px 10px;
@@ -777,12 +770,10 @@ function cancelEdit() {
 /* ============================================================
    概览卡片组：两列，四块排成 2×2
    ------------------------------------------------------------
-   迭代过程（记下来避免再走一遍）：
-     v1 auto-fit minmax(240px) → 视口下排出 3 列 + 1 块换行，不齐
-     v2 固定四列               → 排成一行了，但每张仅约 250px，
-                                 内容（车次 + 时刻 + 座别 + 价格）挤在一起
-     v3 两列（当前）           → 每张约 540px，四块形成规整的 2×2，
-                                 卡片内不再有大片空白，也不显拥挤
+   两列（每张约 540px）让四块形成规整的 2×2，卡片内不再有大片空白，
+   也不显拥挤。不能用固定四列 —— 那样每张只剩约 250px，
+   车次 + 时刻 + 座别 + 价格会挤在一起；auto-fit minmax(240px)
+   在常见视口下会排出 3 列 + 1 块换行，也不齐。
 
    响应式只递减列数，不改变「同级并列」的语义：
      宽屏 ≥760   两列（2×2）
@@ -792,8 +783,8 @@ function cancelEdit() {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   /*
-   * 两行等高。默认每行各自按内容撑高，实测第一行 212px、第二行 218px ——
-   * 六像素的差看起来像没对齐，而两行等高后四块形成规整的 2×2。
+   * 两行等高。默认每行各自按内容撑高，两行会差几个像素，
+   * 看起来像没对齐；两行等高后四块才形成规整的 2×2。
    */
   grid-auto-rows: 1fr;
   gap: 14px;
@@ -815,15 +806,12 @@ function cancelEdit() {
    * 垂直居中，空白被均分到上下 —— 读起来是「留白」而非「没写完」。
    *
    * ⚠️ 这里必须显式声明 display: flex。块级容器上写 align-content
-   * 对普通流子元素**不生效**（它只作用于 flex/grid 容器），
-   * 只加 align-content 等于没改 —— 实测确认过。
+   * 对普通流子元素**不生效**（它只作用于 flex/grid 容器）。
    */
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
-/* 注：原先把交通/住宿/偏好设成各占整行（grid-column: 1 / -1），
-   四块因此排成四行。现在四块等宽并列，不再需要占位修饰类。 */
 /* 目的地是整组里唯一的「标题级」信息：加左侧强调条与淡蓝底，
    让它在四块里第一眼被看到 */
 .ov__card--dest {
@@ -1140,7 +1128,7 @@ function cancelEdit() {
 
 .day__acts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 
-/* 归组后时段标签已移出条目，故列数由 3 列改为 2 列（类型徽标 + 正文） */
+/* 两列：类型徽标 + 正文（时段标签已移到分组标题上，不占条目列） */
 .act {
   display: grid;
   grid-template-columns: auto 1fr;

@@ -245,7 +245,7 @@ onMounted(async () => {
         <table class="table">
           <thead>
             <tr>
-              <!-- 已去掉独立的 ID 列：它只占宽度、日常几乎不用。
+              <!-- 不设独立的 ID 列：它只占宽度、日常几乎不用。
                    需要 ID 时「详情」抽屉里仍有完整展示。 -->
               <th>邮箱</th>
               <th>昵称</th>
@@ -258,7 +258,7 @@ onMounted(async () => {
           <tbody>
             <tr v-for="u in items" :key="u.id">
               <td class="table__email">
-                <!-- 邮箱长度差异极大（实测最长 266px），故截断并保留完整值在 title 里，
+                <!-- 邮箱长度差异极大（最长可达 266px），故截断并保留完整值在 title 里，
                      避免个别长邮箱把整列撑开导致表格横向滚动。 -->
                 <span class="email" :title="u.email">{{ u.email }}</span>
                 <span v-if="isSelf(u)" class="tag tag--me">我</span>
@@ -386,8 +386,7 @@ onMounted(async () => {
 
 .users__panel { padding: 0; overflow: hidden; }
 
-/* 横向滚动仅作为兜底（例如窗口被拖得极窄），不再依赖它来显示完整表格。
-   实测修复前表格最小宽 916px > 容器可用 888px，必然出滚动条。 */
+/* 横向滚动仅作为兜底（例如窗口被拖得极窄），不依赖它来显示完整表格 */
 .table-wrap { overflow-x: auto; }
 .table {
   width: 100%;
@@ -402,7 +401,7 @@ onMounted(async () => {
   font-weight: 600;
   color: var(--text3);
   font-size: 0.75rem;
-  /* 内边距由 14px 收到 11px：6 列共省约 36px */
+  /* 内边距 11px：6 列比 14px 时共省约 36px 宽度 */
   padding: 12px 11px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
@@ -423,7 +422,7 @@ onMounted(async () => {
 .table__email { font-weight: 500; }
 .table__ops { white-space: nowrap; text-align: right; }
 
-/* 邮箱截断：否则单个超长邮箱（实测 266px）就能把表格撑出滚动条。
+/* 邮箱截断：否则单个超长邮箱（最长可达 266px）就能把表格撑出滚动条。
    完整值在 title 属性里，鼠标悬停可见。 */
 .email {
   display: inline-block;

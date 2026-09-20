@@ -61,9 +61,6 @@
 }
 .footer__name em { font-style: normal; color: var(--prim); }
 
-/* 原先这里有一组 .ver-chip 样式，用于页脚的「MVP v0.1.0」版本标签。
-   该标签已按用户要求去掉，样式一并删除，避免留下无引用的规则。 */
-
 .footer__tagline { color: var(--text2); font-size: 0.88rem; }
 
 @media (max-width: 640px) {

@@ -181,11 +181,7 @@ const pwdMismatch = computed(
 
 <template>
   <div class="fg-page">
-    <!--
-      背景只保留两团柔光。原先这里还铺了一层 MapTexture（抽象大陆弧线 +
-      虚线航线 + 圆点站点 + 经纬网格），与个人主页同样属于装饰性曲线，
-      按要求去掉，让背景干净。柔光承担「有层次但不抢内容」的作用。
-    -->
+    <!-- 背景用两团柔光：有层次但不抢内容 -->
     <div class="fg-bg" aria-hidden="true">
       <span class="fg-glow fg-glow--a"></span>
       <span class="fg-glow fg-glow--b"></span>
@@ -393,11 +389,6 @@ const pwdMismatch = computed(
   right: -110px;
   background: radial-gradient(circle, rgba(14, 165, 233, 0.12), transparent 68%);
 }
-/*
- * 原 .fg-map（MapTexture 的定位与径向遮罩）已随元素移除。
- * MapTexture 组件现在没有任何页面在用，但保留文件不删 ——
- * 它是通用装饰组件，将来某处可能还要用；删掉反而增加找回成本。
- */
 
 /* ---------- 卡片：居中、宽度适中 ---------- */
 .fg-main { position: relative; z-index: 1; width: 100%; display: grid; place-items: center; }

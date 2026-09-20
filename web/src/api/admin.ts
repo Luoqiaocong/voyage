@@ -259,7 +259,7 @@ export interface ConversationStats {
    * Token 用量排行（按用户，累计）。
    *
    * 数据来自 user_token_usage 表 —— 它从引入时开始累积。
-   * 更早的用量没有用户维度（原先只按「模型 × 日期」聚合），
+   * 更早的用量没有用户维度（只按「模型 × 日期」聚合），
    * 无法拆分到用户，故不出现在这里。
    */
   top_token_users: {
@@ -298,7 +298,7 @@ export async function getConversationStats(): Promise<ConversationStats> {
 /**
  * 拉取会话元数据列表。
  *
- * 没有 keyword 参数：后端已移除「按标题模糊搜索」——
+ * 没有 keyword 参数：后端不提供「按标题模糊搜索」——
  * 那等于允许对全站用户的对话标题做关键词检索，属隐私越界。
  *
  * sort 只有两个与规模统计相关的维度（后端用 pattern 限制取值）：

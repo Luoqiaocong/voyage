@@ -22,7 +22,7 @@ export const useUserStore = defineStore('user', () => {
   /**
    * 本地判断 access token 是否已过期（不请求后端）。
    *
-   * 为什么需要：路由守卫此前只看「localStorage 里有没有令牌」。若残留一个
+   * 为什么需要：路由守卫只看「localStorage 里有没有令牌」并不够。若残留一个
    * 已过期的令牌（access token 默认仅 30 分钟），访问 /login 会被 guestOnly
    * 静默弹到 /chat，而 /chat 又因令牌失效取不到数据——用户看到的就是一个
    * 空白界面，主观上就是「登录页打不开」。
@@ -71,18 +71,10 @@ export const useUserStore = defineStore('user', () => {
   /**
    * 确保有**可用**的 access token；过期则用 refresh token 换新的。
    *
-   * ⚠️ 这里原先写的是 `if (accessToken.value) return true` —— 只判断
-   * 「localStorage 里有没有一个字符串」，**不看它是否过期**。
-   * 后果是整个刷新机制形同虚设：
-   *
-   *   access token 30 分钟后过期，但本函数仍返回 true
-   *   → 路由守卫认为登录有效，放行进入页面
-   *   → 页面里的请求全部拿到 10102「登录已过期」
-   *   → 用户既进不去、也没被引导去登录，卡在页面上
-   *
-   * 而 7 天有效的 refresh token 就这样一直躺在 localStorage 里没被用过。
-   * 现在改为先判断过期（isTokenExpired 已有，此前没被调用），
-   * 过期才去刷新 —— 这样「用户 30 分钟没操作就被登出」才会真正消失。
+   * 判断依据必须是**是否过期**，不能只看「localStorage 里有没有字符串」：
+   * access token 仅 30 分钟有效，refresh token 有 7 天，只看存在与否会让
+   * 刷新机制形同虚设 —— 请求全部拿到 10102「登录已过期」，而用户既进不去
+   * 页面、也没被引导去登录。
    */
   async function ensureValidToken(): Promise<boolean> {
     // 令牌存在且看起来仍有效 → 直接用

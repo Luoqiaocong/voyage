@@ -3,7 +3,7 @@
  * ProfileView · 我的 / 个人中心
  *
  * 布局（方案1：上沉浸 + 下分栏）
- *   1. 顶部沉浸区：旅行感渐变 + 地图纹理，大头像（可点击更换）、
+ *   1. 顶部沉浸区：旅行感渐变，大头像（可点击更换）、
  *      昵称与关键数据、两个主操作
  *   2. 下方左右分栏：左「基本资料」，右「账号安全 + 会话与账号」
  *   3. 通栏「我的记忆」
@@ -98,7 +98,7 @@ const displayName = computed(
 const initial = computed(() => displayName.value.slice(0, 1).toUpperCase())
 /**
  * 是否展示「管理员」标识。
- * 两种管理员都展示 —— 原先只认 'admin'，引入 super_admin 后超管反而没有标识。
+ * 两种管理员（admin / super_admin）都展示。
  * 文案区分档次，让用户一眼看出自己能不能改动数据。
  */
 const isAdmin = computed(() => canAccessAdmin(user.userInfo?.role))
@@ -114,7 +114,6 @@ const heroStats = computed(() => [
 /**
  * 查看行程：直接去行程列表。
  *
- * 原先是「新建行程」并跳到对话页（带一句起始语）。改成查看是因为
  * 这个按钮在个人主页属于**回看自己的成果**这一类动作 ——
  * 主页上半部分展示的是足迹、统计与偏好，用户在这里想看的是
  * 「我攒下了什么」，而不是再开一次新的规划。
@@ -236,11 +235,10 @@ async function savePassword() {
 }
 
 /**
- * 退出登录改用共享 composable。
+ * 退出登录走共享 composable（composables/useLogout.ts）。
  *
- * 原先这段逻辑只存在于本文件，于是「退出登录」只能在个人页最底部找到 ——
- * 登出是账号级操作，藏在二级页面底部不合常规。现在导航栏的头像菜单
- * 与这里共用同一份实现（见 composables/useLogout.ts），行为必然一致。
+ * 登出是账号级操作，导航栏的头像菜单与个人页都要用到，
+ * 共用同一份实现可保证两处行为一致。
  */
 const { doLogout } = useLogout()
 
@@ -343,12 +341,7 @@ onUnmounted(stopDeleteTimer)
     <main id="main" tabindex="-1">
       <div class="container page">
         <!-- ==================== 1. 顶部沉浸区 ==================== -->
-        <!--
-          原先这里铺了一层 MapTexture（抽象大陆弧线 + 虚线航线 + 圆点站点 +
-          经纬网格，并在右上角用径向遮罩渐隐）。用户要求去掉这些装饰线：
-          顶部这块改用**纯色渐变**承担视觉身份（见 .hero-card），
-          不再叠任何图形 —— 背景干净，内容自然更突出。
-        -->
+        <!-- 顶部这块用**纯色渐变**承担视觉身份（见 .hero-card），不叠任何图形 -->
         <section class="hero-card">
           <div class="hero-card__inner">
             <!-- 大头像：点击更换 -->
@@ -390,11 +383,10 @@ onUnmounted(stopDeleteTimer)
             </div>
 
             <!--
-              这里原先并列两个按钮：「继续对话」（去 /chat）与「查看行程」。
-              前者与导航栏的「进入规划」目标完全相同，属于重复入口 ——
-              个人主页的职责是回看自己的资料与成果，去规划应该走导航栏。
-              故只留「查看行程」，图标用 map 与导航栏「行程」一致
-              （此前误用了 route，那是「规划」的图标）。
+              只留「查看行程」：「继续对话」与导航栏的「进入规划」目标相同，
+              属于重复入口 —— 个人主页的职责是回看自己的资料与成果，
+              去规划应该走导航栏。图标用 map，与导航栏「行程」一致
+              （route 是「规划」的图标）。
             -->
             <div class="hero-cta">
               <button class="btn btn-primary" @click="viewTrips">
@@ -705,20 +697,16 @@ onUnmounted(stopDeleteTimer)
   /*
    * 配色向首页靠齐。
    *
-   * 原先这里是一条 1px 边框 + 投影，后来改成「浅蓝 → 浅粉」渐变 ——
-   * 粉色与中间的过渡色（#f4f0fd）叠起来整体偏紫，与首页的冷蓝体系打架。
-   * 现在与首页收尾区共用同一个 token --grad-wash：蓝 → 近白 → 极浅青，
-   * 全程冷色、无紫。中段落在近白上而不是某一端的彩色，所以看起来是
+   * 与首页收尾区共用同一个 token --grad-wash：蓝 → 近白 → 极浅青，
+   * 全程冷色。粉系渐变（连同 #f4f0fd 这类中间过渡色）整体偏紫，
+   * 与整站的冷蓝体系打架，故不用。
+   * 中段落在近白上而不是某一端的彩色，所以看起来是
    * 「浅底略微透蓝」而不是「一块颜色」，也就不发飘。
    *
-   * 仍不加边框与阴影：顶部这块靠渐变自身与下方白卡片区分。
+   * 不加边框与阴影：顶部这块靠渐变自身与下方白卡片区分。
    */
   background: var(--grad-wash);
 }
-/*
- * 原 .hero-card__map（MapTexture 的绝对定位 + 右上角径向渐隐遮罩）已随元素移除。
- * MapTexture 组件本身仍被 ForgotView 使用，故保留组件文件不动。
- */
 
 .hero-card__inner {
   position: relative;
@@ -953,7 +941,7 @@ a.hero-stat:hover {
  * 密码强度：四级必须用四种颜色 —— **颜色本身承载「强度」这个信息**，
  * 统一成一种蓝就等于把语义删掉了。
  *
- * 但中段（lv-3）原先用青色，在整页的冷蓝体系里显得杂。收进蓝系：
+ * 四色都限定在语义色与蓝系内，不引入青色等额外色相：
  *   弱=红（危险） → 中=金（提醒） → 强=蓝（正常，回归主色） → 很强=绿（通过）
  * 这样既保留了「一眼看出强弱」的能力，又让页面只多出红/金/绿三个
  * 语义色，而它们都有明确含义，不是装饰。
@@ -1107,7 +1095,7 @@ a.hero-stat:hover {
 
 /* ==================== 响应式 ==================== */
 @media (max-width: 900px) {
-  /* 顶部改为：头像与信息一行，按钮组占满一行 */
+  /* 窄屏顶部：头像与信息一行，按钮组占满一行 */
   .hero-card__inner { grid-template-columns: auto minmax(0, 1fr); gap: 20px; }
   .hero-cta { grid-column: 1 / -1; flex-direction: row; }
   .hero-cta .btn { flex: 1; }
@@ -1129,10 +1117,10 @@ a.hero-stat:hover {
   .hero-stats { justify-content: center; }
   .hero-cta { width: 100%; }
   .picker__grid { grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); }
-  /* 窄屏把说明与按钮改为上下排列，避免按钮被文字挤到换行 */
+  /* 窄屏下说明与按钮上下排列，避免按钮被文字挤到换行 */
   .session-item { flex-direction: column; align-items: stretch; gap: 14px; }
   .session-item .btn { width: 100%; justify-content: center; }
-  /* 注销弹窗：输入框与「发送验证码」在窄屏改为上下排列 */
+  /* 注销弹窗：输入框与「发送验证码」在窄屏上下排列 */
   .del-field { flex-direction: column; align-items: stretch; }
   .del-send { width: 100%; justify-content: center; }
 }

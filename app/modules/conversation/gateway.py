@@ -21,8 +21,8 @@ def _thread_config(conversation_id: str) -> RunnableConfig:
     """构造本轮调用的 RunnableConfig。
 
     挂上工具统计回调（ToolCallCounter）：它靠 on_tool_start/end 覆盖**所有**
-    工具，包括两层子 Agent 里的 MCP 工具 —— 原先只在 cached_tools 里埋点，
-    那 16 个 MCP 工具一个都统计不到，管理端「工具调用」恒为 0。
+    工具，包括两层子 Agent 里的 MCP 工具；只在 cached_tools 里埋点会漏掉
+    那些 MCP 工具，管理端「工具调用」恒为 0。
 
     **每次新建实例**而不是复用模块级单例：回调内部要维护
     「本次链路的 tool run_id 集合」用于区分嵌套层级，多请求共用会互相污染，
@@ -79,7 +79,7 @@ class ConversationGateway:
 
         两个问题一起解决：
 
-        1. **体积**：原先一次性返回全部消息，长对话会返回巨大的响应体。
+        1. **体积**：全部消息一次性返回时，长对话会返回巨大的响应体。
            这里按「轮次」截断——一轮 = 一条 user 消息及其后的所有 assistant/tool
            消息。按轮截断而不是按条截断，避免出现「有回答没提问」的断裂。
 
@@ -137,7 +137,7 @@ class ConversationGateway:
         """取最后一条含文本内容的 AI 回复；没有则返回空串。
 
         保留此方法供「就是想要最后一条」的调用方使用。
-        行程提取已改用 get_ai_texts（需要在整个历史里挑选），
+        行程提取用 get_ai_texts（需要在整个历史里挑选），
         见 app/modules/itinerary/service.py 的 _select_source_text。
         """
         messages = await self.get_messages(conversation_id)

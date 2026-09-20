@@ -23,9 +23,9 @@ const SUCCESS_CODES = new Set([20000, 20100, 20200, 20400])
  *
  *   { code: 10102, message: "登录已过期，请重新登录" }   ← 用户看到的就是这句
  *
- * 而原先的拦截器只在 `error.response.status === 401` 时才刷新令牌，
- * 那条分支永远命中不了 —— 于是 refresh token（7 天有效）从未被使用过，
- * 用户每 30 分钟就被弹一次「请重新登录」。
+ * 因此拦截器不能只按 HTTP 401 判断鉴权失败，必须同时识别这组业务码，
+ * 否则 refresh token（7 天有效）不会被使用，用户每 30 分钟就被弹一次
+ * 「请重新登录」。
  *
  * 对应 app/core/business/code.py：
  *   10101 UNAUTHORIZED  未授权，请先登录
@@ -204,7 +204,6 @@ function handleSessionExpired(message?: string): void {
  * 抽出来是因为**有两条入口**都要用它：
  *   1. HTTP 401（网关/中间件层拒绝）
  *   2. HTTP 200 + 业务码 10101/10102/10103（业务异常层的拒绝，本项目的主路径）
- * 原先只处理了第 1 条，而实际发生的是第 2 条。
  */
 async function retryAfterRefresh<T>(
   request: () => Promise<T>,

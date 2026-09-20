@@ -57,9 +57,8 @@ console.log('  ', s4)
 check('能识别出三亚', s4.some((s) => s.includes('三亚')), JSON.stringify(s4))
 
 console.log('\n=== 6. 认不出目的地时仍给贴合当前话题的追问 ===')
-// 这一条是测试发现的缺陷：原先只覆盖天气/交通/行程三类，
-// 「这个大概要多少钱」落在预算话题上却返回空数组，
-// 于是回退到与当前对话无关的固定三条示例。
+// 覆盖天气/交通/行程之外的话题（如预算），
+// 不能回退到与当前对话无关的固定三条示例。
 const s5 = suggestFromContext('这个大概要多少钱')
 console.log('  ', s5)
 check('预算类追问有建议（不再回退到无关示例）', s5.length > 0, JSON.stringify(s5))

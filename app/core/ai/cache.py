@@ -78,7 +78,7 @@ async def get_cached(tool_name: str, args: dict[str, Any]) -> str | None:
         value = await redis_client.get_client().get(build_cache_key(tool_name, args))
         return value if isinstance(value, str) else None
     except Exception as exc:  # noqa: BLE001
-        # 带上异常信息：原先只记「读取失败」，缓存静默失效时无从排查
+        # 必须带上异常信息，否则缓存静默失效时无从排查
         log.warning(f"[toolcache] 读取失败，按未命中处理 tool={tool_name}: {type(exc).__name__}: {exc}")
         return None
 
@@ -106,10 +106,9 @@ async def set_cached(tool_name: str, args: dict[str, Any], value: str) -> None:
 async def _normalize_result(result: Any) -> str:
     """把工具返回值规整成可写入 Redis 的字符串。
 
-    为什么需要：MCP 工具的返回值并不总是字符串。实测 search 工具返回的是
-    形如 (content, artifact) 的元组，直接交给 Redis 会报
-    「Invalid input of type: 'tuple'」——而该异常被上层吞掉后只记一句
-    「写入失败」，导致缓存静默失效、无从排查。
+    为什么需要：MCP 工具的返回值并不总是字符串——search 工具返回的是
+    形如 (content, artifact) 的元组，直接交给 Redis 会因类型不合法而报错，
+    而该异常被上层吞掉后只记一句「写入失败」，导致缓存静默失效、无从排查。
 
     这里是数据进入缓存的唯一闸口，故在这一层统一处理，
     而不是要求每个工具自己保证返回类型。

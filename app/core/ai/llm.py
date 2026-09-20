@@ -95,7 +95,7 @@ def get_llm(
     resolved_api_key = api_key or config.OPENCODE_API_KEY
 
     # 关闭思考模式：上游为 DeepSeek 系模型，认这条 OpenAI 兼容参数；
-    # 用 extra_body 下发以确保透传（enable_thinking 在本通道无效，实测 400）。
+    # 用 extra_body 下发以确保透传（enable_thinking 在本通道无效，会返回 400）。
     extra_body = {"reasoning_effort": "none"} if reasoning_effort == "none" else None
 
     return init_chat_model(

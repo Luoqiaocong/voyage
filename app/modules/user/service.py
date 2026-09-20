@@ -124,7 +124,7 @@ class UserService(TransactionMixin):
         # 密码哈希处理
         hashed_pwd = PasswordManager.hash(pwd)
 
-        # 创建用户（事务）；并发注册同一邮箱时数据库唯一约束报错，转成业务码
+        # 创建用户（事务）；并发注册同一邮箱时由数据库唯一约束拦截，转成业务码
         try:
             async with self.transaction_scope():
                 is_first = await self.repo.is_empty_locked()

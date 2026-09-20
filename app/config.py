@@ -13,12 +13,6 @@ class VoyageConfig(BaseSettings):
     # 注意：该网关强制要求每个请求携带 x-opencode-session 头，
     # 缺失会直接返回 400 MissingSessionID；CLIENT_USER_AGENT 用于自报客户端身份，
     # 避免被网关按通用 SDK 流量限流。
-    #
-    # 这里**没有多通道配置**：早先曾保留 DashScope / DeepSeek 官方 / 阿里云
-    # 三组参数，但代码从未读取过它们（全项目零引用），其中两个还被声明为
-    # 必填项 —— 结果是「不填这些用不到的密钥就无法启动」。
-    # 已全部移除。若要恢复多通道或降级能力，需连同调用层一起实现，
-    # 只加配置项没有意义。
     OPENCODE_GO_URL: str
     OPENCODE_API_KEY: str
     OPENCODE_DEFAULT_SESSION: str = "voyage-anonymous"
@@ -28,11 +22,7 @@ class VoyageConfig(BaseSettings):
     # ---------- DeepSeek 官方通道（预留，当前未启用）----------
     # 现状：get_llm() 无条件使用上面的 OpenCode 通道，**不会**读取这里的配置，
     # 也没有任何降级分支。保留它们是为将来启用多通道/降级做准备。
-    #
-    # 为什么默认给空串而不是像原先那样声明为必填：
-    # 必填项不填就无法启动，而这两个值当前并不被使用 —— 等于用一把
-    # 用不到的钥匙把门锁上。给空默认值后，未配置也能正常启动；
-    # 将来真正接入时再把校验补上（并在启动时明确提示缺失）。
+    # 默认给空串：未配置也能正常启动，将来真正接入时再补校验。
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     # 官方通道的模型名。注意与 OpenCode 通道的 deepseek-v4.1-flash 不是同一个
@@ -88,14 +78,8 @@ class VoyageConfig(BaseSettings):
     
     # ---------- Redis ----------
     # 连接**只由 REDIS_URL 决定**（见 shared/redis/client.py 的 from_url）。
-    #
-    # 下面三项是早先按 host/port/db 分项配置时留下的，代码从未读取它们
-    # （client.py 里对应的三行是注释掉的旧实现）。其中 REDIS_HOST 还被声明为
-    # 必填 —— 又是一处「不填一把用不到的钥匙就无法启动」。
-    #
-    # 保留这三项是为了兼容既有 .env / docker-compose（那边仍在注入它们），
-    # 但全部给默认值、不再必填。它们**不影响实际连接**：
-    # 想换 Redis 实例请改 REDIS_URL。
+    # 下面三项仅为兼容既有 .env / docker-compose（那边仍在注入它们），
+    # 代码不读取，**不影响实际连接**：想换 Redis 实例请改 REDIS_URL。
     REDIS_URL: str
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
@@ -117,17 +101,9 @@ class VoyageConfig(BaseSettings):
         case_sensitive=False,
         # 忽略 .env / 环境变量里未声明的键。
         #
-        # 必须显式设置：pydantic-settings v2 对 BaseSettings 的默认值是
-        # **extra="forbid"**，也就是说 .env 里多出一个键就会抛
-        # ValidationError 让整个应用起不来 —— 实测确认过。
-        #
-        # 为什么这是错的默认行为（对我们而言）：
-        #   · 部署机上往往沿用旧版 .env，删掉/重命名配置项后旧键仍在，
-        #     结果服务直接无法启动，而报错发生在配置加载阶段，
-        #     排查成本高、表现还像「代码坏了」
-        #   · 环境变量是共享空间，别的工具注入的变量也会被算作「多余输入」
-        # 配置项改名或下线时，旧 .env 应当继续可用（多余键被忽略），
-        # 而不是把服务锁死。
+        # 必须显式设置：pydantic-settings v2 的默认值是 extra="forbid"，
+        # 即 .env 里多出一个键就会抛 ValidationError，让整个应用起不来。
+        # 配置项改名或下线时，旧 .env 应当继续可用，而不是把服务锁死。
         extra="ignore",
     )
 

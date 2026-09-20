@@ -95,9 +95,8 @@ def register_exception(app: FastAPI):
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         """把 Pydantic 的校验错误翻译成用户能看懂的话。
 
-        原先无论什么错误都返回 "Param Error"，用户只知道「哪里不对」，
-        不知道「怎么改」——实测注册时密码只有 7 位，界面就只说 Param Error，
-        而真正的原因（至少 8 位）藏在 data.detail 里，前端并不展示。
+        否则只会返回 "Param Error"：用户知道「哪里不对」，却不知道「怎么改」
+        —— 真正的原因藏在 data.detail 里，而前端并不展示它。
 
         注意：密码强度在 service 层（validate_password_strength）本就有
         逐条中文提示，但 schema 上的 min_length 会**先**被 Pydantic 拦下，
@@ -135,9 +134,8 @@ def register_exception(app: FastAPI):
         # Pydantic 错误类型 → 中文说明。ctx 里带有具体边界值，直接引用。
         if err_type == "value_error":
             if field_name == "email":
-                # EmailStr 的报错是英文，且提到 "special-use or reserved name"
-                # 这类术语，直接展示等于没说。统一换成中文。
-                # 注意它的 ctx 键是 reason（不是 error）—— 实测确认过。
+                # EmailStr 的报错是英文术语（"special-use or reserved name"），
+                # 直接展示等于没说，统一换成中文。注意它的 ctx 键是 reason。
                 msg = "邮箱格式不正确"
             else:
                 # 自定义 field_validator 抛的 ValueError：消息本就是给人看的

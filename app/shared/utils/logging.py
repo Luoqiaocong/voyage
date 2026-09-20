@@ -13,9 +13,9 @@ def init_log():
     控制台输出是**必须成功**的（它是排查一切问题的最后一根线）；
     文件输出是**增强**，失败时降级而不是让服务起不来。
 
-    为什么文件日志必须容错（实测过的部署故障链）：
-        docker-compose 把宿主机 ./data 以 bind mount 挂到容器 /app/data。
-        首次部署时该目录不存在，Docker 会以 **root** 创建它；
+    为什么文件日志必须容错：
+        docker-compose 把宿主机 ./data 以 bind mount 挂到容器 /app/data，
+        该目录可能是 **root** 属主（Docker 创建挂载点时），
         而容器内进程以 UID 10001（非 root）运行，于是
         /app/data/output/logs 的 mkdir 会抛 PermissionError。
         该目录正是本函数要写的路径，且 init_log() 在 lifespan 启动阶段被调用 ——
@@ -44,10 +44,9 @@ def init_log():
         # 路径层数：本文件在 app/shared/utils/ 下，回到项目根需要 **4** 层 parent
         # （parent×1=app/shared/utils, ×2=app/shared, ×3=app, ×4=项目根）。
         #
-        # 这里原本是 ×3，结果日志落到了 app/data/output/logs —— 与 Dockerfile
-        # 创建的 /app/data/output/logs、以及 compose 挂载的 ./data:/app/data
-        # **都不在同一处**：容器里日志既不在数据卷里（重建即丢），
-        # 也不在 Dockerfile chown 过的目录里（那步授权等于白做）。
+        # 层数必须与 Dockerfile 创建的 /app/data/output/logs、以及 compose
+        # 挂载的 ./data:/app/data 对齐：否则容器里的日志既不在数据卷里
+        # （重建即丢），也不在 Dockerfile chown 过的目录里（授权等于白做）。
         log_dir = Path(__file__).resolve().parent.parent.parent.parent / "data" / "output" / config.LOG_SAVE_PATH
         log_dir.mkdir(parents=True, exist_ok=True)
         logger.add(

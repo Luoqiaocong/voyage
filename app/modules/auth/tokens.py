@@ -109,9 +109,9 @@ async def issue_code(email: str) -> str:
     """生成验证码并写入 Redis，返回验证码。
 
     只做「生成 + 落库」两件事，不负责发信——发信由 deliver_code 承担。
-    拆开的原因：落库是毫秒级的，而 SMTP 投递实测约 4 秒。
+    拆开的原因：落库是毫秒级的，而 SMTP 投递约 4 秒。
     先落库可以让验证码立即可用，发信则视情况快速等待或转入后台，
-    两者不再互相拖累。
+    两者互不拖累。
     """
     code = "".join(secrets.choice(string.digits) for _ in range(VERIFY_CODE_LENGTH))
     client = redis_client.get_client()

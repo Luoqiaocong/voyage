@@ -8,10 +8,8 @@ from .client import redis_client
 # 原子「计数 +1 并确保过期时间已设置」。
 #
 # 为什么用 Lua 而不是 EXPIRE ... NX：
-#   NX 选项是 Redis 7.0 才引入的，而本机与不少托管实例仍是 5.x/6.x。
-#   在旧版本上直接调用会抛
-#     ResponseError: wrong number of arguments for 'expire' command
-#   导致所有走限流的接口（登录/注册/发码/重置）返回 500。
+#   NX 选项是 Redis 7.0 才引入的，本机与不少托管实例仍是 5.x/6.x，
+#   旧版本上调用会使所有走限流的接口（登录/注册/发码/重置）失败。
 #   Lua 在服务端原子执行，同时兼容 Redis 5/6/7。
 #
 # 语义：
@@ -20,9 +18,9 @@ from .client import redis_client
 #      避免后续请求不断续期导致窗口永不复位；
 #   3) 返回当前计数。
 #
-# 顺带修掉一个隐患：原先用 pipeline 分开执行 INCR 与 EXPIRE，
-# 两者之间存在非原子窗口——若进程在此期间中断，会留下「有计数、无过期」的键，
-# 该限流窗口将永不复位。Lua 原子完成，消除该问题。
+# 注意：用 pipeline 分开执行 INCR 与 EXPIRE 会留下非原子窗口——
+# 若进程在此期间中断，会留下「有计数、无过期」的键，该限流窗口永不复位。
+# Lua 原子完成，没有这个问题。
 _INCR_WITH_TTL = """
 local current = redis.call('INCR', KEYS[1])
 if current == 1 then

@@ -3,9 +3,8 @@
  *
  * 运行：node web/src/utils/messageTable.check.mjs
  *
- * 用真实场景的样本：模型给车次、票价、天气时会写成表格，
- * 而原先解析器不认表格，那些行落进普通段落被渲染成
- * 一堆竖线与短横线的原始文本（用户反馈「很乱」）。
+ * 用真实场景的样本：模型给车次、票价、天气时会写成 markdown 表格，
+ * 解析器必须认出分隔行，否则表格行会被渲染成原始竖线文本。
  */
 import { parseMessage, splitTableRow, looksLikeTableRow, TABLE_SEP_RE } from './messageParse.ts'
 

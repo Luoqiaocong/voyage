@@ -58,10 +58,8 @@ export async function getMessagesPage(
 /**
  * 获取全部历史消息（不分页）。
  *
- * 注意返回的是分页对象而非裸数组——后端在引入分页时把响应从数组改成了
- * 这个结构，而此处原先的类型标注仍是 `unknown[]`，与真实响应不符：
- * 调用方按数组遍历就会抛 "raw is not iterable"，整条历史都渲染不出来。
- * 类型已修正，实现也统一走 getMessagesPage，避免两处形状不一致。
+ * 返回的是分页对象而非裸数组——与后端响应结构一致，
+ * 调用方需按 MessagesPage 取值。
  */
 export async function getMessages(conversationId: string): Promise<MessagesPage> {
   return getMessagesPage(conversationId)

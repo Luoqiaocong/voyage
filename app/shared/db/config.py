@@ -42,7 +42,7 @@ IS_POSTGRES = ASYNC_DATABASE_URL.startswith("postgresql")
 # 连接池配置。
 #
 # 注意：SQLite 不接受 pool_size / max_overflow 这类参数（它用默认的
-# 单连接池实现），传进去会直接报错，故只在 PostgreSQL 下启用。
+# 单连接池实现），传进去会导致连接失败，故只在 PostgreSQL 下启用。
 DB_POOL_CONFIG: dict = dict(
     echo=False,          # 是否打印执行的 SQL（调试时设 True）
     future=True,         # SQLAlchemy 2.0 风格 API

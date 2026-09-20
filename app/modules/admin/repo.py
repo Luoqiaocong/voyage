@@ -177,9 +177,8 @@ class AdminRepo:
         return {
             "total_conversations": total_conv,
             "total_messages": total_msg,
-            # 用户要求「平均每会话消息应为**向下取整**的整数」。
-            # 原先用 round(...,2) 得到 3.33 这种小数——对「平均每会话几条消息」
-            # 这个指标来说，小数既没有意义也不好读。
+            # 用户要求「平均每会话消息应为**向下取整**的整数」：
+            # 小数对「平均每会话几条消息」这个指标没有意义，也不好读。
             "avg_messages_per_conversation": total_msg // total_conv if total_conv else 0,
             "top_active_users": [
                 {
@@ -214,8 +213,8 @@ class AdminRepo:
         数据来自 user_token_usage —— 独立于模型维度的 token_usage
         （理由见 UserTokenUsage 的模型注释）。
 
-        **历史数据缺失需注意**：该表从引入时开始累积，
-        token_usage 里改造前的用量没有用户维度、无法拆分，故不会出现在这里。
+        **历史数据缺失需注意**：该表只累积带用户维度的用量，
+        token_usage 里没有用户维度的记录无法拆分，故不会出现在这里。
         """
         rows = (
             await self.db.execute(
@@ -256,7 +255,7 @@ class AdminRepo:
         「帮我看看妇科检查」「离婚财产分割咨询」这类标题一旦对管理员
         可见，就是内容层面的隐私泄露，超出了运营统计的必要范围。
 
-        同理，原先支持的 `keyword` 按标题模糊搜索也一并移除：
+        同理，这里**不提供**按标题模糊搜索的 `keyword` 参数：
         那不只是「看见标题」，而是可以对全站用户的对话标题做关键词检索，
         属于系统性的内容窥探能力。
 
@@ -304,7 +303,7 @@ class AdminRepo:
                 "message_count": r[3],
                 # repo 直接返回 dict，不经过 Pydantic schema，
                 # 故时间必须在此转成本地时区字符串；否则前端拿到的是 UTC，
-                # 展示会早 8 小时（与用户详情页同样的问题）。
+                # 展示会早 8 小时。
                 "created_at": to_local_display(r[4]) if r[4] else None,
             }
             for r in rows

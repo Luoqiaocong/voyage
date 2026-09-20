@@ -22,7 +22,7 @@ function check(label, ok, detail = '') {
 const shape = (gs) => gs.map((g) => `${g.label || '—'}:${g.items.length}`).join(' ')
 
 console.log('=== 1. 连续同时段合并 ===')
-// 这是改动的核心场景：上午连着 3 条，原先每条都挂「上午」
+// 核心场景：上午连着 3 条要合成一组
 const g1 = groupBySlot(
   ['上午：宽窄巷子', '上午：人民公园', '上午：青羊宫', '下午：武侯祠', '晚上：火锅'],
   (s) => detectSlot(s),

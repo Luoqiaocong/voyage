@@ -17,14 +17,14 @@ from app.shared.utils import log
 #   Windows  必须经 cmd 才能解析并执行 uvx（uvx 是控制台脚本，非可执行文件）
 #   Linux    直接调用 uvx 即可；写 cmd 会因找不到该命令而启动失败
 #
-# 此前这里硬编码了 ["cmd", "/c", "uvx", ...]，导致 Docker（Linux 镜像）
-# 里的这个 MCP 从未成功启动过 —— 表现为 travel 子 Agent 少了一组网页搜索
-# 工具，而失败是静默降级（见 get_namespace_tools 的兜底），不易察觉。
+# 两个平台的命令都必须正确，否则这个 MCP 起不来；而失败是静默降级
+# （见 get_namespace_tools 的兜底），表现为 travel 子 Agent 少了一组
+# 网页搜索工具，不易察觉。
 #
-# 版本固定为 0.1.3 而不是交给 uvx 取最新：
+# 版本固定而不是交给 uvx 取最新：
 #   - uvx 默认拉 PyPI 最新版，上游发新版可能改变工具签名，而我们的
 #     依赖声明里没有它（它不由 uv.lock 管理），等于埋了个会自己变的依赖
-#   - 首次运行需联网下载，固定版本让"下载到哪一个"可预期，也便于复现问题
+#   - 首次运行需联网下载，固定版本让"下载到哪一个"可预期
 _IS_WINDOWS = sys.platform == "win32"
 
 #: uvx 启动 duckduckgo-mcp-server 的命令（按平台生成）
@@ -92,9 +92,8 @@ _warmed_namespaces: set[str] = set()
 #: 冷启动超时。首次拉取要额外承担两件事：
 #:   1. 通过 uvx 下载 duckduckgo-mcp-server（首次运行没有本地缓存）
 #:   2. 与 PostgreSQL checkpointer、Redis 的初始化争 CPU
-#: 实测：首次 11.47s、缓存预热后 4.08s。旧值 10s 恰好卡在中间，
-#: 导致**全新部署第一次启动必然判超时**，travel 子 Agent 静默降级为 0 个工具
-#: —— 用户侧表现是「搜索 / 酒店 / 美食推荐没有数据」，且不会看到任何报错。
+#: 故必须给足余量：一旦判超时，travel 子 Agent 会静默降级为 0 个工具，
+#: 用户侧表现为「搜索 / 酒店 / 美食推荐没有数据」。
 COLD_START_TIMEOUT_SECONDS = 45.0
 
 #: 运行期超时。此时连接已建立、包已缓存，仍保留较短的超时，

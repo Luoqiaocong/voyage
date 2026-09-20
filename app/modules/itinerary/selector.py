@@ -94,7 +94,7 @@ def score_reply(text: str) -> tuple[float, dict[str, int]]:
 
     # 篇幅过短基本不可能是完整行程（一句「好的」也可能命中词汇）。
     # 注意阈值不能太高：一份只有 2 天、每餐都省略的简版行程
-    # 篇幅也在 100 字上下，罚过头会把真行程误判为闲聊。
+    # 篇幅也在 100 字上下，罚过会把真行程当成闲聊。
     stripped = len(re.sub(r"\s", "", text))
     if stripped < 40:
         score -= 6.0

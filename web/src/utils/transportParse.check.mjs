@@ -56,8 +56,8 @@ check('识别出 1 条备选', t2.alternatives.length === 1, String(t2.alternati
 check('备选车次 G311', t2.alternatives[0]?.trainNo === 'G311', t2.alternatives[0]?.trainNo)
 /*
  * 注意这里断言的是「它在备选列表里」，而不是 role 字段等于「备选」。
- * role 表达的是**行程段**（去程/返程），主/备由它在 legs 中的位置决定；
- * 混为一谈会让「返程」也被标成备选（实测踩过这个坑，见 parseTransport 注释）。
+ * role 表达的是**行程段**（去程/返程），主/备由它在 legs 中的位置决定，
+ * 两者混用会让「返程」也被标成备选（见 parseTransport 注释）。
  */
 check('备选被归入 alternatives（位置而非 role 决定主/备）',
   t2.alternatives[0] === t2.legs[1])

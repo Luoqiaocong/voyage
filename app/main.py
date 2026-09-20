@@ -1,8 +1,8 @@
 """应用入口。
 
-注意开头的 Windows 事件循环处理：从 SQLite 切到 PostgreSQL 后，
-会话状态由 langgraph 的 psycopg checkpointer 持久化，而 psycopg 的异步模式
-**拒绝 ProactorEventLoop**（Windows 上 asyncio 的默认实现）。
+注意开头的 Windows 事件循环处理：会话状态由 langgraph 的 psycopg
+checkpointer 持久化，而 psycopg 的异步模式**拒绝 ProactorEventLoop**
+（Windows 上 asyncio 的默认实现）。
 这里的设置是对启动方式的兜底——推荐仍用仓库根目录的 run.py 启动。
 """
 import asyncio
@@ -59,9 +59,9 @@ async def lifespan(app: FastAPI):
 async def _prewarm() -> None:
     """预热重资源，缩短用户第一次提问的等待。
 
-    为什么需要：实测首次调用 travel_recommend 耗时约 120 秒，
-    其中包含 MCP 建连与 8 个网络工具的准备。这段开销与用户的具体问题
-    无关，完全可以提前付掉——启动时多花几秒，换来用户侧少等。
+    为什么需要：首次调用 travel_recommend 耗时约 120 秒（含 MCP 建连与
+    8 个网络工具的准备）。这段开销与用户的具体问题无关，完全可以提前付掉
+    ——启动时多花几秒，换来用户侧少等。
 
     刻意做成「尽力而为」：任一步失败只记日志，不影响服务可用性，
     因为所有资源在真正用到时都会惰性重建。
@@ -98,10 +98,9 @@ app.add_middleware(
     #
     # 原因：本系统用 Authorization: Bearer 头传令牌，前端既没开
     # withCredentials、后端也不依赖 Cookie —— 没有任何需要「携带凭据」的场景。
-    # 而 allow_credentials=True 与 allow_origins=["*"] 是浏览器规范**禁止的组合**：
-    # 一旦将来真发了带凭据的跨域请求，浏览器会直接拒绝响应，
-    # 且报错在控制台里表现为难以定位的 CORS 失败。
-    # 保持默认 False：安全上更严，也消除了这颗雷。
+    # 而 allow_credentials=True 与 allow_origins=["*"] 是浏览器规范**禁止的组合**，
+    # 将来一旦发出带凭据的跨域请求会被浏览器直接拒绝，且报错难以定位。
+    # 保持默认 False 更安全。
     allow_methods=["*"],
     allow_headers=["*"],
 )

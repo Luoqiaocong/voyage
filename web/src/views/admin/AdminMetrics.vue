@@ -92,13 +92,9 @@ onMounted(load)
         <div class="mcard">
           <p class="mcard__label">工具调用</p>
           <!--
-            用后端的精确总计 tool.total.calls，而不是前端把明细行加起来。
-            原先的写法有两个问题：
-              · tool.total.calls 曾被解析成一个名叫 total 的「工具」混进明细，
-                相加时把它也算了一次，于是「总计 = 工具之和 + 总计」；
-                数字看着对只是巧合（total 恰好等于工具之和），
-                换一天数据就会虚高
-              · 即便解析修好了，两套求和逻辑并存也容易再次漂移
+            用后端的精确总计 tool.total.calls，而不是前端把明细行加起来：
+            两套求和逻辑并存容易漂移，且明细中可能混有汇总行，
+            相加时会把总计重复计入。
           -->
           <p class="mcard__value">{{ snap.counters?.['tool.total.calls'] ?? 0 }}</p>
           <p class="mcard__sub">今日累计 · 含各层子 Agent 与 MCP 工具</p>

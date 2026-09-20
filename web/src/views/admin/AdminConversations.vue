@@ -3,15 +3,12 @@
  * 会话洞察：统计概览 + 用户活跃排行 + Token 用量排行。
  *
  * 隐私边界（重要）：本页**只展示聚合数据**
- * （用户、消息数、Token 数），不展示会话标题或任何消息内容。
- * 原先有「按标题搜索」的检索框，那等于允许对全站用户的对话标题做
- * 关键词检索——标题是 LLM 从用户消息生成的，属于用户内容，已移除。
+ * （用户、消息数、Token 数），不展示会话标题或任何消息内容，
+ * 也不提供按标题检索 —— 标题是 LLM 从用户消息生成的，属于用户内容。
  *
- * 原先下方还有一张「会话规模分布」明细表（逐行列出会话 ID + 用户 +
- * 消息数 + 时间），已替换为 Token 用量排行。原因是会话 ID 是哈希串
- * （如 76a3160f3a83），而标题因隐私要求不返回 —— 用户既认不出是哪次对话，
- * 也无法据此做任何对比，作为排行它不成立。
- * 随之删除的还有一整套分页状态与请求（见下方注释）。
+ * 排行只按「用户维度」做：会话 ID 是哈希串（如 76a3160f3a83），
+ * 而标题按隐私要求不返回，逐行列出会话既认不出是哪次对话，
+ * 也无法据此做任何对比，作为排行不成立。
  */
 import { computed, onMounted, ref } from 'vue'
 import { getConversationStats, type ConversationStats } from '@/api/admin'
@@ -22,11 +19,8 @@ const ui = useUiStore()
 const stats = ref<ConversationStats | null>(null)
 
 /**
- * 活跃用户排行的口径。
- *
- * 用户要求「这都可以归为用户活跃排行，不必两个卡片，下拉框按不同规则排序
- * 就可以了」。原先「活跃用户排行」与「会话规模分布」是两张卡片，
- * 但前者按会话数、后者按消息数，本质是同一份数据的两种排法。
+ * 活跃用户排行的口径：一个卡片 + 下拉切换。
+ * 按会话数与按消息数本质是同一份数据的两种排法，不必拆成两张卡片。
  *
  * 两种口径都只依赖已返回的 top_active_users 字段（conversations /
  * today_messages），切换时**不需要重新请求** —— 数据一次取回、本地重排，
@@ -60,8 +54,8 @@ const hiddenRank = computed(() => Math.max(0, rankedUsers.value.length - RANK_VI
 
 /**
  * 前三名的奖牌色识别。
- * 返回 gold / silver / bronze，其余为空。用**背景色**而不是 emoji 奖牌，
- * 免得与站内图标风格不一致（此前已统一去掉 emoji 图标）。
+ * 返回 gold / silver / bronze，其余为空。用**背景色**而不是 emoji 奖牌：
+ * 站内图标统一为 SVG，混入 emoji 会在不同平台呈现成不同字形。
  */
 function medalOf(index: number): string {
   return ['gold', 'silver', 'bronze'][index] ?? ''
@@ -80,14 +74,6 @@ async function loadStats() {
     ui.toast(e?.message ?? '会话统计加载失败', 'error')
   }
 }
-
-/*
- * 原先此处有 load() / goto() / watch(sort) / watch(page) / totalPages
- * 与 items / total / page / pageSize / sort / loading 等一整套分页状态，
- * 服务于已被替换掉的「会话规模分布」明细表。
- * 明细表移除后它们全部失去引用，故一并删除 ——
- * 保留会让后来者以为「还有列表在拉数据」，也会白跑一次接口。
- */
 
 /* ---------------- Token 用量排行 ---------------- */
 
@@ -121,8 +107,7 @@ function formatTokens(n: number): string {
 }
 
 onMounted(() => {
-  // 只拉统计：两个排行（活跃 / Token）都在 getConversationStats 的响应里，
-  // 不再有第二张需要分页请求的表
+  // 只拉一次统计：两个排行（活跃 / Token）都在 getConversationStats 的响应里
   loadStats()
 })
 </script>
@@ -145,15 +130,10 @@ onMounted(() => {
              避免前端再做一次 round 造成两处口径不一致 -->
         <p class="ccard__value">{{ stats?.avg_messages_per_conversation ?? '—' }}</p>
       </div>
-      <!-- 原先这里还有一张「已生成标题」卡片。
-           该指标只服务于「查看会话标题」，而标题已按隐私要求不再暴露，
-           指标本身也一并从后端移除，故这里删掉这张卡片。 -->
     </div>
 
     <!--
-      活跃用户排行：一个卡片 + 下拉切换口径。
-      原先「活跃用户排行」（按会话数）与「会话规模分布」（按消息数）
-      是两张卡片，本质是同一份数据的两种排法，合并后更省空间也更清楚。
+      活跃用户排行：一个卡片 + 下拉切换口径（两种口径是同一份数据的两种排法）。
       切换口径在本地重排，不重新请求 —— 数据已在前端。
     -->
     <section v-if="stats?.top_active_users.length" class="card conv__panel">
@@ -195,11 +175,9 @@ onMounted(() => {
     </section>
 
     <!--
-      Token 用量排行：替换原先的「会话规模分布」明细表。
-      原先那张表逐行列出「会话 ID + 用户 + 消息数 + 时间」，但会话 ID 是
-      哈希串（如 76a3160f3a83），而标题因隐私要求不返回 —— 用户既认不出
-      是哪次对话，也无法据此做任何对比。作为排行它不成立。
-      Token 排行同样是「用户维度」，但数值有明确含义、可横向比较。
+      Token 用量排行（用户维度）：数值有明确含义、可横向比较。
+      会话 ID 是哈希串（如 76a3160f3a83），而标题按隐私要求不返回，
+      逐行列出会话无法用来做对比，故这里只按用户聚合。
     -->
     <section class="card conv__panel">
       <header class="conv__head">
@@ -267,11 +245,6 @@ onMounted(() => {
 /* 卡片头右侧的操作区（当前只有活跃排行的口径下拉） */
 .conv__head-ops { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .conv__sort { flex: 0 0 190px; font-size: 0.82rem; }
-/*
- * 原先此处有 .conv__privacy（带盾牌图标的「不展示会话内容」提示）。
- * 明细表移除后该提示也不再渲染 —— 现在页面上已没有任何会话级信息，
- * 无需再解释「为什么看不到内容」。相关样式一并删除。
- */
 
 .rank { display: flex; flex-direction: column; gap: 10px; }
 .rank li { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 12px; }
@@ -289,8 +262,8 @@ onMounted(() => {
 }
 /*
  * 前三名金银铜。
- * 用底色区分而不是奖牌 emoji：站内图标已统一为 SVG，混入 emoji
- * 会在不同平台呈现成不同字形（此前已因这个原因清理过一批）。
+ * 用底色区分而不是奖牌 emoji：站内图标统一为 SVG，混入 emoji
+ * 会在不同平台呈现成不同字形。
  * 名次本身仍是数字，比图标更精确。
  */
 .rank__no--gold { background: linear-gradient(135deg, #f0b429, #d69e2e); color: #fff; }
@@ -314,11 +287,6 @@ onMounted(() => {
 .rank__toggle:hover { background: var(--blue-50); border-color: var(--blue-200); }
 .rank__toggle:focus-visible { outline: 2px solid var(--prim); outline-offset: 2px; }
 
-/*
- * 保留 table__empty：Token 排行的空态仍在用它（一条居中的提示文字）。
- * 其余 .table / .table-wrap / .table__mono / .table__date / .table__email
- * 与 .pager / .pager__info 都是「会话规模分布」明细表的样式，
- * 那张表已被 Token 排行替换，这些规则失去引用，故删除。
- */
+/* Token 排行的空态：一条居中的提示文字 */
 .table__empty { text-align: center; color: var(--text3); padding: 30px 0; }
 </style>

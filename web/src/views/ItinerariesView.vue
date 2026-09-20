@@ -278,7 +278,7 @@ onMounted(async () => {
   color: var(--text);
 }
 
-/* 天数与预算合成一行次级信息：比原来「大字 + 徽标」的主次更清楚 */
+/* 天数与预算合成一行次级信息：主次比「大字 + 徽标」更清楚 */
 .it-card__sub {
   display: flex;
   align-items: center;
@@ -514,7 +514,7 @@ onMounted(async () => {
   font-size: 0.76rem;
 }
 
-/* 「查看行程」：从弱化的灰色文字改为有底色的按钮态，加强存在感。
+/* 「查看行程」做成有底色的按钮态，加强存在感。
    卡片整体可点，这里是**视觉承诺**而非独立交互元素，故不做成真按钮。 */
 .it-card__go {
   display: inline-flex;

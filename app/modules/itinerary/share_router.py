@@ -119,9 +119,9 @@ class ShareOwnerRouter:
         字段填成默认值，于是 service 里 `if allow_copy is not None` 恒为真，
         「只改传入字段」的意图落空。
 
-        实测后果：用户先关掉「允许复制」，之后只想关「允许编辑」而只传
-        allow_edit 时，allow_copy 会被静默还原为默认的 True —— 用户会以为
-        权限设置不稳定。故未显式传入的一律按 None 传递，让 service 跳过。
+        否则会出现这种情况：用户先关掉「允许复制」，之后只想关「允许编辑」
+        而只传 allow_edit 时，allow_copy 会被静默还原为默认的 True ——
+        用户会以为权限设置不稳定。故未显式传入的一律按 None 传递，让 service 跳过。
         """
         given = req.model_fields_set
         share = await self.service.update_share(

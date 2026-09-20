@@ -55,11 +55,9 @@ router.beforeEach(async (to) => {
   // 任何意外都退化为「按未登录处理」——宁可多跳一次登录页，也不要白屏。
   try {
     /*
-     * access token 过期时**先尝试续期**，而不是直接登出。
-     *
-     * 原实现是「过期就 clearAuth()」—— 那等于把 7 天有效期的 refresh token
-     * 当摆设：用户每 30 分钟（access token 寿命）就被登出一次，
-     * 明明还能续，却要重新输密码。这正是「登录很快就过期」的直接原因。
+     * access token 过期时**先尝试续期**，而不是直接登出 ——
+     * refresh token 有 7 天有效期，access token 只有 30 分钟，
+     * 直接登出会让用户每 30 分钟就要重新输一次密码。
      *
      * ensureValidToken 内部会：令牌仍有效 → 直接用；过期 → 用 refresh
      * token 换新的；换不到才清登录态。它自己吞掉异常，不会中断导航。
@@ -76,9 +74,8 @@ router.beforeEach(async (to) => {
        * 已登录用户访问登录页时弹到对话页。
        *
        * 必须**保留 example**：首页填了需求点「开始规划」→ 去登录页
-       * （?example=...）→ 如果此刻已是登录态（例如令牌刚恢复、或从历史
-       * 记录进来），原先直接 return { name: 'chat' } 会把文案丢掉，
-       * 用户回到对话页发现刚写的内容没了。
+       * （?example=...）→ 此时若已是登录态（例如令牌刚恢复、或从历史
+       * 记录进来），丢掉 example 会让用户回到对话页后发现刚写的内容没了。
        *
        * redirect 参数也要一并保留：/login?redirect=/itineraries/3 这类
        * 深链在已登录时同样应落到原目标，而不是一律去 /chat。
@@ -104,14 +101,13 @@ router.beforeEach(async (to) => {
 
     if (to.meta.requiresAdmin) {
       // role 来自 /users/info：整页刷新时 store 里还是空的（userInfo 只存在内存），
-      // 必须先拉一次，否则会把自己误判成非管理员并弹回首页。
+      // 必须先拉一次，否则会被当成非管理员弹回首页。
       // fetchUserInfo 内部已吞掉异常并返回 null，正常不会抛。
       if (!user.userInfo) {
         await user.fetchUserInfo()
       }
       // 两种管理员都能进：普通管理员只是没有写权限，不该被挡在门外。
-      // 判断走 utils/role.ts（原先写 role !== 'admin'，引入 super_admin 后
-      // 会把超管也一并挡掉，与后端放行矛盾）。
+      // 判断走 utils/role.ts，admin 与 super_admin 都放行（与后端一致）。
       if (!canAccessAdmin(user.userInfo?.role)) {
         return { name: 'home' }
       }

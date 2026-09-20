@@ -78,7 +78,7 @@ async function submitPassword() {
   try {
     await fetchItinerary()
   } catch (e: any) {
-    // 密码错误时保留输入框让用户重试，而不是整页报错
+    // 密码错误时保留输入框让用户重试，而不是整页失败
     errorText.value = e?.message ?? '密码校验失败'
   } finally {
     submitting.value = false
@@ -107,9 +107,8 @@ async function copyToMine() {
  * 活动的费用文案。
  *
  * cost 是整数、单位元，**0 表示免费**（后端与 ItineraryDetailView 都按此约定）。
- * 原先写 `a.cost ? ... : ''`，0 是假值 → 免费活动返回空串，
- * 模板里的 v-if 便整个不渲染，看起来像费用数据缺失。
- * 现改为明确返回「免费」。
+ * 不能用真值判断：0 是假值，免费活动会被当成「没有费用」而返回空串，
+ * 模板里的 v-if 便整个不渲染，看起来像费用数据缺失。故明确返回「免费」。
  */
 function activityCost(a: ItineraryActivity): string {
   return a.cost ? `约 ${a.cost} 元` : '免费'

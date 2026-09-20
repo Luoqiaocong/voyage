@@ -92,24 +92,15 @@ const streamPhase = computed(() => {
 })
 
 /**
- * 用户是否**主动**滚离了底部。
+ * 用户是否主动滚离了底部。
  *
- * 它同时决定两件事：「要不要自动跟随流式输出」与「是否显示回到底部按钮」。
+ * 它同时决定两件事：要不要自动跟随流式输出、是否显示回到底部按钮。
  *
- * ## 为什么必须是「用户意图」而不是「容器位置」
+ * 只有**用户的滚动动作**才能把它置为 true（滚轮向上、触摸下拉、键盘上翻），
+ * 程序性的内容增长不影响它。原因：流式输出时内容持续变高，若按容器位置判断，
+ * 用户上翻后一旦落回底部阈值内就会被重新拉回去，根本读不了上面的内容。
  *
- * 原实现是在容器的 scroll 事件里按间距判断（gap > 80px 即视为离开底部），
- * 看起来合理，但**在流式输出下必然失效**：
- *
- *   AI 每吐一段字，内容就变长 → 容器位置被动改变 → 触发 scroll 事件
- *   → 重新计算 gap → 一旦落回 80px 内就把本标志置回 false
- *   → 自动跟随恢复 → 用户刚拉上去又被拽回底部
- *
- * 也就是说，用户想往上读时，只要 AI 还在输出，就永远「甩不掉」底部。
- *
- * 现在改为：**只有用户的滚动动作才能把它置为 true**（滚轮向上、触摸下拉、
- * 键盘上翻）。程序性的内容增长不再影响它。
- * 复位只发生在两个明确的时刻：用户点「回到底部」、或用户发送新消息。
+ * 复位只发生在两个时刻：用户点「回到底部」，或用户发送新消息。
  */
 const awayFromBottom = ref(false)
 
@@ -165,10 +156,9 @@ function onKeyIntent(e: KeyboardEvent) {
  * @param smooth 是否平滑滚动
  * @param force  是否无视「用户已滚上去」强制拉到底
  *
- * 默认**只在用户本来就在底部时才自动跟随**。
- * 原先是无条件跟随：用户往回翻看历史时，新生成的内容会不断把他拽回底部，
- * 根本读不了上面的内容 —— 这是流式输出场景的经典体验问题。
- * 用户主动触发的操作（发送、点箭头、切换会话）则用 force 强制到底。
+ * 默认只在用户本来就在底部时才自动跟随：流式输出下内容不断增长，
+ * 无条件跟随会让正在回看历史的用户一直被拽回底部。
+ * 用户主动触发的操作（发送、点箭头、切换会话）传 force 强制到底。
  */
 function scrollToBottom(smooth = false, force = false) {
   nextTick(() => {
@@ -202,13 +192,9 @@ async function loadConversations() {
 /**
  * 把后端返回的历史消息规整成可渲染的消息列表。
  *
- * 兼容两种响应形状：
+ * 兼容两种响应形状，避免后端调整返回结构时前端整条历史渲染不出来：
  * - 分页对象 `{ messages, total_rounds, returned_rounds, truncated }`（当前后端）
- * - 裸数组 `[...]`（更早的后端版本）
- *
- * 后端在「历史消息分页」这次改动中把返回从数组改成了分页对象，
- * 而调用方当时仍按数组遍历，导致 `for...of` 抛 "raw is not iterable"，
- * 整条历史记录都渲染不出来。这里做形状归一，避免后端再次调整时同类问题复发。
+ * - 裸数组 `[...]`（旧版后端）
  */
 function normalizeMessages(payload: unknown): RdMsg[] {
   const list: unknown[] = Array.isArray(payload)
@@ -295,7 +281,7 @@ async function openConversation(id: string) {
     // 历史没取到，摘要也补一次（独立请求，失败静默）
     void cacheSummary(id)
   }
-  // 切换会话是用户主动操作，强制到底（不受「此前是否在翻历史」影响）
+  // 切换会话是用户主动操作，强制到底（不受是否在翻历史影响）
   scrollToBottom(false, true)
 }
 
@@ -310,44 +296,30 @@ function resetStream() {
 /**
  * 开一个新会话。
  *
- * ## 这里刻意**不调用 createConversation**
+ * 这里刻意**不调用创建会话的接口**：点「新会话」只把界面切到空白对话窗的
+ * 草稿态（activeId = null），后端与列表都不动；等用户真的发出第一条消息时
+ * （见 runTurn）才创建会话、生成标题并出现在列表里。
  *
- * 原先点一下就在后端建一条会话、并立刻插进列表 —— 结果是：
- * 用户点开看看、什么都没聊就去做别的，列表里就永久留下一条「新会话」。
- * 建了又没内容，既占位置，也让人以为自己说过什么。
- *
- * 现在的做法与主流对话产品一致（用户点名要求）：
- *   点「新会话」→ 只是把界面切到空白对话窗**草稿态**（activeId = null），
- *   后端不动、列表不动；等用户真的发出第一条消息时（见 runTurn），
- *   才创建会话、生成标题、出现在列表里。
- *
- * 于是「空会话」在数据和界面上都不存在，不需要额外去删。
- * 副作用是草稿态与「首次进入、还没选会话」是同一个状态 ——
- * 这没问题：两者要显示的都是那个空白对话框。因此这里再点一次
- * 也不会有变化，只需把焦点放回输入框。
+ * 这样「空会话」在数据和界面上都不存在，不需要额外清理；也不会出现
+ * 「点开看看、什么都没聊」就在列表里永久留下一条空记录的情况。
+ * 代价是草稿态与「首次进入、还没选会话」是同一个状态 —— 两者要显示的都是
+ * 那个空白对话框，所以并无冲突，再点一次只是把焦点放回输入框。
  */
 async function newConversation() {
   if (streaming.value) return
   /*
-   * 点「新会话」就等于告诉系统：欢迎屏的使命结束了。
-   *
-   * 必须同时做两件事，缺一不可：
-   *   1. welcomeDismissed = true —— 立刻把欢迎屏关掉。
-   *      只有在「一条会话都没有」的场景下这一步才是决定性的：
-   *      那时 shouldShowWelcome 由 conversations.length === 0 直接判真，
-   *      **不看 lastWelcomeAt**，所以只写记录根本关不掉它 ——
-   *      用户看到的就是「点了没反应」（这是实测复现过的 bug）。
-   *   2. markWelcomeShown() —— 落一条「今天已经见过」的持久记录，
-   *      让刷新后（welcomeDismissed 随内存重置）不再重新弹出来。
+   * 点「新会话」意味着欢迎屏的使命结束，必须同时做两件事：
+   *   1. dismissWelcome() 立刻关掉欢迎屏
+   *   2. 它内部还会落一条「今天已经见过」的持久记录，
+   *      使刷新后（内存标记重置）不再重新弹出来
    */
   dismissWelcome()
 
   /*
    * 已经在草稿态：无需重来，把焦点交回输入框即可。
    *
-   * 判据用 isDraft 而不是 `!activeId` —— 后者在**欢迎屏**上也为真，
-   * 那时若不进入草稿态，输入框根本不在 DOM 里（欢迎屏分支没有 composer），
-   * 后面那句 focus() 会静默失败。
+   * 判据用 isDraft 而不是 `!activeId` —— 后者在欢迎屏上也为真，
+   * 而欢迎屏分支没有输入框（composer 在另一分支），focus() 会静默失败。
    */
   if (isDraft.value) {
     await nextTick()
@@ -422,19 +394,9 @@ function onRenameKey(e: KeyboardEvent, conv: Conversation) {
   }
 }
 
-/**
- * 注意：原先此处有 renameFromToolbar()，供工具条的「重命名」按钮调用——
- * 它会先展开侧栏再把焦点移到标题输入框。该按钮已移除（侧栏点标题即可就地
- * 编辑，工具条是重复入口，且焦点跳走会让用户困惑），故此函数一并删除。
- */
-
 async function handleDelete(conv: Conversation) {
-  /*
-   * 不再把会话 id 显示给用户。原先标题为空时回退到 conv.id，
-   * 弹出一串随机字符（如「确定删除会话「483f5aa725c1」吗？」）——
-   * 用户既看不懂，也不需要知道内部标识。
-   * 没有标题就是「新会话」，与列表里的显示保持一致。
-   */
+  // 会话 id 是内部标识，不展示给用户；无标题时统一显示「新会话」，
+  // 与列表里的显示保持一致
   const label = conv.title?.trim() || '新会话'
   const sure = await ui.confirm(`确定删除「${label}」吗？历史记录与 AI 记忆将一并清除。`)
   if (!sure) return
@@ -501,17 +463,13 @@ async function handleExtract() {
     return
   }
 
-  // 这里刻意**不做内容预判**。
+  // 这里刻意不做内容预判。
   //
-  // 曾经加过一个 looksLikeItinerary() 启发式（要求出现 Day N 且时段/要素达标），
-  // 想拦住「最后一条是收尾语、提取会编造」的情况。实测证明它两向都错：
-  //   - 误拦真行程：一份含「路线/高铁/酒店/预算/行程」6 个要素的攻略，
-  //     因没写「Day 1」而被拦（真实数据里 8 个会话只放行 1 个）
-  //   - 放行非行程：纯车次表因车次号里的 "D7" 被误判成天数标记而通过
-  // 根源是「这段文本能否被 LLM 抽成行程」本质上猜不准。
-  // 真正的判定器在后端：extract_itinerary_plan 失败返回 None，
-  // service 抛 ITINERARY_GEN_FAILED，**不会编造**。所以交给它判断即可。
-  // 只留用户要判断的两件事：提取范围、失败可能。字数帮他确认「是哪一条」
+  // 能否被抽成行程，本质上无法靠文本特征猜出来（试过按是否出现 Day N、
+  // 是否含时段等要素判断，真行程会被误拦、车次表反而会被放行）。
+  // 真正的判定器在后端：抽取失败返回 None 并报错，不会编造内容。
+  // 前端只负责让用户确认两件事：提取范围、以及可能失败 —— 字数用于帮他
+  // 确认「是哪一条」。
   const sure = await ui.confirm(
     `将从最后一条 AI 回复中提取行程（约 ${target.content.length} 字）。\n` +
       '若它不是一份完整的行程安排，提取会失败。继续？'
@@ -578,7 +536,7 @@ async function runTurn(text: string, echoUser: boolean) {
   const myCtl = new AbortController()
   abortCtl = myCtl
   resetStream()
-  // 用户刚发送，强制到底（即便他此前在翻历史）
+  // 用户刚发送，强制到底（即便正在翻历史）
   scrollToBottom(false, true)
 
   let finished = false
@@ -590,9 +548,6 @@ async function runTurn(text: string, echoUser: boolean) {
        * 事件名以 api/conversation.ts 的 SSE 解析层为准：那一层已把后端的
        * tool_call / tool_result 归一成前端的 'tool'，并带上 label / phase /
        * content。这里只消费归一后的类型，不要改成后端的事件名。
-       *
-       * （曾误判此处与后端事件名不匹配并改动过，实为误判：
-       *   抓原始 SSE 帧确认后端正常发出、前端解析层也正常映射。）
        */
       if (chunk.type === 'text') {
         streamText.value += chunk.content
@@ -724,9 +679,8 @@ function toggleFold() {
 /**
  * 折叠图标列里的「搜索」。
  *
- * ⚠️ 这里**不能**展开侧栏。搜索是屏幕中央的弹窗，与侧栏宽度无关；
- * 原先写了 sideFolded = false，于是折叠状态下点搜索会把侧栏又推开 ——
- * 用户明确报告过这个 bug：他折叠侧栏就是为了腾出宽度，结果一点搜索就弹回来。
+ * 这里不能展开侧栏：搜索是屏幕中央的弹窗，与侧栏宽度无关。
+ * 折叠侧栏的目的正是腾出阅读宽度，一点搜索就把侧栏推回来会违背这个意图。
  */
 function focusSearch() {
   openSearch()
@@ -765,7 +719,7 @@ async function cacheSummary(id: string) {
     )
     if (!first || typeof first.content !== 'string') return
     const next = { ...convSummary.value, [id]: summarize(first.content) }
-    // 超限时丢掉最早的一批，避免无限增长
+    // 超限时丢掉最旧的一批，避免无限增长
     const keys = Object.keys(next)
     if (keys.length > SUMMARY_CACHE_MAX) {
       for (const k of keys.slice(0, keys.length - SUMMARY_CACHE_MAX)) delete next[k]
@@ -936,18 +890,13 @@ const listLoaded = ref(false)
 /**
  * 本次进入对话页期间，用户是否已经主动关掉过欢迎屏。
  *
- * ⚠️ 没有这个标记就会出现「点了没反应」（实测复现过）：
- * 下面 shouldShowWelcome 在「一条会话都没有」时是**直接判真**的，
- * 因为它要先满足「新用户必须看到欢迎屏」。于是 markWelcomeShown()
- * 虽然写了 lastWelcomeAt，那个值却根本不参与判断 —— 欢迎屏卸不掉，
- * 欢迎屏那一分支里又没有 composer，用户点「开始新的旅程」看到的
- * 就是界面纹丝不动。
- *
- * 这两个状态回答的是不同的问题，不能合并：
+ * 它回答的问题与 lastWelcomeAt 不同，两者不能合并：
  *   lastWelcomeAt    跨会话/跨天：今天是否已经见过欢迎屏（持久化）
  *   welcomeDismissed 本次进入：用户是否已经明确表示「我要开始打字了」
  *
  * 后者只活在内存里 —— 它代表一次点击，刷新后本就该重新按当天记录判断。
+ * 若没有它，「无会话」场景下欢迎屏会被判为常显而卸不掉，
+ * 用户点了「开始新的旅程」只会看到界面纹丝不动。
  */
 const welcomeDismissed = ref(false)
 
@@ -976,8 +925,8 @@ const shouldShowWelcome = computed(() =>
 /**
  * 草稿态：点过「新会话」、还没发出第一条消息。
  *
- * 与「欢迎屏」是**两个不同的界面**（这是上一版做错的地方）：
- *   欢迎屏：logo + 标题 + 三张引导卡 + 「开始新的旅程」按钮
+ * 与欢迎屏是两个不同的界面：
+ *   欢迎屏：引导卡 + 「开始新的旅程」按钮，没有输入框
  *   草稿态：只给输入框，让用户直接打字
  * 两者都满足 activeId 为空，所以必须用额外的状态区分，
  * 否则点「新会话」会看到欢迎屏、而按钮又无事可做。
@@ -994,10 +943,8 @@ const groupedResults = computed(() => groupByTime(searchResults.value))
 /**
  * 把一段文案填进输入框并聚焦。
  *
- * 欢迎屏上的引导卡会用到它 —— 而欢迎屏那一分支**没有输入框**
- * （composer 在另一个分支里），直接 inputEl?.focus() 会静默失败。
- * 所以先离开欢迎屏（它已经完成使命：用户选好了起点），
- * 等输入框渲染出来再聚焦。
+ * 欢迎屏上的引导卡会用到它，而欢迎屏分支没有输入框（composer 在另一分支），
+ * 直接 focus() 会静默失败。所以要先离开欢迎屏，等输入框渲染出来再聚焦。
  */
 async function fillInput(text: string) {
   input.value = text
@@ -1011,9 +958,8 @@ async function fillInput(text: string) {
 /**
  * 关闭欢迎屏并记下「今天已经见过」。
  *
- * 抽成一个函数，是因为有两个入口都要做同样两件事
- * （「新会话」按钮与欢迎屏上的引导卡），漏做其中一件就会复现
- * 「点了没反应」—— 这个 bug 已经因为两处逻辑不一致出现过一次。
+ * 抽成函数是因为有两个入口都要做同样两件事（「新会话」按钮与欢迎屏上的
+ * 引导卡）。两处逻辑不一致正是本项目出现过的一个缺陷，故统一到一处。
  */
 function dismissWelcome() {
   welcomeDismissed.value = true
@@ -1037,12 +983,9 @@ function markWelcomeShown() {
 /**
  * 会话列表的时间显示。
  *
- * 原先这里自己实现了一套（用 new Date() 解析并判断是否同一天）。
- * 现在委托给 utils/datetime 的 formatRelative：
- *   · 统一了时间处理（原先三处各写一套，假设的后端格式还不一样）
- *   · 修掉一个隐患：new Date('2026-09-19 17:30:00') 会被当成本机时区解析，
- *     而后端下发的**已经是东八区本地时间**，在非东八区的机器上会再偏一次
- *   · formatRelative 用正则提取日期分量后本地构造 Date，不做时区换算
+ * 委托给 utils/datetime 的 formatRelative 统一处理时间：
+ * 它用正则提取日期分量后本地构造 Date，不做时区换算 —— 后端下发的
+ * 已经是东八区本地时间，若交给 new Date() 解析会被当成本机时区再偏一次。
  */
 function convTime(createdAt?: string): string {
   return formatRelative(createdAt)
@@ -1058,8 +1001,8 @@ const QUICK_PROMPTS = [
 /**
  * 空状态的引导卡片：把最常用的三类场景摆出来。
  *
- * 原先空态只有一行文字提示，用户不知道该从哪问起。
- * 卡片带图标与说明，比一串示例胶囊更能说明「这个助手能做什么」。
+ * 卡片带图标与说明，比一串示例胶囊更能说明这个助手能做什么，
+ * 也避免用户面对空态时不知道该从哪问起。
  */
 const EMPTY_GUIDES = [
   {
@@ -1103,7 +1046,7 @@ const quickPrompts = computed(() => {
  *
  * 这层颜色是**纯装饰**：它不承载语义，用户也不需要通过颜色去理解建议。
  * 所以可以大方地用「关键词命中」这种近似 —— 猜错了只是颜色不那么贴切，
- * 不会误导（对比：状态色猜错会让人误判系统状态）。
+ * 不像状态色那样错配会让人误解系统状态。
  *
  * ## 为什么要按关键词而不是按序号循环
  *
@@ -1143,10 +1086,9 @@ const showQuickChips = computed(() => !streaming.value && !input.value.trim())
 /**
  * 底部提示行的显示时机。
  *
- * 原先提示行**常驻**，但它平时只是重复表头已经写过的 placeholder，
- * 真正有信息量的时刻是「光标已在输入框里、却还没想好写什么」。
- * 所以改为：聚焦时显示，或已经在输入内容时显示（此时提示的是换行方式）。
- * 好处是静息状态下输入区更干净，底部也不再多占一行。
+ * 提示行平时只是重复 placeholder 的内容，真正有信息量的时刻是
+ * 「光标已在输入框里、却还没想好写什么」。所以只在聚焦时、或已经在输入
+ * 内容时显示（后者提示的是换行方式），静息状态下输入区保持干净。
  */
 const showInputHint = computed(() => inputFocused.value || !!input.value.trim())
 
@@ -1226,10 +1168,9 @@ function onKeydown(e: KeyboardEvent) {
 /**
  * 全局 Esc：关闭窄屏抽屉。
  *
- * 原先抽屉只能靠点遮罩关闭 —— 遮罩是鼠标操作，键盘用户打开抽屉后
- * 就出不去了（Tab 会一路走到抽屉里的会话项，却找不到关闭入口）。
- * 遮罩上补 tabindex 也只是权宜之计：遮罩不是内容，让它可聚焦本身就是
- * 语义错误。用 Esc 才是这个交互的键盘等价操作。
+ * 抽屉若无键盘关闭方式，键盘用户打开后就出不去了（Tab 会一路走到抽屉里的
+ * 会话项，却找不到关闭入口）。遮罩上补 tabindex 只是权宜之计 ——
+ * 遮罩不是内容，让它可聚焦本身就是语义错误。Esc 才是这个交互的键盘等价操作。
  *
  * 挂在 window 而非某个元素：抽屉打开时焦点可能在抽屉内任意位置，
  * 只有全局监听才能稳定捕获。
@@ -1289,9 +1230,9 @@ onMounted(async () => {
 /**
  * 欢迎屏一旦真的显示出来就记下时刻。
  *
- * ⚠️ 刻意**不加 immediate**：挂载那一刻 conversations 还是空数组
- * （loadConversations 尚未返回），会误判成「该显示欢迎屏」并把记录写掉 ——
- * 老用户当天就再也看不到欢迎屏了。只在它真正**变为**显示时记录。
+ * 刻意**不加 immediate**：挂载那一刻会话列表尚未返回（空数组），
+ * 会被当成「该显示欢迎屏」并把记录写掉，老用户当天就再也看不到欢迎屏。
+ * 只在它真正**变为**显示时记录。
  */
 watch(shouldShowWelcome, (show) => {
   if (show) markWelcomeShown()
@@ -2115,16 +2056,11 @@ watch(streaming, (v) => {
 /*
  * 折叠态。
  *
- * ## 为什么不能只把宽度收成 0
+ * 折叠/展开的按钮就在侧栏内部，所以不能只把宽度收成 0 —— 那样按钮也消失，
+ * 结果是「收得起来、展不开」。做法是：
  *
- * 折叠/展开的按钮**就在侧栏内部**。把整块收成 0 之后按钮也跟着消失 ——
- * 结果是「收得起来、展不开」，用户被锁在折叠状态里。
- * （实测：toggleFold 原本全项目只有一个调用点，且在该按钮上。）
- *
- * ## 做法
- *
- *   1. 侧栏内容整体淡出（`:not(.side-rail)` —— **必须排除图标列**，
- *      否则连展开按钮一起淡掉，等于没修）
+ *   1. 侧栏内容整体淡出（`:not(.side-rail)` —— 必须排除图标列，
+ *      否则连展开按钮一起淡掉）
  *   2. 图标列改为绝对定位，脱离「宽度归零」的影响，钉在面板左侧
  */
 .chat-side--folded > *:not(.side-rail) {
@@ -2199,18 +2135,10 @@ watch(streaming, (v) => {
   background: var(--border);
 }
 /*
- * ⚠️ 这里原有两条规则已删除：
- *
- *     .chat-side--folded      { opacity: 0; pointer-events: none }
- *     .chat-side--folded *    { pointer-events: none }
- *
- * 它们把**整栏连同图标列**一起禁用点击，而图标列正是折叠后唯一的
- * 「展开」入口 —— 结果就是「折叠后再也点不开」。
- * 我新增 .side-rail 时没删掉它们，它们在样式表里更靠后，
- * 把我给图标列设的 pointer-events: auto 又覆盖回 none（实测确认）。
- *
- * 淡出改由上面那条 `.chat-side--folded > *:not(.side-rail)` 负责，
- * 它排除了图标列，语义也更准确：要淡出的是**内容**，不是整个侧栏。
+ * 注意：这里**不能**给 .chat-side--folded 或其子元素加 pointer-events: none。
+ * 图标列是折叠后唯一的「展开」入口，一旦被禁用点击，用户就再也展不开侧栏。
+ * 淡出只作用于内容（上面那条 `> *:not(.side-rail)` 已排除图标列）——
+ * 要淡出的是内容，不是整个侧栏。
  */
 
 /* ============================================================
@@ -2629,7 +2557,7 @@ watch(streaming, (v) => {
   cursor: pointer;
   border: 1px solid transparent;
   transition: background-color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
-  /* 按钮元素的重置：抹掉浏览器默认外观，与原先的 li 视觉保持一致 */
+  /* 按钮元素的重置：抹掉浏览器默认外观，与会话项视觉保持一致 */
   width: 100%;
   background: transparent;
   font: inherit;
@@ -2744,11 +2672,6 @@ watch(streaming, (v) => {
   text-align: center;
   padding: 24px;
 }
-
-/*
- * 原 .chat-empty__logo（64px 圆角方块 + logo）已移除 —— 用户要求欢迎屏不要 logo。
- * 去掉后标题成为第一眼内容，视觉重心也从「品牌」回到了「开始对话」。
- */
 .chat-empty h2 { font-size: 1.45rem; }
 .chat-empty p { color: var(--text2); max-width: 30em; font-size: 0.9rem; }
 
@@ -2882,13 +2805,9 @@ watch(streaming, (v) => {
   align-items: center;
   gap: 7px;
   /*
-   * ⚠️ flex-shrink: 0 与 white-space: nowrap 是「横向滚动」能否成立的关键。
-   *
-   * flex 项默认 flex-shrink: 1，而 min-width: auto 又允许它被压到内容
-   * 最小宽度以下 —— 结果在窄容器里芯片会被压窄、文字在里面折行：
-   * 实测容器 420px 时单个芯片从 37px 高变成 94px 高，整行变成一堵墙，
-   * 而 overflow-x: auto 根本没机会生效（因为内容被压缩到不溢出了）。
-   * 加上这两条后芯片保持自身宽度、容器真正横向溢出，横滚才起作用。
+   * flex-shrink: 0 与 white-space: nowrap 是「横向滚动」能否成立的关键。
+   * flex 项默认可被压缩折行，内容被压到不溢出时 overflow-x: auto 就失效了；
+   * 这两条保证芯片保持自身宽度，容器真正横向溢出。
    */
   flex-shrink: 0;
   white-space: nowrap;
@@ -3129,7 +3048,7 @@ watch(streaming, (v) => {
  * 渲染」交给浏览器，它自己知道视口在哪，比在 JS 里重算更准也更省。
  *
  * 为什么排除 :last-child：末条是**正在流式输出**的消息，它的高度每来一个字
- * 都在变。若也按估算值占位，估算与实测会交替生效，滚动位置就会抖。
+ * 都在变。若也按估算值占位，估算值与真实高度交替生效，滚动位置会抖。
  * 一条消息不参与虚拟化对性能没有影响。
  *
  * contain-intrinsic-size 用 `auto 200px` 而非单纯 `200px`：
@@ -3351,11 +3270,8 @@ watch(streaming, (v) => {
 .composer {
   flex-shrink: 0;
   /*
-   * 最大宽度与消息流（.chat-stream 的 820px）对齐并居中。
-   *
-   * 原先是整块铺满可用宽度 —— 在宽屏上输入框会被拉到一千多像素，
-   * 一行能塞下好几个句子，视觉上又长又空，与上方消息的宽度也对不齐。
-   * 收窄到与消息同宽后，输入区与对话内容形成同一条中轴。
+   * 最大宽度与消息流（.chat-stream 的 820px）对齐并居中：
+   * 输入区与对话内容保持同一条中轴，宽屏上也不会被拉得又长又空。
    */
   width: 100%;
   max-width: 820px;
@@ -3418,7 +3334,7 @@ watch(streaming, (v) => {
 }
 .composer__box {
   width: 100%;
-  /* 单行时约 40px 高，比原先的 34px 更好点、也更接近常见的聊天输入框 */
+  /* 单行约 40px 高，接近常见的聊天输入框 */
   min-height: 40px;
   max-height: 180px;
   resize: none;
@@ -3488,8 +3404,7 @@ watch(streaming, (v) => {
  * 主次由**背景**区分，而不只是透明度：
  *   无内容 → 淡灰底、灰箭头、无光晕：明确是「还不能点」
  *   有内容 → 主题渐变实心 + 光晕 + 轻微放大：明确是「可以发了」
- * 原先两种情况共用同一套渐变底，只靠 opacity 0.42 区分 ——
- * 在浅色界面上「半透明的蓝按钮」仍然像可点，主次不够清晰。
+ * 只靠半透明区分的话，浅色界面上「半透明的蓝按钮」仍然像可点。
  */
 .send-btn {
   flex-shrink: 0;
@@ -3627,19 +3542,12 @@ watch(streaming, (v) => {
     pointer-events: auto;
   }
   /*
-   * ⚠️ 这里**不能**再写 `.chat-side--folded .side-rail { display: none }`。
-   *
-   * 我原先写的是：
-   *     .chat-side--folded .side-rail,
-   *     .side-rail { display: none; }
-   * 其中 `.chat-side--folded .side-rail` 与基础规则
-   * `.chat-side--folded .side-rail { display: flex }` **特异性完全相同**
-   * （都是 0,2,0），而它位置更靠后 —— 于是媒体查询一旦命中，
-   * 折叠态就被打成 display:none，**三个按钮全看不见**。
-   * 这也是「折叠后根本看不到按钮」的真正原因。
-   *
-   * 而且这个重置本来就是多余的：`.side-rail` 基类已经是 display:none，
-   * 窄屏不需要折叠这套（侧栏本就是抽屉），根本不会进入折叠态。
+   * 这里**不能**写 `.chat-side--folded .side-rail { display: none }`：
+   * 它与基础规则 `.chat-side--folded .side-rail { display: flex }` 特异性相同
+   * （都是 0,2,0），位置更靠后会在媒体查询命中时把折叠态打成 display:none，
+   * 图标列的三个按钮全部消失。
+   * 这个重置也是多余的：`.side-rail` 基类已是 display:none，窄屏侧栏走的是
+   * 抽屉方案，不会进入折叠态。
    */
   /* 「给浮出按钮让位」只针对宽屏折叠，窄屏下不适用 */
   .chat-main--folded .chat-toolbar {
