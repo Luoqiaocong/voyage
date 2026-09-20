@@ -325,241 +325,213 @@ onMounted(load)
       </p>
 
       <!--
-        气泡区：**局部滚动**。
-        max-height + overflow-y 让记忆多时只在这里滚，页面本身不动 ——
-        否则在个人主页往下滚会被这一块吸住，长列表还会把下方的
-        密码/账号卡片一路推到底。
-        点空白处或按 Esc 收起已展开的操作。
-      -->
-            <!--
         气泡区：两列瀑布流 + **局部滚动**。
         分列与限高滚动的理由见 script 里 distribute() 的注释
         （简言之：CSS 多列在受限高度下会向右溢出而不会竖向滚动）。
       -->
-      <div
-        class="bubbles"
-        @click.self="closeOpened"
-        @keydown.esc="closeOpened"
-      >
+      <div class="bubbles" @click.self="closeOpened" @keydown.esc="closeOpened">
         <div ref="colARef" class="bubbles__col" role="list" aria-label="记忆列表">
-            <div
-              v-for="m in colA"
-              :key="m.id"
-              class="bubble"
-              :class="[bubbleTone(m.id), { 'bubble--open': openedId === m.id }]"
+          <div
+            v-for="m in colA"
+            :key="m.id"
+            class="bubble"
+            :class="[bubbleTone(m.id), { 'bubble--open': openedId === m.id }]"
+          >
+            <button
+              class="bubble__body"
+              type="button"
+              :aria-expanded="openedId === m.id"
+              :aria-label="`${m.fact_key_label}：${m.fact_value}，点击${openedId === m.id ? '收起' : '展开'}元素操作`"
+              @click="toggleOpen(m)"
             >
-              <!--
-                点击气泡本体展开/收起元素操作。
-                用 button 而不是 div + @click：键盘用户能 Tab 到、回车触发，
-                aria-expanded 也能如实播报当前状态。
-              -->
-              <button
-                class="bubble__body"
-                type="button"
-                :aria-expanded="openedId === m.id"
-                :aria-label="`${m.fact_key_label}：${m.fact_value}，点击${openedId === m.id ? '收起' : '展开'}元素操作`"
-                @click="toggleOpen(m)"
+              <span class="bubble__key">{{ m.fact_key_label }}</span>
+              <span class="bubble__value">{{ m.fact_value }}</span>
+              <span v-if="m.hit_count > 1" class="bubble__hit" :title="`被重复提到 ${m.hit_count} 次`">
+                ×{{ m.hit_count }}
+              </span>
+            </button>
+
+            <button
+              class="bubble__del"
+              type="button"
+              :disabled="busyId === m.id"
+              :aria-label="`删除整条记忆「${m.fact_key_label}：${m.fact_value}」`"
+              title="删除整条记忆"
+              @click.stop="removeOne(m)"
+            >
+              ×
+            </button>
+
+            <Transition name="bubble-act">
+              <div
+                v-if="openedId === m.id && m.is_multi && m.values.length > 1"
+                class="bubble__items"
               >
-                <span class="bubble__key">{{ m.fact_key_label }}</span>
-                <span class="bubble__value">{{ m.fact_value }}</span>
-                <span
-                  v-if="m.hit_count > 1"
-                  class="bubble__hit"
-                  :title="`被重复提到 ${m.hit_count} 次`"
-                >×{{ m.hit_count }}</span>
-              </button>
-
-              <!--
-                「×」删除整条记忆，**常驻**在右上角。
-                与点击气泡弹开的「−」分工明确：× 删整条、− 删单个元素。
-                整条删除不可逆，故仍走一次确认。
-              -->
-              <button
-                class="bubble__del"
-                type="button"
-                :disabled="busyId === m.id"
-                :aria-label="`删除整条记忆「${m.fact_key_label}：${m.fact_value}」`"
-                title="删除整条记忆"
-                @click.stop="removeOne(m)"
-              >×</button>
-
-              <!--
-                展开后的元素级操作：每个元素一行，行内右侧是「−」。
-                只在**多值且不止一个元素**时出现 —— 只有一个元素时
-                删掉它等于删整条，那条路径已经由右上角的 × 提供。
-              -->
-              <Transition name="bubble-act">
-                <div
-                  v-if="openedId === m.id && m.is_multi && m.values.length > 1"
-                  class="bubble__items"
-                >
-                  <div v-for="v in m.values" :key="v" class="bubble__item">
-                    <span class="bubble__item-text">{{ v }}</span>
-                    <button
-                      class="bubble__minus"
-                      type="button"
-                      :disabled="busyId === m.id"
-                      :aria-label="`不再记住「${v}」`"
-                      :title="`不再记住「${v}」（删完后整条会自动消失）`"
-                      @click.stop="removeValue(m, v)"
-                    >−</button>
-                  </div>
-                </div>
-              </Transition>
-
-              <!-- 次级信息与修正项：展开时才出现，平时让气泡保持干净 -->
-              <Transition name="bubble-act">
-                <div v-if="openedId === m.id" class="bubble__meta">
-                  <span class="bubble__conf" :class="`bubble__conf--${confidenceTone(m.confidence)}`">
-                    {{ confidenceText(m.confidence) }}
-                  </span>
-                  <span v-if="m.evidence" class="bubble__evi" :title="m.evidence">「{{ m.evidence }}」</span>
-                </div>
-              </Transition>
-
-              <Transition name="bubble-act">
-                <div v-if="openedId === m.id && editingId !== m.id" class="bubble__ops">
-                  <button class="bubble__op" type="button" @click.stop="startEdit(m)">修正</button>
-                  <button class="bubble__op" type="button" :disabled="busyId === m.id" @click.stop="toggle(m)">
-                    停用
+                <div v-for="v in m.values" :key="v" class="bubble__item">
+                  <span class="bubble__item-text">{{ v }}</span>
+                  <button
+                    class="bubble__minus"
+                    type="button"
+                    :disabled="busyId === m.id"
+                    :aria-label="`不再记住「${v}」`"
+                    :title="`不再记住「${v}」（删完后整条会自动消失）`"
+                    @click.stop="removeValue(m, v)"
+                  >
+                    −
                   </button>
                 </div>
-              </Transition>
-
-              <!-- 修正态：原地变成输入框，不弹窗 -->
-              <div v-if="editingId === m.id" class="bubble__edit" @click.stop>
-                <select
-                  v-if="optionsFor(m.fact_key)"
-                  v-model="draftValue"
-                  class="select bubble__input"
-                  :aria-label="`修改「${m.fact_key_label}」的取值`"
-                >
-                  <option v-for="o in optionsFor(m.fact_key)!" :key="o" :value="o">{{ o }}</option>
-                </select>
-                <input
-                  v-else
-                  v-model="draftValue"
-                  class="input bubble__input"
-                  maxlength="40"
-                  :aria-label="`修改「${m.fact_key_label}」的取值`"
-                />
-                <button class="btn btn-primary btn--xs" :disabled="savingValue" @click="saveValue(m)">
-                  保存
-                </button>
-                <button class="btn btn-ghost btn--xs" @click="cancelEdit">取消</button>
               </div>
+            </Transition>
+
+            <Transition name="bubble-act">
+              <div v-if="openedId === m.id" class="bubble__meta">
+                <span class="bubble__conf" :class="`bubble__conf--${confidenceTone(m.confidence)}`">
+                  {{ confidenceText(m.confidence) }}
+                </span>
+                <span v-if="m.evidence" class="bubble__evi" :title="m.evidence">
+                  「{{ m.evidence }}」
+                </span>
+              </div>
+            </Transition>
+
+            <Transition name="bubble-act">
+              <div v-if="openedId === m.id && editingId !== m.id" class="bubble__ops">
+                <button class="bubble__op" type="button" @click.stop="startEdit(m)">修正</button>
+                <button
+                  class="bubble__op"
+                  type="button"
+                  :disabled="busyId === m.id"
+                  @click.stop="toggle(m)"
+                >
+                  停用
+                </button>
+              </div>
+            </Transition>
+
+            <div v-if="editingId === m.id" class="bubble__edit" @click.stop>
+              <select
+                v-if="optionsFor(m.fact_key)"
+                v-model="draftValue"
+                class="select bubble__input"
+                :aria-label="`修改「${m.fact_key_label}」的取值`"
+              >
+                <option v-for="o in optionsFor(m.fact_key)!" :key="o" :value="o">{{ o }}</option>
+              </select>
+              <input
+                v-else
+                v-model="draftValue"
+                class="input bubble__input"
+                maxlength="40"
+                :aria-label="`修改「${m.fact_key_label}」的取值`"
+              />
+              <button class="btn btn-primary btn--xs" :disabled="savingValue" @click="saveValue(m)">
+                保存
+              </button>
+              <button class="btn btn-ghost btn--xs" @click="cancelEdit">取消</button>
             </div>
-</div>
+          </div>
         </div>
+
         <div ref="colBRef" class="bubbles__col" role="list">
-            <div
-              v-for="m in colB"
-              :key="m.id"
-              class="bubble"
-              :class="[bubbleTone(m.id), { 'bubble--open': openedId === m.id }]"
+          <div
+            v-for="m in colB"
+            :key="m.id"
+            class="bubble"
+            :class="[bubbleTone(m.id), { 'bubble--open': openedId === m.id }]"
+          >
+            <button
+              class="bubble__body"
+              type="button"
+              :aria-expanded="openedId === m.id"
+              :aria-label="`${m.fact_key_label}：${m.fact_value}，点击${openedId === m.id ? '收起' : '展开'}元素操作`"
+              @click="toggleOpen(m)"
             >
-              <!--
-                点击气泡本体展开/收起元素操作。
-                用 button 而不是 div + @click：键盘用户能 Tab 到、回车触发，
-                aria-expanded 也能如实播报当前状态。
-              -->
-              <button
-                class="bubble__body"
-                type="button"
-                :aria-expanded="openedId === m.id"
-                :aria-label="`${m.fact_key_label}：${m.fact_value}，点击${openedId === m.id ? '收起' : '展开'}元素操作`"
-                @click="toggleOpen(m)"
+              <span class="bubble__key">{{ m.fact_key_label }}</span>
+              <span class="bubble__value">{{ m.fact_value }}</span>
+              <span v-if="m.hit_count > 1" class="bubble__hit" :title="`被重复提到 ${m.hit_count} 次`">
+                ×{{ m.hit_count }}
+              </span>
+            </button>
+
+            <button
+              class="bubble__del"
+              type="button"
+              :disabled="busyId === m.id"
+              :aria-label="`删除整条记忆「${m.fact_key_label}：${m.fact_value}」`"
+              title="删除整条记忆"
+              @click.stop="removeOne(m)"
+            >
+              ×
+            </button>
+
+            <Transition name="bubble-act">
+              <div
+                v-if="openedId === m.id && m.is_multi && m.values.length > 1"
+                class="bubble__items"
               >
-                <span class="bubble__key">{{ m.fact_key_label }}</span>
-                <span class="bubble__value">{{ m.fact_value }}</span>
-                <span
-                  v-if="m.hit_count > 1"
-                  class="bubble__hit"
-                  :title="`被重复提到 ${m.hit_count} 次`"
-                >×{{ m.hit_count }}</span>
-              </button>
-
-              <!--
-                「×」删除整条记忆，**常驻**在右上角。
-                与点击气泡弹开的「−」分工明确：× 删整条、− 删单个元素。
-                整条删除不可逆，故仍走一次确认。
-              -->
-              <button
-                class="bubble__del"
-                type="button"
-                :disabled="busyId === m.id"
-                :aria-label="`删除整条记忆「${m.fact_key_label}：${m.fact_value}」`"
-                title="删除整条记忆"
-                @click.stop="removeOne(m)"
-              >×</button>
-
-              <!--
-                展开后的元素级操作：每个元素一行，行内右侧是「−」。
-                只在**多值且不止一个元素**时出现 —— 只有一个元素时
-                删掉它等于删整条，那条路径已经由右上角的 × 提供。
-              -->
-              <Transition name="bubble-act">
-                <div
-                  v-if="openedId === m.id && m.is_multi && m.values.length > 1"
-                  class="bubble__items"
-                >
-                  <div v-for="v in m.values" :key="v" class="bubble__item">
-                    <span class="bubble__item-text">{{ v }}</span>
-                    <button
-                      class="bubble__minus"
-                      type="button"
-                      :disabled="busyId === m.id"
-                      :aria-label="`不再记住「${v}」`"
-                      :title="`不再记住「${v}」（删完后整条会自动消失）`"
-                      @click.stop="removeValue(m, v)"
-                    >−</button>
-                  </div>
-                </div>
-              </Transition>
-
-              <!-- 次级信息与修正项：展开时才出现，平时让气泡保持干净 -->
-              <Transition name="bubble-act">
-                <div v-if="openedId === m.id" class="bubble__meta">
-                  <span class="bubble__conf" :class="`bubble__conf--${confidenceTone(m.confidence)}`">
-                    {{ confidenceText(m.confidence) }}
-                  </span>
-                  <span v-if="m.evidence" class="bubble__evi" :title="m.evidence">「{{ m.evidence }}」</span>
-                </div>
-              </Transition>
-
-              <Transition name="bubble-act">
-                <div v-if="openedId === m.id && editingId !== m.id" class="bubble__ops">
-                  <button class="bubble__op" type="button" @click.stop="startEdit(m)">修正</button>
-                  <button class="bubble__op" type="button" :disabled="busyId === m.id" @click.stop="toggle(m)">
-                    停用
+                <div v-for="v in m.values" :key="v" class="bubble__item">
+                  <span class="bubble__item-text">{{ v }}</span>
+                  <button
+                    class="bubble__minus"
+                    type="button"
+                    :disabled="busyId === m.id"
+                    :aria-label="`不再记住「${v}」`"
+                    :title="`不再记住「${v}」（删完后整条会自动消失）`"
+                    @click.stop="removeValue(m, v)"
+                  >
+                    −
                   </button>
                 </div>
-              </Transition>
-
-              <!-- 修正态：原地变成输入框，不弹窗 -->
-              <div v-if="editingId === m.id" class="bubble__edit" @click.stop>
-                <select
-                  v-if="optionsFor(m.fact_key)"
-                  v-model="draftValue"
-                  class="select bubble__input"
-                  :aria-label="`修改「${m.fact_key_label}」的取值`"
-                >
-                  <option v-for="o in optionsFor(m.fact_key)!" :key="o" :value="o">{{ o }}</option>
-                </select>
-                <input
-                  v-else
-                  v-model="draftValue"
-                  class="input bubble__input"
-                  maxlength="40"
-                  :aria-label="`修改「${m.fact_key_label}」的取值`"
-                />
-                <button class="btn btn-primary btn--xs" :disabled="savingValue" @click="saveValue(m)">
-                  保存
-                </button>
-                <button class="btn btn-ghost btn--xs" @click="cancelEdit">取消</button>
               </div>
+            </Transition>
+
+            <Transition name="bubble-act">
+              <div v-if="openedId === m.id" class="bubble__meta">
+                <span class="bubble__conf" :class="`bubble__conf--${confidenceTone(m.confidence)}`">
+                  {{ confidenceText(m.confidence) }}
+                </span>
+                <span v-if="m.evidence" class="bubble__evi" :title="m.evidence">
+                  「{{ m.evidence }}」
+                </span>
+              </div>
+            </Transition>
+
+            <Transition name="bubble-act">
+              <div v-if="openedId === m.id && editingId !== m.id" class="bubble__ops">
+                <button class="bubble__op" type="button" @click.stop="startEdit(m)">修正</button>
+                <button
+                  class="bubble__op"
+                  type="button"
+                  :disabled="busyId === m.id"
+                  @click.stop="toggle(m)"
+                >
+                  停用
+                </button>
+              </div>
+            </Transition>
+
+            <div v-if="editingId === m.id" class="bubble__edit" @click.stop>
+              <select
+                v-if="optionsFor(m.fact_key)"
+                v-model="draftValue"
+                class="select bubble__input"
+                :aria-label="`修改「${m.fact_key_label}」的取值`"
+              >
+                <option v-for="o in optionsFor(m.fact_key)!" :key="o" :value="o">{{ o }}</option>
+              </select>
+              <input
+                v-else
+                v-model="draftValue"
+                class="input bubble__input"
+                maxlength="40"
+                :aria-label="`修改「${m.fact_key_label}」的取值`"
+              />
+              <button class="btn btn-primary btn--xs" :disabled="savingValue" @click="saveValue(m)">
+                保存
+              </button>
+              <button class="btn btn-ghost btn--xs" @click="cancelEdit">取消</button>
             </div>
-</div>
+          </div>
         </div>
       </div>
 
@@ -573,7 +545,12 @@ onMounted(load)
             <span class="off-item__key">{{ m.fact_key_label }}</span>
             <span class="off-item__value">{{ m.fact_value }}</span>
             <span class="off-item__ops">
-              <button class="bubble__op" type="button" :disabled="busyId === m.id" @click="toggle(m)">
+              <button
+                class="bubble__op"
+                type="button"
+                :disabled="busyId === m.id"
+                @click="toggle(m)"
+              >
                 重新启用
               </button>
               <button
