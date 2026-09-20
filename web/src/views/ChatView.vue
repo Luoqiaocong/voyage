@@ -1790,15 +1790,20 @@ watch(streaming, (v) => {
   height: 100%;
   background: var(--border);
 }
-/* 折叠时整栏淡出并收窄；不给 width 是因为宽度已由网格控制 */
-.chat-side--folded {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s;
-}
-.chat-side--folded * {
-  pointer-events: none;
-}
+/*
+ * ⚠️ 这里原有两条规则已删除：
+ *
+ *     .chat-side--folded      { opacity: 0; pointer-events: none }
+ *     .chat-side--folded *    { pointer-events: none }
+ *
+ * 它们把**整栏连同图标列**一起禁用点击，而图标列正是折叠后唯一的
+ * 「展开」入口 —— 结果就是「折叠后再也点不开」。
+ * 我新增 .side-rail 时没删掉它们，它们在样式表里更靠后，
+ * 把我给图标列设的 pointer-events: auto 又覆盖回 none（实测确认）。
+ *
+ * 淡出改由上面那条 `.chat-side--folded > *:not(.side-rail)` 负责，
+ * 它排除了图标列，语义也更准确：要淡出的是**内容**，不是整个侧栏。
+ */
 
 /* ============================================================
    侧栏顶部操作区
