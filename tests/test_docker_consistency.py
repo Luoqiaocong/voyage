@@ -31,7 +31,10 @@ compose = Path("docker-compose.yml").read_text(encoding="utf-8")
 
 print("=== 1. 运行阶段是否具备 uvx（stdio MCP 的启动依赖）===")
 runtime = docker.split("AS runtime", 1)[1] if "AS runtime" in docker else docker
-check("运行阶段 COPY 了 uvx", re.search(r"COPY --from=\S+ /uvx /bin/", runtime) is not None)
+# uvx 是依赖 uv 的小型启动器（实测 /uvx 会调用 /uv），故两个二进制需一并拷贝，
+# 正则同时接受「只拷 uvx」与「uv、uvx 一起拷」两种写法。
+check("运行阶段 COPY 了 uvx",
+      re.search(r"COPY --from=\S+ (?:/uv )?/uvx /bin/", runtime) is not None)
 check("运行阶段 COPY 了 .venv",
       "--from=builder /app/.venv /app/.venv" in runtime)
 

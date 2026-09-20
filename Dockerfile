@@ -53,21 +53,24 @@ COPY --from=builder /app/.venv /app/.venv
 # 需由应用启动子进程，命令是 `uvx duckduckgo-mcp-server==<版本>`。
 # 此前运行阶段没有 uvx，该 MCP 在容器里必然起不来（且是静默降级，不易发现）。
 # 直接从官方镜像取静态二进制，与构建期版本一致。
-COPY --from=ghcr.io/astral-sh/uv:0.9.9 /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.9.9 /uv /uvx /bin/
 # 应用代码、迁移脚本与配置
-COPY app/ ./app/
-COPY alembic/ ./alembic/
-COPY alembic.ini pyproject.toml uv.lock .env.example ./
+# 用 --chown 直接以 voyage 身份落盘：只需给业务代码授权，
+# 不必在拷贝后对 /app 递归 chown —— 那会把 1.8GB 的 .venv 一并扫一遍，
+# 使每次改代码重建都多花数分钟。.venv 从 builder 拷贝后保持只读即可。
+COPY --chown=voyage:voyage app/ ./app/
+COPY --chown=voyage:voyage alembic/ ./alembic/
+COPY --chown=voyage:voyage alembic.ini pyproject.toml uv.lock .env.example ./
 # run.py 是仓库约定的启动入口（内含事件循环处理），一并打包。
 # Linux 下 CMD 直接用 uvicorn 即可（默认就是 SelectorEventLoop），
 # 带上它可保证容器内外启动方式一致，也便于进容器手动排查。
-COPY run.py ./
+COPY --chown=voyage:voyage run.py ./
 
 # 日志目录必须先建好并授权给非 root 用户。
 # 注意：这里同时建 data/exports 是为了兼容「不配 DATABASE_URL 时回退 SQLite」
 # 的用法；配了 PostgreSQL 时业务数据不在容器里，该目录只放日志。
 RUN mkdir -p /app/data/exports /app/data/output/logs \
-    && chown -R voyage:voyage /app
+    && chown -R voyage:voyage /app/data
 
 USER voyage
 

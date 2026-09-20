@@ -117,7 +117,7 @@ services:
       # 中文内容不受影响（库默认 UTF8），这里只固定初始化参数便于行为可预期
       POSTGRES_INITDB_ARGS: "--encoding=UTF8"
     volumes:
-      - pg-data:/var/lib/postgresql/data
+      - pg-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-voyage} -d ${POSTGRES_DB:-voyage}"]
       interval: 10s
