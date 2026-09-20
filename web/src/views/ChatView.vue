@@ -304,18 +304,39 @@ function resetStream() {
   showReasoning.value = false
 }
 
+/**
+ * 开一个新会话。
+ *
+ * ## 这里刻意**不调用 createConversation**
+ *
+ * 原先点一下就在后端建一条会话、并立刻插进列表 —— 结果是：
+ * 用户点开看看、什么都没聊就去做别的，列表里就永久留下一条「新会话」。
+ * 建了又没内容，既占位置，也让人以为自己说过什么。
+ *
+ * 现在的做法与主流对话产品一致（用户点名要求）：
+ *   点「新会话」→ 只是把界面切到空白对话窗**草稿态**（activeId = null），
+ *   后端不动、列表不动；等用户真的发出第一条消息时（见 runTurn），
+ *   才创建会话、生成标题、出现在列表里。
+ *
+ * 于是「空会话」在数据和界面上都不存在，不需要额外去删。
+ * 副作用是草稿态与「首次进入、还没选会话」是同一个状态 ——
+ * 这没问题：两者要显示的都是那个空白对话框。因此这里再点一次
+ * 也不会有变化，只需把焦点放回输入框。
+ */
 async function newConversation() {
   if (streaming.value) return
-  try {
-    const conv = await createConversation()
-    if (!conversations.value.some((c) => c.id === conv.id)) {
-      conversations.value.unshift(conv)
-    }
-    await openConversation(conv.id)
+  // 已经在草稿态：无需重来，把焦点交回输入框即可
+  if (!activeId.value) {
     inputEl.value?.focus()
-  } catch (e: any) {
-    ui.toast(e?.message ?? '创建会话失败', 'error')
+    return
   }
+  activeId.value = null
+  messages.value = []
+  resetStream()
+  historyTruncated.value = false
+  // 切到草稿态是用户主动操作，滚回顶部（空白窗没有「底部」可言）
+  await nextTick()
+  inputEl.value?.focus()
 }
 
 /**
@@ -503,6 +524,17 @@ async function send() {
 async function runTurn(text: string, echoUser: boolean) {
   if (!text || streaming.value) return
 
+  /*
+   * 会话的**唯一创建入口**。
+   *
+   * 「新会话」按钮只把界面切到草稿态（activeId = null），不建后端会话；
+   * 直到这里 —— 用户真的发出第一条消息 —— 才创建。
+   * 这样列表里不会出现「建了却没聊过」的空会话，也就不需要清理逻辑。
+   *
+   * 插入列表放在创建之后、流式开始之前：此时列表里已有这一条，
+   * 后续流式返回的 title 事件才能按 id 找到它并回填标题
+   * （见下方 chunk.type === 'title' 分支）。
+   */
   if (!activeId.value) {
     try {
       const conv = await createConversation()
