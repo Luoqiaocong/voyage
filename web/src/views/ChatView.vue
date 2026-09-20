@@ -23,6 +23,7 @@ import { useUiStore } from '@/stores/ui'
 import { suggestFromContext } from '@/utils/quickSuggest'
 import { formatRelative } from '@/utils/datetime'
 import { groupByTime, isToday } from '@/utils/conversationGroup'
+import { shouldShowWelcome as shouldShowWelcomePure } from '@/utils/welcomeGate'
 import { useUserStore } from '@/stores/user'
 import { PAGE_COPY } from '@/constants/copy'
 
@@ -330,12 +331,16 @@ async function newConversation() {
   /*
    * 点「新会话」就等于告诉系统：欢迎屏的使命结束了。
    *
-   * 必须显式记这一笔。无会话时 shouldShowWelcome 由
-   * 「conversations.length === 0」直接判真，**不看 lastWelcomeAt** ——
-   * 只清 activeId 的话欢迎屏会原地不动，用户看到的是「点了没反应」
-   * （这正是之前那个 bug 的成因之一）。
+   * 必须同时做两件事，缺一不可：
+   *   1. welcomeDismissed = true —— 立刻把欢迎屏关掉。
+   *      只有在「一条会话都没有」的场景下这一步才是决定性的：
+   *      那时 shouldShowWelcome 由 conversations.length === 0 直接判真，
+   *      **不看 lastWelcomeAt**，所以只写记录根本关不掉它 ——
+   *      用户看到的就是「点了没反应」（这是实测复现过的 bug）。
+   *   2. markWelcomeShown() —— 落一条「今天已经见过」的持久记录，
+   *      让刷新后（welcomeDismissed 随内存重置）不再重新弹出来。
    */
-  markWelcomeShown()
+  dismissWelcome()
 
   /*
    * 已经在草稿态：无需重来，把焦点交回输入框即可。
@@ -929,22 +934,44 @@ const lastWelcomeAt = ref('')
 const listLoaded = ref(false)
 
 /**
+ * 本次进入对话页期间，用户是否已经主动关掉过欢迎屏。
+ *
+ * ⚠️ 没有这个标记就会出现「点了没反应」（实测复现过）：
+ * 下面 shouldShowWelcome 在「一条会话都没有」时是**直接判真**的，
+ * 因为它要先满足「新用户必须看到欢迎屏」。于是 markWelcomeShown()
+ * 虽然写了 lastWelcomeAt，那个值却根本不参与判断 —— 欢迎屏卸不掉，
+ * 欢迎屏那一分支里又没有 composer，用户点「开始新的旅程」看到的
+ * 就是界面纹丝不动。
+ *
+ * 这两个状态回答的是不同的问题，不能合并：
+ *   lastWelcomeAt    跨会话/跨天：今天是否已经见过欢迎屏（持久化）
+ *   welcomeDismissed 本次进入：用户是否已经明确表示「我要开始打字了」
+ *
+ * 后者只活在内存里 —— 它代表一次点击，刷新后本就该重新按当天记录判断。
+ */
+const welcomeDismissed = ref(false)
+
+/**
  * 这次进入是否该显示欢迎屏。
  *
  * 用户要求：只在**没有会话历史**、或**当天首次打开对话页**时出现。
- * 点「新会话」时不该再看到它（那是要开始打字，不是要看介绍）。
+ * 点「新会话」或引导卡时不该再看到它（那是要开始打字，不是要看介绍）。
  *
- * 注意这里的两个「不显示」来源不同，别混：
- *   listLoaded=false  数据还没到，先不判断（防闪烁）
+ * 注意这里的「不显示」有三个来源，别混：
+ *   welcomeDismissed   用户刚点了「开始新的旅程」/「新会话」/引导卡
+ *   listLoaded=false   数据还没到，先不判断（防闪烁）
  *   有会话且今天已显示过  用户今天已经见过，不必再看
  */
-const shouldShowWelcome = computed(() => {
-  // 加载完成前不下结论：此时 conversations 为空只是「还没拿到」，
-  // 不是「用户没有会话」
-  if (!listLoaded.value) return false
-  if (conversations.value.length === 0) return true
-  return !isToday(lastWelcomeAt.value)
-})
+const shouldShowWelcome = computed(() =>
+  shouldShowWelcomePure({
+    dismissed: welcomeDismissed.value,
+    listLoaded: listLoaded.value,
+    conversationCount: conversations.value.length,
+    lastWelcomeAt: lastWelcomeAt.value,
+    // 沿用列表分组那套「本地自然日」口径，避免两处对「今天」的理解不一致
+    isToday,
+  })
+)
 
 /**
  * 草稿态：点过「新会话」、还没发出第一条消息。
@@ -974,11 +1001,23 @@ const groupedResults = computed(() => groupByTime(searchResults.value))
  */
 async function fillInput(text: string) {
   input.value = text
-  // markWelcomeShown 会同时更新 lastWelcomeAt 与 localStorage，
-  // 于是 shouldShowWelcome 转为 false、composer 分支渲染出来
-  if (shouldShowWelcome.value) markWelcomeShown()
+  // 引导卡与快捷芯片都在欢迎屏上：点它等于「我要开始打字了」，
+  // 于是关掉欢迎屏（同时落一条当天记录），让 composer 分支渲染出来
+  if (shouldShowWelcome.value) dismissWelcome()
   await nextTick()
   inputEl.value?.focus()
+}
+
+/**
+ * 关闭欢迎屏并记下「今天已经见过」。
+ *
+ * 抽成一个函数，是因为有两个入口都要做同样两件事
+ * （「新会话」按钮与欢迎屏上的引导卡），漏做其中一件就会复现
+ * 「点了没反应」—— 这个 bug 已经因为两处逻辑不一致出现过一次。
+ */
+function dismissWelcome() {
+  welcomeDismissed.value = true
+  markWelcomeShown()
 }
 
 /** 记录「欢迎屏刚刚露过面」，供 shouldShowWelcome 判断 */
