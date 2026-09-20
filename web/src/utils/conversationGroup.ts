@@ -65,6 +65,22 @@ export function bucketOf(iso: string, now: Date = new Date()): ConversationBucke
   return 'earlier'
 }
 
+/**
+ * 判断 `iso` 是否为「今天」。
+ *
+ * 与 dayDiff 同一套本地自然日口径：用来记「欢迎屏今天已经露过面了吗」，
+ * 必须和分组用的口径一致，否则会出现「列表说昨天、欢迎屏说今天」这种
+ * 自相矛盾的表现。
+ *
+ * iso 为空 / 无法解析 → 返回 false（当作没露过面，宁可多露一次）。
+ */
+export function isToday(iso: string | null | undefined, now: Date = new Date()): boolean {
+  if (!iso) return false
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return false
+  return dayDiff(d, now) === 0
+}
+
 export interface GroupedItem<T> {
   key: ConversationBucket
   label: string

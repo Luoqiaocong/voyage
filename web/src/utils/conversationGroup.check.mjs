@@ -9,7 +9,7 @@
  *   · 未来时间归入今天（时钟偏差不该造出一个空组）
  *   · 无法解析的时间不丢项，沉到「更早」
  */
-import { bucketOf, dayDiff, groupByTime } from './conversationGroup.ts'
+import { bucketOf, dayDiff, groupByTime, isToday } from './conversationGroup.ts'
 
 let pass = 0
 let fail = 0
@@ -90,6 +90,20 @@ const onlyToday = groupByTime([{ id: 'x', created_at: at(2026, 9, 20) }], NOW)
 check('只有今天有数据时只出 1 组', onlyToday.length === 1, String(onlyToday.length))
 check('不出现空的「昨天」段落', !onlyToday.some((g) => g.key === 'yesterday'))
 check('空列表返回空数组', groupByTime([], NOW).length === 0)
+
+console.log('\n=== 9. isToday（欢迎屏「当天首次」判定复用同一口径）===')
+check('今天 00:00 → true', isToday(new Date(2026, 8, 20, 0, 0).toISOString(), NOW) === true)
+check('今天 23:59 → true', isToday(new Date(2026, 8, 20, 23, 59).toISOString(), NOW) === true)
+check('昨天 23:59 → false', isToday(new Date(2026, 8, 19, 23, 59).toISOString(), NOW) === false)
+// 空值/乱码必须当作「没露过面」——这样宁可多显示一次欢迎屏，不会永久吞掉
+check('空串 → false', isToday('', NOW) === false)
+check('null → false', isToday(null, NOW) === false)
+check('undefined → false', isToday(undefined, NOW) === false)
+check('乱码 → false', isToday('not-a-date', NOW) === false)
+check('与 bucketOf 口径一致（同一时刻不会一个说今天一个说昨天）', (() => {
+  const iso = new Date(2026, 8, 19, 23, 59).toISOString()
+  return isToday(iso, NOW) === false && bucketOf(iso, NOW) === 'yesterday'
+})())
 
 console.log(
   `\n${'=' * 56}\n会话分组验证: ${pass} 通过 / ${fail} 失败\n${'=' * 56}`

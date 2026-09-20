@@ -22,7 +22,7 @@ import { extractItinerary } from '@/api/itinerary'
 import { useUiStore } from '@/stores/ui'
 import { suggestFromContext } from '@/utils/quickSuggest'
 import { formatRelative } from '@/utils/datetime'
-import { groupByTime } from '@/utils/conversationGroup'
+import { groupByTime, isToday } from '@/utils/conversationGroup'
 import { useUserStore } from '@/stores/user'
 import { PAGE_COPY } from '@/constants/copy'
 
@@ -325,8 +325,15 @@ function resetStream() {
  */
 async function newConversation() {
   if (streaming.value) return
-  // 已经在草稿态：无需重来，把焦点交回输入框即可
-  if (!activeId.value) {
+  /*
+   * 已经在草稿态：无需重来，把焦点交回输入框即可。
+   *
+   * 判据用 isDraft 而不是 `!activeId` —— 后者在**欢迎屏**上也为真，
+   * 那时若不进入草稿态，输入框根本不在 DOM 里（欢迎屏分支没有 composer），
+   * 后面那句 focus() 会静默失败，用户点了按钮看不到任何变化。
+   */
+  if (isDraft.value) {
+    await nextTick()
     inputEl.value?.focus()
     return
   }
@@ -334,7 +341,6 @@ async function newConversation() {
   messages.value = []
   resetStream()
   historyTruncated.value = false
-  // 切到草稿态是用户主动操作，滚回顶部（空白窗没有「底部」可言）
   await nextTick()
   inputEl.value?.focus()
 }
@@ -879,13 +885,81 @@ function pickResult(id: string) {
   void openConversation(id)
 }
 
-/* ==================== 时间分组 ==================== */
+/* ==================== 欢迎屏 / 草稿态 ==================== */
+
+/**
+ * 欢迎屏的记录键：存上一次露面的**时刻**（ISO 字符串）。
+ * 按用户区分，避免多账号在同一浏览器里互相影响。
+ */
+const WELCOME_KEY = 'voyage:chat-welcome-at'
+
+/** 上一次欢迎屏露面的时刻；读不到返回空串。
+ *  存时刻而不是日期：判定交给 isToday（与列表分组同一套自然日口径），
+ *  自己再拼一次日期字符串容易在两者之间产生不一致。 */
+const lastWelcomeAt = ref('')
+
+/**
+ * 这次进入是否该显示欢迎屏。
+ *
+ * 用户要求：欢迎屏只在**没有会话历史**、或**当天首次打开对话页**时出现。
+ * 点「新会话」时不该再看到它（那是要开始打字，不是要看介绍）。
+ *
+ * 为什么不只用「有没有会话」判断：
+ *   老用户每天第一次进来，给他一个空白输入框会显得空落落的；
+ *   欢迎屏兼作「今天想去哪儿」的起手式。但同一天内反复点「新会话」
+ *   就不该反复看到 —— 那才是打扰。
+ */
+const shouldShowWelcome = computed(() => {
+  if (conversations.value.length === 0) return true
+  return !isToday(lastWelcomeAt.value)
+})
+
+/**
+ * 草稿态：点过「新会话」、还没发出第一条消息。
+ *
+ * 与「欢迎屏」是**两个不同的界面**（这是上一版做错的地方）：
+ *   欢迎屏：logo + 标题 + 三张引导卡 + 「开始新的旅程」按钮
+ *   草稿态：只给输入框，让用户直接打字
+ * 两者都满足 activeId 为空，所以必须用额外的状态区分，
+ * 否则点「新会话」会看到欢迎屏、而按钮又无事可做。
+ */
+const isDraft = computed(() => !activeId.value && !shouldShowWelcome.value)
+
 
 /** 侧栏列表按时间分组（今天/昨天/7 天内/30 天内/更早） */
 const groupedConversations = computed(() => groupByTime(filteredConversations.value))
 
 /** 弹窗结果同样分组，便于在长列表里定位 */
 const groupedResults = computed(() => groupByTime(searchResults.value))
+
+/**
+ * 把一段文案填进输入框并聚焦。
+ *
+ * 欢迎屏上的引导卡会用到它 —— 而欢迎屏那一分支**没有输入框**
+ * （composer 在另一个分支里），直接 inputEl?.focus() 会静默失败。
+ * 所以先离开欢迎屏（它已经完成使命：用户选好了起点），
+ * 等输入框渲染出来再聚焦。
+ */
+async function fillInput(text: string) {
+  input.value = text
+  // markWelcomeShown 会同时更新 lastWelcomeAt 与 localStorage，
+  // 于是 shouldShowWelcome 转为 false、composer 分支渲染出来
+  if (shouldShowWelcome.value) markWelcomeShown()
+  await nextTick()
+  inputEl.value?.focus()
+}
+
+/** 记录「欢迎屏刚刚露过面」，供 shouldShowWelcome 判断 */
+function markWelcomeShown() {
+  const now = new Date().toISOString()
+  lastWelcomeAt.value = now
+  try {
+    localStorage.setItem(WELCOME_KEY, now)
+  } catch {
+    // 隐私模式等场景下 localStorage 不可用：退化为「本次会话内记住」，
+    // 不影响功能，只是同一天重进可能再看到一次欢迎屏
+  }
+}
 
 
 /** 会话项显示的时间：今天显示时刻，更早显示日期，避免一长串相同日期 */
@@ -1115,6 +1189,13 @@ onMounted(async () => {
   // 全局 Esc：关闭窄屏抽屉（见 onGlobalKeydown 的说明）
   window.addEventListener('keydown', onGlobalKeydown)
 
+  // 读「上次欢迎屏露面时刻」，决定这次进来是给欢迎屏还是直接给输入框
+  try {
+    lastWelcomeAt.value = localStorage.getItem(WELCOME_KEY) ?? ''
+  } catch {
+    lastWelcomeAt.value = ''
+  }
+
   user.fetchUserInfo().catch(() => {})
   await loadConversations()
   if (conversations.value.length > 0) {
@@ -1132,6 +1213,17 @@ onMounted(async () => {
     // 进入时清掉 query，避免刷新或返回时重复填充
     router.replace({ path: route.path })
   }
+})
+
+/**
+ * 欢迎屏一旦真的显示出来就记下时刻。
+ *
+ * ⚠️ 刻意**不加 immediate**：挂载那一刻 conversations 还是空数组
+ * （loadConversations 尚未返回），会误判成「该显示欢迎屏」并把记录写掉 ——
+ * 老用户当天就再也看不到欢迎屏了。只在它真正**变为**显示时记录。
+ */
+watch(shouldShowWelcome, (show) => {
+  if (show) markWelcomeShown()
 })
 
 onUnmounted(() => {
@@ -1402,8 +1494,13 @@ watch(streaming, (v) => {
 
       <!-- ==================== 主区域 ==================== -->
       <section class="chat-body">
-        <!-- 空状态 -->
-        <div v-if="!activeId" class="chat-empty">
+        <!--
+          空状态 = 欢迎屏。
+          显示条件不是「没有 activeId」而是 shouldShowWelcome：
+          点「新会话」时 activeId 同样为空，但那时用户是要开始打字，
+          不该再看到 logo 与引导卡（否则就像点了没反应）。
+        -->
+        <div v-if="shouldShowWelcome" class="chat-empty">
           <button
             class="side-toggle chat-empty__toggle"
             type="button"
@@ -1432,7 +1529,7 @@ watch(streaming, (v) => {
               :key="g.title"
               type="button"
               class="guide-card"
-              @click="input = g.prompt; inputEl?.focus()"
+              @click="fillInput(g.prompt)"
             >
               <span class="guide-card__icon" aria-hidden="true">
                 <TravelIcon :name="g.icon" :size="18" />
@@ -1442,7 +1539,17 @@ watch(streaming, (v) => {
             </button>
           </div>
 
-          <button class="btn btn-primary" @click="newConversation">
+          <!--
+            「开始新的旅程」只在**一条会话都没有**时出现。
+            此时它是唯一的起手式，点它把焦点交给下面的输入框。
+            已有会话时不该出现：那时用户已经在对话页里了，
+            「开始新的旅程」既啰嗦又容易与「新会话」混淆。
+          -->
+          <button
+            v-if="!conversations.length"
+            class="btn btn-primary"
+            @click="newConversation"
+          >
             <TravelIcon name="plane" :size="17" />
             开始新的旅程
           </button>
@@ -1660,7 +1767,7 @@ watch(streaming, (v) => {
                     type="button"
                     class="quick-chip"
                     :class="`quick-chip--${chipTone(q, qi)}`"
-                    @click="input = q; inputEl?.focus()"
+                    @click="fillInput(q)"
                   >
                     {{ q }}
                   </button>
