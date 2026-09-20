@@ -147,15 +147,21 @@ class AdminService(TransactionMixin):
         except Exception as exc:  # noqa: BLE001
             db_detail = f"{type(exc).__name__}: {str(exc)[:120]}"
 
-        configured = bool(config.OPENCODE_GO_URL and config.OPENCODE_API_KEY)
+        # 按当前 LLM_CHANNEL 解析通道，而不是写死 OpenCode ——
+        # 切换通道后健康页应如实反映正在使用的网关与模型。
+        from app.core.ai.llm import get_llm_channel_info
+
+        channel_info = get_llm_channel_info()
+        configured = channel_info["configured"]
 
         return {
             "redis_ok": redis_ok,
             "redis_detail": redis_detail,
             "database_ok": db_ok,
             "database_detail": db_detail,
+            "llm_channel": channel_info["channel"],
             "llm_channel_configured": configured,
-            "llm_model": config.OPENCODE_LLM_MODEL,
+            "llm_model": channel_info["model"],
             "llm_detail": (
                 "配置完整（未实际发起调用以免消耗额度）" if configured else "缺少 URL 或 API Key"
             ),

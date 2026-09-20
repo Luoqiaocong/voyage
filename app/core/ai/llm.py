@@ -1,8 +1,9 @@
-"""LLM 工厂：统一走 OpenCode Go（OpenAI 兼容端点）。
+"""LLM 工厂：按配置在 OpenCode Go / DeepSeek 官方 / SenseAudio / 智谱之间切换（均为 OpenAI 兼容）。
 
 设计要点
 --------
-- 全平台所有任务共用同一模型（config.OPENCODE_LLM_MODEL），按任务只区分温度；
+- 全平台所有任务共用同一模型，按任务只区分温度；具体模型由 config.LLM_CHANNEL
+  决定的通道默认模型给出（也可调用方显式覆盖）；
 - 请求头（x-opencode-session / User-Agent）由 opencode.py 在请求发出时注入，
   这里只负责把共享的 httpx 客户端交给 ChatOpenAI；
 - 不传 extra_body 的 enable_thinking：那是 DashScope 专有参数，本通道会拒绝。
@@ -22,6 +23,48 @@ from .token import token_counter
 # 同步客户端仅为满足 ChatOpenAI 的初始化校验（项目内不存在同步调用路径）。
 _http_client = build_http_client()
 _sync_http_client = build_sync_http_client()
+
+
+def _resolve_channel() -> tuple[str, str, str]:
+    """按 config.LLM_CHANNEL 解析当前通道的 (base_url, api_key, 默认模型)。
+
+    - opencode：OpenCode Go 网关（默认）
+    - deepseek：DeepSeek 官方 OpenAI 兼容端点
+    - senseaudio：SenseAudio OpenAI 兼容网关（glm 系列模型）
+    - zhipu：智谱 BigModel OpenAI 兼容网关（glm 系列模型）
+    未知取值按 opencode 处理，避免因配置拼写错误导致启动即不可用。
+    """
+    channel = config.LLM_CHANNEL.strip().lower()
+    if channel == "deepseek":
+        return (
+            config.DEEPSEEK_BASE_URL,
+            config.DEEPSEEK_API_KEY,
+            config.DEEPSEEK_LLM_MODEL_FLASH,
+        )
+    if channel == "senseaudio":
+        return (
+            config.SENSEAUDIO_BASE_URL,
+            config.SENSEAUDIO_API_KEY,
+            config.SENSEAUDIO_LLM_MODEL,
+        )
+    if channel == "zhipu":
+        return (
+            config.ZHIPU_BASE_URL,
+            config.ZHIPU_API_KEY,
+            config.ZHIPU_LLM_MODEL,
+        )
+    return config.OPENCODE_GO_URL, config.OPENCODE_API_KEY, config.OPENCODE_LLM_MODEL
+
+
+def get_llm_channel_info() -> dict:
+    """返回当前 LLM 通道信息，供管理端健康检查展示（不发起真实调用）。"""
+    base_url, api_key, model = _resolve_channel()
+    return {
+        "channel": config.LLM_CHANNEL,
+        "base_url": base_url,
+        "model": model,
+        "configured": bool(base_url and api_key),
+    }
 
 
 class VoyageModel(StrEnum):
@@ -66,14 +109,16 @@ TASK_REASONING_OFF: frozenset[TaskKind] = frozenset({TaskKind.EXTRACT})
 def get_task_llm(task: TaskKind, **overrides) -> BaseChatModel:
     """按任务类型获取 LLM：默认温度见 TASK_TEMPERATURES，可用关键字覆盖。"""
     params: dict = {"temperature": TASK_TEMPERATURES[task]}
-    if task in TASK_REASONING_OFF:
+    # 关闭思考的两种情况：任务本身必须关闭（EXTRACT），或全局开关打开；
+    # overrides 最后合并，故调用方仍可显式传 reasoning_effort 覆盖。
+    if task in TASK_REASONING_OFF or config.LLM_DISABLE_REASONING:
         params["reasoning_effort"] = "none"
     params.update(overrides)
     return get_llm(**params)
 
 
 def get_llm(
-    model: str | VoyageModel = VoyageModel.DEEPSEEK_V4_1_FLASH,
+    model: str | VoyageModel | None = None,
     temperature: float = 1.0,
     api_key: str | None = None,
     base_url: str | None = None,
@@ -83,20 +128,30 @@ def get_llm(
     """统一的 LLM 实例获取工厂函数。
 
     Args:
-        model: 模型 ID，默认取全平台统一模型
+        model: 模型 ID；不传时取当前通道（config.LLM_CHANNEL）的默认模型
         temperature: 采样温度
-        api_key / base_url: 显式覆盖通道配置（默认走 OpenCode Go）
+        api_key / base_url: 显式覆盖通道配置（默认按 LLM_CHANNEL 解析）
         model_provider: 仅支持 OpenAI 兼容协议（本通道的 /chat/completions）
         reasoning_effort: 传 "none" 关闭思考模式（强制工具调用场景需要）
     """
-    model_name = str(model)
+    channel_base_url, channel_api_key, channel_model = _resolve_channel()
 
-    resolved_base_url = base_url or config.OPENCODE_GO_URL
-    resolved_api_key = api_key or config.OPENCODE_API_KEY
+    model_name = str(model) if model is not None else channel_model
+    resolved_base_url = base_url or channel_base_url
+    resolved_api_key = api_key or channel_api_key
 
-    # 关闭思考模式：上游为 DeepSeek 系模型，认这条 OpenAI 兼容参数；
-    # 用 extra_body 下发以确保透传（enable_thinking 在本通道无效，实测 400）。
-    extra_body = {"reasoning_effort": "none"} if reasoning_effort == "none" else None
+    # 关闭思考模式的参数因网关而异：
+    # - 智谱：用 thinking={"type":"disabled"}；其 glm-4.x/5-turbo 接受该参数，
+    #   而 glm-5.x 系属「始终思考」，传了会 400，故换模型而非换参数。
+    #   同时不能再下发 reasoning_effort，否则智谱会以参数冲突报错。
+    # - 其它（DeepSeek/SenseAudio/OpenCode）：用 OpenAI 兼容的 reasoning_effort。
+    extra_body = None
+    if reasoning_effort == "none":
+        if config.LLM_CHANNEL.strip().lower() == "zhipu":
+            extra_body = {"thinking": {"type": "disabled"}}
+            reasoning_effort = None
+        else:
+            extra_body = {"reasoning_effort": "none"}
 
     return init_chat_model(
         model=model_name,

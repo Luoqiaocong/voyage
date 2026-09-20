@@ -78,7 +78,10 @@ class OpenCodeAuth(httpx.Auth):
     def auth_flow(
         self, request: httpx.Request
     ) -> Generator[httpx.Request, httpx.Response, None]:
-        request.headers["x-opencode-session"] = get_session_id()
+        # x-opencode-session 是 OpenCode Go 网关的强制头；切换到其它 OpenAI
+        # 兼容通道（如 DeepSeek 官方）时不必携带，避免把平台标识外泄给第三方。
+        if config.LLM_CHANNEL.strip().lower() == "opencode":
+            request.headers["x-opencode-session"] = get_session_id()
         # 自报客户端身份，避免被网关按通用 SDK 流量限流
         request.headers["User-Agent"] = config.CLIENT_USER_AGENT
         yield request

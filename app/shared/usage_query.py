@@ -183,10 +183,26 @@ def estimate_cost_usd(
 ) -> dict[str, Any]:
     """按模型单价估算费用（美元），单价单位为「每百万 token」。
 
+    单价可能以不同币种报价：MODEL_PRICING 为美元，MODEL_PRICING_CNY 为人民币，
+    人民币单价按 CNY_PER_USD 折算成美元后合并，避免两种币种直接相加。
     未配置单价的模型按 0 计并单独列出——避免看板显示一个"看起来完整"
     但实为漏算的金额。
     """
-    table = pricing if pricing is not None else config.MODEL_PRICING
+    if pricing is not None:
+        table = pricing
+    else:
+        table = dict(config.MODEL_PRICING)
+        # 汇率填 0 时按 1 处理，避免除零把整个看板算成 inf。
+        rate = config.CNY_PER_USD or 1.0
+        for model, price in config.MODEL_PRICING_CNY.items():
+            # 同名的美元报价优先（setdefault），人民币表只做补充。
+            table.setdefault(
+                model,
+                {
+                    "input": float(price.get("input", 0)) / rate,
+                    "output": float(price.get("output", 0)) / rate,
+                },
+            )
     total = 0.0
     unpriced: list[str] = []
     for item in breakdown:

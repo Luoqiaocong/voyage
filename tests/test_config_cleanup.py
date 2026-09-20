@@ -64,7 +64,7 @@ check("DEEPSEEK_API_KEY 声明了默认值（非必填）",
 check("DEEPSEEK_BASE_URL 声明了默认值",
       fields["DEEPSEEK_BASE_URL"].is_required() is False)
 check("DeepSeek 模型名有默认值",
-      fields["DEEPSEEK_LLM_MODEL_FLASH"].default == "deepseek-v4-flash",
+      fields["DEEPSEEK_LLM_MODEL_FLASH"].default == "deepseek-flash",
       repr(fields["DEEPSEEK_LLM_MODEL_FLASH"].default))
 # 真正使用的通道仍应是必填 —— 缺失就该启动失败，避免线上静默不可用
 check("OPENCODE_API_KEY 仍是必填（缺失应启动失败）",
