@@ -23,6 +23,7 @@ from .schemas import (
     LoginUserRequest,
     RegisterUserRequest,
     UserChangePasswordRequest,
+    UserDeleteAccountRequest,
     UserInfo,
     UserProfileUpdate,
     UserRefreshTokenRequest,
@@ -115,6 +116,12 @@ class UserRouter:
     @router.delete("/", summary="用户注销", status_code=status.HTTP_204_NO_CONTENT)
     async def delete_user(
         self,
+        req: UserDeleteAccountRequest,
         current_user: Annotated[User, Depends(get_current_user)],
     ):
-        await self.service.to_delete_user(current_user.id)
+        """注销账号（不可逆），需邮箱验证码二次确认。
+
+        验证码由 `/auth/code` 发到当前登录用户的邮箱 —— 前端不必填邮箱，
+        邮箱从鉴权态取，避免传入任意邮箱造成越权发码。
+        """
+        await self.service.to_delete_user(current_user, req.code)

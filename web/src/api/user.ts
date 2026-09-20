@@ -62,8 +62,15 @@ export async function logout(refresh_token: string): Promise<void> {
   await http.post('/users/logout', { refresh_token })
 }
 
-export async function deleteAccount(): Promise<void> {
-  await http.delete('/users/')
+/**
+ * 注销账号（不可逆），需邮箱验证码二次确认。
+ *
+ * 验证码由 sendCode(email) 发到当前账号绑定的邮箱；
+ * 这里**只传 code**，不传邮箱 —— 邮箱由后端从鉴权态取，
+ * 前端传邮箱会变成「给任意邮箱发码」的越权口子。
+ */
+export async function deleteAccount(code: string): Promise<void> {
+  await http.delete('/users/', { data: { code } })
 }
 
 export async function getAvatars(): Promise<AvatarLibrary> {

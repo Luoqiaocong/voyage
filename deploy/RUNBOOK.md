@@ -108,12 +108,16 @@ POSTGRES_PASSWORD=<用 openssl rand -hex 16 生成>
 ALLOWED_ORIGINS=["https://<你的域名>"]
 
 # ---- 模型与邮件密钥（沿用你现有的值）----
-DEEPSEEK_API_KEY=...
+# 当前只有 OpenCode Go 一个 LLM 通道在用，配这三项即可
 OPENCODE_GO_URL=...
 OPENCODE_API_KEY=...
-DASHSCOPE_API_KEY=...
 RESEND_API_KEY=...
 ```
+
+> **`DEEPSEEK_API_KEY` / `DASHSCOPE_API_KEY` 不用填**（此处原列了它们，已删）：
+> `DASHSCOPE_API_KEY` 已从代码中移除（全项目零引用）；
+> `DEEPSEEK_API_KEY` 保留在配置里但**当前未启用** —— `get_llm()` 无条件走
+> OpenCode 通道，没有降级分支。按旧版文档填了它们，会误以为配好了备用通道。
 
 > **`DATABASE_URL` / `REDIS_URL` 不用填**：compose 已覆盖为容器内的
 > postgres 与 redis 服务地址（见 docker-compose.yml 的 environment 段）。

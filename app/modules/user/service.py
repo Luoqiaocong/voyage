@@ -259,13 +259,19 @@ class UserService(TransactionMixin):
         await revoke_refresh_token(token)
         
         
-    async def to_delete_user(self, user_id: int) -> None:
-        """用户注销（硬删除）。
+    async def to_delete_user(self, user: User, code: str) -> None:
+        """用户注销（硬删除），需邮箱验证码二次确认。
+
+        校验放在删除之前：码不对就直接返回，不做任何破坏性操作。
+        用一次性消费语义（consume_code）—— 同一个码即便被重放，第二次必然失败。
 
         顺序：先清该用户会话的 langgraph checkpoint（外部存储），
         再在同一事务内删除会话行与用户行（显式删除，不依赖 ORM 级联，保证原子）。
         """
-        user = await self._get_user(user_id=user_id)
+        # 一律用**当前登录用户**的邮箱验码，不接受前端传入的邮箱：
+        # 否则就成了「给任意邮箱发码 + 拿该邮箱的码注销自己」的越权口子。
+        if not await consume_code(user.email, code):
+            raise UserException(code=BusinessCode.CODE_VERIFY_FAILED)
 
         # 1. 先清 checkpoint（外部存储无法参与事务；失败残留由孤儿清理函数兜底）
         await self.conv_service.delete_checkpoints_for_user(user.id)

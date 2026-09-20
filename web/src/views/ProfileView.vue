@@ -12,14 +12,14 @@
  * 三个请求并行且各自 catch——某一个失败只影响对应数字，不让整块消失。
  * 个人主页上出现写死的假数字最伤信任，所以宁可显示 0 也不编。
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppNavbar from '@/components/AppNavbar.vue'
 import BackToTop from '@/components/BackToTop.vue'
 import MemoryPanel from '@/components/MemoryPanel.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
 import { AVATAR_BASE_URL } from '@/constants'
-import { changePassword, deleteAccount, getAvatars, updateProfile } from '@/api/user'
+import { changePassword, deleteAccount, getAvatars, sendCode, updateProfile } from '@/api/user'
 import { listItineraries } from '@/api/itinerary'
 import { listConversations } from '@/api/conversation'
 import { listMemories } from '@/api/memory'
@@ -41,6 +41,22 @@ const dirty = ref(false)
 /** 头像选择弹窗 */
 const pickerOpen = ref(false)
 const loadingAvatars = ref(true)
+
+/* ---------------- 注销账号弹窗 ---------------- */
+/** 是否展示注销弹窗 */
+const delOpen = ref(false)
+/** 用户填写的邮箱验证码 */
+const delCode = ref('')
+/** 注销请求进行中（禁用按钮、禁止关闭弹窗） */
+const deleting = ref(false)
+/** 验证码发送中 */
+const delSending = ref(false)
+/** 弹窗内的错误提示（验证码错误等） */
+const delError = ref('')
+/** 重发倒计时（秒） */
+const delCountdown = ref(0)
+/** 倒计时定时器句柄；离开页面时必须清掉，否则会在已卸载的组件上改状态 */
+let delTimer: number | null = null
 
 const pwdForm = reactive({ current: '', next: '', confirm: '' })
 const savingPwd = ref(false)
@@ -233,17 +249,92 @@ async function handleLogout() {
 }
 
 async function handleDeleteAccount() {
-  const sure = await ui.confirm('确定永久注销账号吗？所有会话和行程将被删除，且无法恢复！')
-  if (!sure) return
+  // 打开专用弹窗（而不是一句文本确认）：注销需要邮箱验证码二次确认，
+  // 确认文案本身说不清「去哪拿码、填在哪」，必须给出可操作的界面。
+  delCode.value = ''
+  delError.value = ''
+  delOpen.value = true
+}
+
+/* ---------------- 注销：邮箱验证码 ---------------- */
+
+/**
+ * 发送验证码到**当前账号绑定的邮箱**。
+ *
+ * 界面刻意只放一个验证码输入框、不要求填邮箱：
+ * 邮箱是已知的（就是登录的这个账号），让用户再输一遍既多余，
+ * 又容易输成别的邮箱 —— 那样验证码会发到不该去的地方。
+ * 这里只是为了在提示里告诉用户「发去哪了」，才读一下 email。
+ */
+async function handleSendDeleteCode() {
+  const email = user.userInfo?.email
+  if (!email) {
+    delError.value = '无法获取账号邮箱，请刷新页面后重试'
+    return
+  }
+  delSending.value = true
+  delError.value = ''
   try {
-    await deleteAccount()
+    await sendCode(email)
+    startDeleteCountdown()
+    ui.toast(`验证码已发送至 ${email}`, 'success')
+  } catch (e: any) {
+    delError.value = e?.message ?? '验证码发送失败，请稍后重试'
+  } finally {
+    delSending.value = false
+  }
+}
+
+function startDeleteCountdown() {
+  delCountdown.value = 60
+  stopDeleteTimer()
+  delTimer = window.setInterval(() => {
+    delCountdown.value -= 1
+    if (delCountdown.value <= 0) stopDeleteTimer()
+  }, 1000)
+}
+
+function stopDeleteTimer() {
+  if (delTimer !== null) {
+    window.clearInterval(delTimer)
+    delTimer = null
+  }
+}
+
+const delSendText = computed(() =>
+  delCountdown.value > 0 ? `${delCountdown.value} 秒后重发` : '发送验证码'
+)
+
+const canConfirmDelete = computed(
+  () => delCode.value.trim().length === 6 && !deleting.value
+)
+
+function closeDeleteModal() {
+  if (deleting.value) return
+  delOpen.value = false
+  stopDeleteTimer()
+}
+
+async function confirmDeleteAccount() {
+  if (!canConfirmDelete.value) return
+  deleting.value = true
+  delError.value = ''
+  try {
+    await deleteAccount(delCode.value.trim())
+    stopDeleteTimer()
+    delOpen.value = false
     user.clearAuth()
     ui.toast('账号已注销', 'success')
     router.replace('/')
   } catch (e: any) {
-    ui.toast(e?.message ?? '注销失败', 'error')
+    // 验证码错误等业务失败：留在弹窗里让用户重填，而不是关掉重来
+    delError.value = e?.message ?? '注销失败，请稍后重试'
+  } finally {
+    deleting.value = false
   }
 }
+
+onUnmounted(stopDeleteTimer)
 </script>
 
 <template>
@@ -500,6 +591,73 @@ async function handleDeleteAccount() {
 
     <!-- 返回顶部：资料页含表单、偏好、记忆面板等多个区块，长度可观 -->
     <BackToTop />
+
+    <!-- ==================== 注销账号弹窗 ====================
+         注销不可逆，必须有一道「证明你是本人」的关口。
+         用邮箱验证码而不是再输一次密码：在一张弹窗里收集密码观感更像钓鱼表单，
+         且与「修改密码」的语义混淆。验证码发到账号绑定邮箱，前端无需填邮箱。 -->
+    <Teleport to="body">
+      <div v-if="delOpen" class="del-mask" @click.self="closeDeleteModal">
+        <div class="del-box" role="dialog" aria-modal="true" aria-labelledby="del-title">
+          <header class="del-head">
+            <h3 id="del-title" class="del-title">注销账号</h3>
+            <button
+              class="del-close"
+              type="button"
+              aria-label="关闭"
+              :disabled="deleting"
+              @click="closeDeleteModal"
+            >
+              ×
+            </button>
+          </header>
+
+          <p class="del-warn">
+            注销将<strong>永久删除</strong>全部会话、行程与偏好记忆，无法恢复。
+          </p>
+          <p class="del-hint">
+            请输入发送到
+            <strong>{{ user.userInfo?.email ?? '你的邮箱' }}</strong>
+            的 6 位验证码以确认操作。
+          </p>
+
+          <div class="del-field">
+            <input
+              v-model="delCode"
+              class="input del-input"
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              maxlength="6"
+              placeholder="6 位验证码"
+              :disabled="deleting"
+              @keyup.enter="confirmDeleteAccount"
+            />
+            <button
+              class="btn btn-ghost del-send"
+              type="button"
+              :disabled="delCountdown > 0 || delSending || deleting"
+              @click="handleSendDeleteCode"
+            >
+              {{ delSending ? '发送中…' : delSendText }}
+            </button>
+          </div>
+
+          <p v-if="delError" class="del-error" role="alert">{{ delError }}</p>
+
+          <footer class="del-foot">
+            <button
+              class="btn btn-danger btn--block"
+              type="button"
+              :disabled="!canConfirmDelete"
+              @click="confirmDeleteAccount"
+            >
+              {{ deleting ? '注销中…' : '确认注销' }}
+            </button>
+          </footer>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- ==================== 头像选择弹窗 ==================== -->
     <div v-if="pickerOpen" class="picker" @click.self="pickerOpen = false">
@@ -974,5 +1132,101 @@ a.hero-stat:hover {
   /* 窄屏把说明与按钮改为上下排列，避免按钮被文字挤到换行 */
   .session-item { flex-direction: column; align-items: stretch; gap: 14px; }
   .session-item .btn { width: 100%; justify-content: center; }
+  /* 注销弹窗：输入框与「发送验证码」在窄屏改为上下排列 */
+  .del-field { flex-direction: column; align-items: stretch; }
+  .del-send { width: 100%; justify-content: center; }
 }
+
+/* ==================== 注销账号弹窗 ====================
+   视觉与 .picker（头像选择）保持一致：同一套遮罩、圆角与进场动画。
+   危险操作的红色只用在标题与底部按钮上，避免整张卡片通红。 */
+.del-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 90;                 /* 高于 picker(80)，两个弹窗不会同时开，但顺序上更安全 */
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(2px);
+}
+.del-box {
+  width: min(440px, 100%);
+  background: var(--panel);
+  border-radius: var(--r-l);
+  padding: 22px 24px 20px;
+  box-shadow: var(--shadow-lift);
+  animation: pickerIn 0.26s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .del-box { animation: none; }
+}
+
+.del-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.del-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--danger, #d64545);
+}
+.del-close {
+  border: none;
+  background: transparent;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  cursor: pointer;
+  padding: 0 4px;
+}
+.del-close:hover:not(:disabled) { color: var(--ink); }
+.del-close:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.del-warn {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: var(--r-s, 10px);
+  background: rgba(214, 69, 69, 0.08);
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+.del-warn strong { color: var(--danger, #d64545); }
+
+.del-hint {
+  margin-top: 12px;
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+.del-hint strong { color: var(--ink); }
+
+/* 输入框 + 发送按钮同一行：发送按钮贴在输入框右侧 */
+.del-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+.del-input {
+  flex: 1;
+  min-width: 0;
+  letter-spacing: 0.28em;      /* 验证码逐位分开，更好读也更好数 */
+  font-variant-numeric: tabular-nums;
+}
+.del-send {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.del-error {
+  margin-top: 10px;
+  font-size: 0.85rem;
+  color: var(--danger, #d64545);
+}
+
+/* 底部红色注销按钮：拉满整行，是弹窗里唯一的实心危险按钮 */
+.del-foot { margin-top: 18px; }
 </style>

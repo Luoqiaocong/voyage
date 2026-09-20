@@ -107,6 +107,31 @@ class UserResetPasswordRequest(BaseModel):
     token: Annotated[str, Field(description="重置密码 临时Token")]
 
 
+class UserDeleteAccountRequest(BaseModel):
+    """注销账号：用邮箱验证码二次确认。
+
+    为什么用验证码而不是密码：
+      · 注销不可逆，必须有一道「证明你是本人」的关口；
+      · 但让用户在这里再输一次密码，等于在一张弹窗里收集密码 ——
+        视觉上更像钓鱼表单，且与「修改密码」的语义混淆；
+      · 验证码发到账号绑定的邮箱（由后端从当前登录用户取，前端不必填），
+        既证明了对邮箱的控制权，又不必在注销路径上传输密码。
+
+    只收 code 一个字段：邮箱从鉴权态推导，避免前端传任意邮箱导致
+    「给别人的邮箱发码」这类越权可能。
+    """
+
+    code: Annotated[str, Field(description="邮箱验证码（6 位）", min_length=6, max_length=6)]
+
+    @field_validator("code", mode="before")
+    def strip_code(cls, value: str) -> str:
+        return value.strip() if isinstance(value, str) else value
+
+    model_config = {
+        "json_schema_extra": {"examples": [{"code": "123456"}]}
+    }
+
+
 
 class UserInfo(UserIdentity, UserProfileBase):
     # 只读回显：前端据此决定是否展示管理端入口。

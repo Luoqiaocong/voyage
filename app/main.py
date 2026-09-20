@@ -94,7 +94,14 @@ app.add_middleware(
     # 默认允许所有来源（开发便利）；配置了 ALLOWED_ORIGINS 就按白名单收窄。
     # 同源部署（nginx 把 /api 反代到后端）时浏览器不会发跨域请求，无需配置此项。
     allow_origins=config.ALLOWED_ORIGINS or ["*"],
-    allow_credentials=True,
+    # 刻意**不设** allow_credentials。
+    #
+    # 原因：本系统用 Authorization: Bearer 头传令牌，前端既没开
+    # withCredentials、后端也不依赖 Cookie —— 没有任何需要「携带凭据」的场景。
+    # 而 allow_credentials=True 与 allow_origins=["*"] 是浏览器规范**禁止的组合**：
+    # 一旦将来真发了带凭据的跨域请求，浏览器会直接拒绝响应，
+    # 且报错在控制台里表现为难以定位的 CORS 失败。
+    # 保持默认 False：安全上更严，也消除了这颗雷。
     allow_methods=["*"],
     allow_headers=["*"],
 )
