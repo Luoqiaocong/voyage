@@ -5,6 +5,7 @@
 """
 import importlib
 import sys
+from pathlib import Path
 
 sys.path.insert(0, ".")
 
@@ -80,6 +81,31 @@ now = current.MCPCONFIG["TRAVEL_TOOLS_CONFIG"]["duckduckgo-mcp-server"]
 print(f"  sys.platform={sys.platform!r}  ->  command={now['command']!r} args={now['args']}")
 expected = "cmd" if sys.platform == "win32" else "uvx"
 check("当前平台命令正确", now["command"] == expected, now["command"])
+
+print("\n=== 6. 超时配置（冷启动 vs 运行期）===")
+# 为什么必须锁住这组值：
+# 冷启动要额外承担 uvx 下载包 + 与 checkpointer/Redis 初始化争 CPU，
+# 实测首次 11.47s、缓存预热后 4.08s。若把冷启动超时调回 10s，
+# **全新部署第一次启动必然判超时**，travel 子 Agent 静默降级为 0 个工具 ——
+# 用户侧只看到「搜索/酒店/美食没数据」，没有任何报错，极难排查。
+cold = current.COLD_START_TIMEOUT_SECONDS
+warm = current.TOOL_FETCH_TIMEOUT_SECONDS
+check("冷启动超时存在", isinstance(cold, (int, float)), str(cold))
+check("运行期超时存在", isinstance(warm, (int, float)), str(warm))
+check("冷启动超时显著大于运行期超时（两级策略生效）",
+      cold >= warm * 2, f"cold={cold} warm={warm}")
+check("冷启动超时足以覆盖实测首次耗时 11.47s",
+      cold >= 30, f"cold={cold}s（实测首次 11.47s）")
+check("运行期超时仍收得够短（不被慢端点拖住）",
+      warm <= 20, f"warm={warm}s")
+check("有 warmed 集合用于区分冷启动/运行期",
+      hasattr(current, "_warmed_namespaces"))
+
+src = Path("app/core/ai/mcp.py").read_text(encoding="utf-8")
+check("超时按 cold 变量选择（而非写死一个值）",
+      "COLD_START_TIMEOUT_SECONDS if cold else TOOL_FETCH_TIMEOUT_SECONDS" in src)
+check("失败日志带上冷启动/运行期与超时值（便于排查）",
+      "冷启动" in src and "超时" in src)
 
 print(f"\n{'=' * 56}\nMCP 平台兼容验证: {ok_n} 通过 / {fail_n} 失败\n{'=' * 56}")
 sys.exit(1 if fail_n else 0)

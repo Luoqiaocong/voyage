@@ -85,7 +85,20 @@ NAMESPACE_MEMO = {
 # 缓存已初始化的 Client 实例，避免重复建连和资源泄漏
 _clients_cache: dict[str, MultiServerMCPClient] = {}
 
+#: 已经取过工具的 namespace，用来区分「冷启动」与「运行期」。
+#: 两者的合理超时差一个数量级（见下），故必须分开。
+_warmed_namespaces: set[str] = set()
 
+#: 冷启动超时。首次拉取要额外承担两件事：
+#:   1. 通过 uvx 下载 duckduckgo-mcp-server（首次运行没有本地缓存）
+#:   2. 与 PostgreSQL checkpointer、Redis 的初始化争 CPU
+#: 实测：首次 11.47s、缓存预热后 4.08s。旧值 10s 恰好卡在中间，
+#: 导致**全新部署第一次启动必然判超时**，travel 子 Agent 静默降级为 0 个工具
+#: —— 用户侧表现是「搜索 / 酒店 / 美食推荐没有数据」，且不会看到任何报错。
+COLD_START_TIMEOUT_SECONDS = 45.0
+
+#: 运行期超时。此时连接已建立、包已缓存，仍保留较短的超时，
+#: 避免某个 MCP 端点变慢时把用户请求一起拖住。
 TOOL_FETCH_TIMEOUT_SECONDS = 10.0
 
 
@@ -94,6 +107,10 @@ async def get_namespace_tools(namespace: str) -> list[BaseTool]:
     根据命名空间获取对应的 MCP 工具列表（带超时与降级）。
     自动缓存 MultiServerMCPClient 实例以复用连接；拉取失败返回空列表，
     由子 Agent 提示词的兜底话术接管应答，不让单个 MCP 端点卡死整个请求。
+
+    超时分两档：该 namespace **第一次取用时给冷启动超时**，成功之后回到
+    运行期超时。冷启动慢是正常的（下载 + 初始化争抢），不该因此判失败；
+    但也不能一直用长超时，否则运行期某个端点卡住会把请求拖很久。
     """
     # 1. 查映射表
     config_key = NAMESPACE_MEMO.get(namespace)
@@ -107,18 +124,30 @@ async def get_namespace_tools(namespace: str) -> list[BaseTool]:
         return []
 
     # 3. 复用或创建 Client 实例，整体限时拉取工具
+    cold = namespace not in _warmed_namespaces
+    timeout = COLD_START_TIMEOUT_SECONDS if cold else TOOL_FETCH_TIMEOUT_SECONDS
     try:
         if namespace not in _clients_cache:
             _clients_cache[namespace] = MultiServerMCPClient(tools_config)
 
         tools = await asyncio.wait_for(
             _clients_cache[namespace].get_tools(),
-            timeout=TOOL_FETCH_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
-        log.info(f"[mcp] namespace '{namespace}' 工具就绪：{len(tools)} 个")
+        _warmed_namespaces.add(namespace)
+        log.info(
+            f"[mcp] namespace '{namespace}' 工具就绪：{len(tools)} 个"
+            + ("（冷启动）" if cold else "")
+        )
         return tools
     except Exception as exc:  # noqa: BLE001 - 统一降级入口，避免单个 MCP 端点拖垮请求
         # 降级：丢弃失败缓存，返回空工具列表（子 Agent 兜底话术接管）
         _clients_cache.pop(namespace, None)
-        log.error(f"[mcp] namespace '{namespace}' 不可用：{exc}")
+        # 超时后也标记为已预热：此时 uvx 多半已把包装好，
+        # 下一次用短超时重试即可；否则会永远享受 45s 长超时，失去运行期保护。
+        _warmed_namespaces.add(namespace)
+        log.error(
+            f"[mcp] namespace '{namespace}' 不可用"
+            f"（{'冷启动' if cold else '运行期'}，超时 {timeout:.0f}s）：{exc}"
+        )
         return []
