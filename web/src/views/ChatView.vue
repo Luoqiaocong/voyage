@@ -1049,49 +1049,6 @@ watch(streaming, (v) => {
         :class="{ 'chat-side--open': sideOpen, 'chat-side--folded': sideFolded }"
         aria-label="会话列表"
       >
-        <!--
-          折叠图标列（仅在侧栏折叠时可见，见 .chat-side--folded）。
-          收起后留一条窄竖列，把顶部那三个动作原样保留下来 ——
-          收起侧栏不该等于失去功能。
-
-          三个动作与展开态顶部操作栏一一对应，顺序也一致：
-            展开会话列表 ←→ .side-act（折叠按钮，同一个 panel 图标）
-            搜索会话     ←→ .side-act（搜索按钮，focusSearch 展开并聚焦）
-            创建新会话   ←→ .side-act--new
-        -->
-        <div class="side-rail">
-          <button
-            class="rail-btn"
-            type="button"
-            aria-label="展开会话列表"
-            aria-expanded="false"
-            title="展开会话列表"
-            @click="toggleFold"
-          >
-            <!-- 与展开态顶部同一个面板图标，保证是同一个动作的同一种表示 -->
-            <TravelIcon name="panel" :size="17" />
-          </button>
-          <button
-            class="rail-btn"
-            type="button"
-            :disabled="!conversations.length"
-            aria-label="搜索会话"
-            title="搜索会话"
-            @click="focusSearch"
-          >
-            <TravelIcon name="search" :size="17" />
-          </button>
-          <button
-            class="rail-btn"
-            type="button"
-            :disabled="streaming"
-            aria-label="创建新会话"
-            title="创建新会话"
-            @click="newConversation"
-          >
-            <TravelIcon name="plus" :size="17" />
-          </button>
-        </div>
 
         <div class="chat-side__head">
           <!--
@@ -1268,6 +1225,55 @@ watch(streaming, (v) => {
           </li>
         </ul>
       </aside>
+
+      <!--
+        折叠图标列（仅侧栏折叠时可见，见 .chat-main--folded）。
+
+        ⚠️ 它是 .chat-main 的**直接子元素**，不是 .chat-side 的子元素。
+        这一点是必需的：折叠时侧栏那一列宽度为 0，而侧栏自身又有
+        overflow: hidden —— 图标列若放在侧栏内部，会被夹在零宽区域里
+        裁掉／压在零宽盒子里，表现就是「三个按钮都看不见、也点不到」
+        （实测：几何上按钮尺寸正常，但 elementFromPoint 命中的是主区）。
+
+        放在这里则落在网格第 1 列（侧栏那一列），由容器 align-self: start
+        定位；非折叠时侧栏占满该列 → 它被侧栏盖住；折叠时侧栏宽 0 →
+        它显示出来。不需要额外的显示/隐藏规则。
+
+        三个动作与展开态顶部操作栏一一对应，顺序也一致。
+      -->
+      <div class="side-rail">
+        <button
+          class="rail-btn"
+          type="button"
+          aria-label="展开会话列表"
+          aria-expanded="false"
+          title="展开会话列表"
+          @click="toggleFold"
+        >
+          <!-- 与展开态顶部同一个面板图标，保证是同一个动作的同一种表示 -->
+          <TravelIcon name="panel" :size="17" />
+        </button>
+        <button
+          class="rail-btn"
+          type="button"
+          :disabled="!conversations.length"
+          aria-label="搜索会话"
+          title="搜索会话"
+          @click="focusSearch"
+        >
+          <TravelIcon name="search" :size="17" />
+        </button>
+        <button
+          class="rail-btn"
+          type="button"
+          :disabled="streaming"
+          aria-label="创建新会话"
+          title="创建新会话"
+          @click="newConversation"
+        >
+          <TravelIcon name="plus" :size="17" />
+        </button>
+      </div>
 
       <!--
         极细分割线。只占 1px 的独立网格列，折叠时该列归零自动消失。
@@ -1732,21 +1738,25 @@ watch(streaming, (v) => {
 /* ============================================================
    折叠图标列
    ------------------------------------------------------------
-   收起侧栏后留一条窄竖列，把顶部操作栏那三个动作原样保留 ——
-   收起不该等于失去功能，也不该让用户失去找回它的入口。
-   与容器左边缘对齐、从工具栏那一行开始往下排。
+   它是 .chat-main 的直接子元素，占据网格第 1 列（侧栏那一列）。
+   靠**层叠顺序**自动显隐，不需要 display 切换：
+     · 展开态：.chat-side 占满该列，且是后绘制顺序更早但宽度完整
+       —— 图标列被它盖住（同时我们用 .chat-main--folded 精确控制）
+     · 折叠态：该列宽度为 0，侧栏不可见，图标列显示出来
+   用 position: absolute + align-self: start：不参与撑高，
+   只占顶部一小块，右边留给主区。
    ============================================================ */
 .side-rail {
   display: none;   /* 展开态不显示，避免与顶部操作栏重复 */
 }
-.chat-side--folded .side-rail {
+.chat-main--folded .side-rail {
   display: flex;
   flex-direction: column;
   gap: 6px;
   /*
-   * 绝对定位：侧栏宽度此时为 0，只有脱离文档流才能显示出来。
-   * 左边缘留 9px、顶部留 9px，与顶部操作栏的第一行大致齐平
-   * （.chat-side__head 的 padding 是 12px）。
+   * 定位在网格第 1 列内、贴左上角。
+   * 用 absolute 是必要的：容器那条 1px 分割线列会让「侧栏列」的
+   * 实际可用宽度只有 0px，普通流里的元素会被挤成 0 宽。
    */
   position: absolute;
   top: 9px;
@@ -3012,9 +3022,21 @@ watch(streaming, (v) => {
     opacity: 1;
     pointer-events: auto;
   }
-  /* 图标列是宽屏折叠态的专属形态；窄屏由抽屉 + 工具栏按钮承担 */
-  .chat-side--folded .side-rail,
-  .side-rail { display: none; }
+  /*
+   * ⚠️ 这里**不能**再写 `.chat-side--folded .side-rail { display: none }`。
+   *
+   * 我原先写的是：
+   *     .chat-side--folded .side-rail,
+   *     .side-rail { display: none; }
+   * 其中 `.chat-side--folded .side-rail` 与基础规则
+   * `.chat-side--folded .side-rail { display: flex }` **特异性完全相同**
+   * （都是 0,2,0），而它位置更靠后 —— 于是媒体查询一旦命中，
+   * 折叠态就被打成 display:none，**三个按钮全看不见**。
+   * 这也是「折叠后根本看不到按钮」的真正原因。
+   *
+   * 而且这个重置本来就是多余的：`.side-rail` 基类已经是 display:none，
+   * 窄屏不需要折叠这套（侧栏本就是抽屉），根本不会进入折叠态。
+   */
   /* 「给浮出按钮让位」只针对宽屏折叠，窄屏下不适用 */
   .chat-main--folded .chat-toolbar {
     padding-left: 0;
