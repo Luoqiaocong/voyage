@@ -1,8 +1,12 @@
-"""记忆去重修复的验证。
+"""记忆去重与多值合并的验证。
 
 覆盖两个实测到的重复形态：
   1. 一个取值里塞了多项（「北京、上海、广州」），无法与单城条目比对
   2. 措辞差异（「美食」/「美食。」、「北京」/「北京市」）绕过精确匹配
+
+以及多值键的**存储形态**：一行一个键、多项用「、」连接。
+原因是一城一行会让记忆面板出现三张几乎相同的卡片（用户反馈），
+而注入 prompt 时本来就是按键聚合的 —— 聚合才是这些键的真实语义。
 """
 import asyncio
 import selectors
@@ -12,7 +16,13 @@ from sqlalchemy import select
 
 sys.path.insert(0, ".")
 
-from app.modules.memory.schemas import MemoryExtraction, MemoryFact
+from app.modules.memory.schemas import (
+    MemoryExtraction,
+    MemoryFact,
+    merge_values,
+    pack_values,
+    split_values,
+)
 from app.modules.memory.service import MemoryService
 
 ok_n = fail_n = 0
@@ -56,7 +66,25 @@ async def main() -> None:
 
     S = MemoryService
 
-    print("=== 1. _expand_multi：拆分含多项的取值 ===")
+    print("=== 0b. merge_values / split_values：合并与拆分互逆 ===")
+    # 顺序：老项在前、新项追加（面板不会因为一次提炼就整体重排）
+    check("并入新项时老项保持在前",
+          merge_values("北京、上海", "广州") == ["北京", "上海", "广州"],
+          str(merge_values("北京、上海", "广州")))
+    check("归一后重复的项不并入",
+          merge_values("北京、上海", "北京市") == ["北京", "上海"],
+          str(merge_values("北京、上海", "北京市")))
+    check("标点差异也判为同一项",
+          merge_values("美食", "美食。") == ["美食"], str(merge_values("美食", "美食。")))
+    check("空原值只留新项", merge_values(None, "北京") == ["北京"])
+    check("一次并入多项", merge_values("北京", "上海", "广州") == ["北京", "上海", "广州"])
+    check("忽略空白项", merge_values("北京", "  ", "") == ["北京"])
+    check("pack(split(x)) == x（互逆）",
+          pack_values(split_values("北京、上海、广州")) == "北京、上海、广州")
+    check("split 空值返回空列表", split_values("") == [] and split_values(None) == [])
+    check("pack 空列表返回空串", pack_values([]) == "")
+
+    print("\n=== 1. _expand_multi：拆分含多项的取值 ===")
     cases = [
         ("visited_city", "北京、上海、广州", ["北京", "上海", "广州"]),
         ("visited_city", "北京,上海", ["北京", "上海"]),
@@ -103,11 +131,17 @@ async def main() -> None:
             conversation_id="c1",
         )
         print(f"        第一次: {r1}")
-        check("合并写法被拆成 3 城 + 1 同行人", r1["inserted"] == 4, str(r1))
+        # 3 座城市并入同一行（inserted=1），同行人另起一行
+        check("合并写法拆出 3 城但只写 1 行 + 同行人 1 行",
+              r1["inserted"] == 2, str(r1))
 
         rows = await svc.list_memories(uid)
-        cities = sorted(r.fact_value for r in rows if r.fact_key == "visited_city")
-        check("城市拆分为 北京/上海/广州", cities == ["上海", "北京", "广州"], str(cities))
+        city_rows = [r for r in rows if r.fact_key == "visited_city"]
+        check("去过的城市只有一行（不是一城一行）", len(city_rows) == 1,
+              f"{len(city_rows)} 行")
+        cities = split_values(city_rows[0].fact_value) if city_rows else []
+        check("该行内含 北京/上海/广州 三项",
+              sorted(cities) == ["上海", "北京", "广州"], str(cities))
 
         # 第二次：单独写法 + 措辞差异
         r2 = await svc.upsert_facts(
@@ -123,13 +157,48 @@ async def main() -> None:
         )
         print(f"        第二次: {r2}")
         check("北京/北京市/上海。 判为重复", r2["deduped"] >= 3, str(r2))
-        check("成都为新城市", r2["inserted"] >= 1, str(r2))
+        check("成都为新增项（并入同一行）", r2["appended"] >= 1, str(r2))
+        check("没有为成都新开一行", r2["inserted"] == 0, str(r2))
 
         rows = await svc.list_memories(uid)
-        cities = sorted(r.fact_value for r in rows if r.fact_key == "visited_city")
+        city_rows = [r for r in rows if r.fact_key == "visited_city"]
+        check("仍然只有一行", len(city_rows) == 1, f"{len(city_rows)} 行")
+        cities = split_values(city_rows[0].fact_value) if city_rows else []
         print(f"        最终城市: {cities}")
-        check("城市无重复（4 个）", len(cities) == 4, str(cities))
+        check("城市共 4 项（无重复）", len(cities) == 4, str(cities))
         check("北京只出现一次", sum(1 for c in cities if "北京" in c) == 1, str(cities))
+        check("顺序稳定：老项在前、新项追加在后",
+              cities[:3] == ["北京", "上海", "广州"] and cities[3] == "成都",
+              str(cities))
+
+        print("\n=== 3b. remove_value：只删一项而不是整条 ===")
+        from app.core.business import UserException
+
+        try:
+            await svc.remove_value(user_id=uid, memory_id=city_rows[0].id,
+                                   fact_value="桂林")  # 列表里没有这一项
+            check("删不存在的项应报错", False, "没有抛异常")
+        except UserException as e:
+            check("删不存在的项应报错", True, str(getattr(e, "msg", e))[:40])
+
+        after = await svc.remove_value(user_id=uid, memory_id=city_rows[0].id,
+                                       fact_value="成都")
+        check("删一项后仍返回该行（未整条删除）", after is not None)
+        left = split_values(after.fact_value) if after else []
+        check("成都不见了、其余 3 项还在",
+              "成都" not in left and sorted(left) == ["上海", "北京", "广州"], str(left))
+        rows = await svc.list_memories(uid)
+        check("仍然只有一行", len([r for r in rows if r.fact_key == "visited_city"]) == 1)
+
+        # 删到只剩一项，再删应整行删除（留一张空卡片没有意义）
+        for v in ("上海", "广州"):
+            await svc.remove_value(user_id=uid, memory_id=city_rows[0].id, fact_value=v)
+        gone = await svc.remove_value(user_id=uid, memory_id=city_rows[0].id,
+                                      fact_value="北京")
+        check("删最后一项时整行被删除", gone is None)
+        rows = await svc.list_memories(uid)
+        check("该键已无任何行",
+              not [r for r in rows if r.fact_key == "visited_city"])
 
         print("\n=== 4. 标量键仍按覆盖处理（未被拆分逻辑破坏）===")
         await svc.upsert_facts(

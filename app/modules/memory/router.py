@@ -27,6 +27,18 @@ class MemoryItem(BaseModel):
     fact_key: Annotated[str, Field(description="事实键")]
     fact_key_label: Annotated[str, Field(description="事实键的中文标签，便于前端展示")]
     fact_value: Annotated[str, Field(description="当前取值")]
+    values: Annotated[
+        list[str],
+        Field(
+            description=(
+                "拆开后的取值列表。多值键（偏好/饮食/去过的城市/同行人）"
+                "在库里是「一行一个键、多项用「、」连接」，这里拆成数组供前端"
+                "逐项展示与删除；标量键则只有一项。前端不必自己解析分隔符 —— "
+                "拆分的口径必须与后端一致，放在后端才只有一处实现。"
+            )
+        ),
+    ] = []
+    is_multi: Annotated[bool, Field(description="是否多值键（决定前端能否逐项删除）")] = False
     previous_value: Annotated[str | None, Field(description="被覆盖的旧值（偏好变化的痕迹）")] = None
     confidence: Annotated[float, Field(description="置信度 0-1")]
     evidence: Annotated[str | None, Field(description="来源原文片段")] = None
@@ -36,13 +48,17 @@ class MemoryItem(BaseModel):
 
     @classmethod
     def from_model(cls, m) -> "MemoryItem":
+        from app.modules.memory.schemas import MULTI_KEYS, split_values
         from app.shared.utils import to_local_display
 
+        is_multi = m.fact_key in MULTI_KEYS
         return cls(
             id=m.id,
             fact_key=m.fact_key,
             fact_key_label=KEY_LABELS.get(m.fact_key, m.fact_key),
             fact_value=m.fact_value,
+            values=split_values(m.fact_value) if is_multi else [m.fact_value],
+            is_multi=is_multi,
             previous_value=m.previous_value,
             confidence=round(m.confidence or 0.0, 2),
             evidence=m.evidence,
@@ -117,6 +133,33 @@ class MemoryRouter:
         memory = await self.service.set_active(
             user_id=self.current_user.id, memory_id=memory_id, is_active=req.is_active
         )
+        return MemoryItem.from_model(memory)
+
+    @router.delete(
+        "/{memory_id}/values/{fact_value}",
+        status_code=status.HTTP_200_OK,
+        summary="删除多值记忆中的某一项",
+    )
+    async def remove_value(
+        self,
+        memory_id: Annotated[int, Path(ge=1, description="记忆 ID")],
+        fact_value: Annotated[str, Path(min_length=1, max_length=40, description="要删除的那一项")],
+    ):
+        """只删一项而不是整条。
+
+        合并成一行后，整条删除会把所有城市一起删掉；用户想纠正
+        「我没去过桂林」时不该被迫全删重来。删到零项时整行一起删。
+
+        取值放路径而不是请求体：DELETE 带 body 虽然 axios 支持，
+        但语义上带 body 的 DELETE 一直是灰色地带（部分代理会丢弃）。
+        放路径还能天然享受 URL 解码 —— 前端 encodeURIComponent 即可。
+        """
+        memory = await self.service.remove_value(
+            user_id=self.current_user.id, memory_id=memory_id, fact_value=fact_value
+        )
+        # 剩最后一项被删掉时整行已不存在，返回 deleted 让前端知道要移除这张卡
+        if memory is None:
+            return {"deleted": True}
         return MemoryItem.from_model(memory)
 
     @router.delete(

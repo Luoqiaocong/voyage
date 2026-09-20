@@ -494,10 +494,10 @@ async function handleExtract() {
   // 根源是「这段文本能否被 LLM 抽成行程」本质上猜不准。
   // 真正的判定器在后端：extract_itinerary_plan 失败返回 None，
   // service 抛 ITINERARY_GEN_FAILED，**不会编造**。所以交给它判断即可。
+  // 只留用户要判断的两件事：提取范围、失败可能。字数帮他确认「是哪一条」
   const sure = await ui.confirm(
-    '将从本会话「最后一条 AI 回复」提取行程。\n\n' +
-      `后端只取最后一条 AI 回复（不是整个对话），当前这条约 ${target.content.length} 字。\n` +
-      '若它不是行程安排，提取会失败且不会生成任何行程。继续？'
+    `将从最后一条 AI 回复中提取行程（约 ${target.content.length} 字）。\n` +
+      '若它不是一份完整的行程安排，提取会失败。继续？'
   )
   if (!sure) return
 

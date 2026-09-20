@@ -33,6 +33,10 @@ from .schemas import (
     MULTI_KEYS,
     VALUE_ENUMS,
     MemoryExtraction,
+    canonical_value,
+    merge_values,
+    pack_values,
+    split_values,
 )
 
 # 注入 prompt 的最大记忆条数。
@@ -81,16 +85,12 @@ class MemoryService(TransactionMixin):
     def _canonical(value: str) -> str:
         """宽松归一：用于「同一事实的不同写法」判定。
 
-        实测的重复形态是措辞差异（「美食」与「美食 」「美食。」），
-        而库里的唯一约束是精确匹配，挡不住这些。归一只用于**查询比对**，
-        写入时仍保留模型给的原始措辞（更可读）。
-
-        去除：空白、各类中英文标点、以及结尾的「市/省」这类行政区后缀
-        （「北京市」与「北京」应当视为同一座城市）。
+        实现已下沉到 schemas._canonical_value —— merge_values 也需要它，
+        而 service 依赖 schemas（不能反向导入）。**只能有一份实现**：
+        两边口径一旦分叉，就会出现「合并时判为不同、查找时判为相同」
+        这类自相矛盾的行为，且很难查。
         """
-        v = re.sub(r"[\s，,。.、；;：:！!？?（）()【】\[\]\"'“”‘’~·\-—_/]+", "", value)
-        v = re.sub(r"(市|省|自治州|地区)$", "", v)
-        return v.lower()
+        return canonical_value(value)
 
     @classmethod
     def _expand_multi(cls, key: str, value: str) -> list[str]:
@@ -131,7 +131,7 @@ class MemoryService(TransactionMixin):
 
         冲突消解的分支见 repo 模块文档；这里负责编排并保证在同一事务内完成。
         """
-        stats = {"inserted": 0, "deduped": 0, "overwritten": 0, "rejected": 0}
+        stats = {"inserted": 0, "deduped": 0, "overwritten": 0, "rejected": 0, "appended": 0}
 
         async with self.transaction_scope():
             for fact in extraction.facts:
@@ -186,18 +186,44 @@ class MemoryService(TransactionMixin):
             stats["deduped"] += 1
             return
 
-        # 分支二：多值键 → 直接新增，与已有取值并存
+        # 分支二：多值键 → **并入该键已有的那一行**（而不是新增一行）
+        #
+        # 原先这里直接 insert，于是「去过的城市」有三座就三行，
+        # 用户在记忆面板看到三张几乎相同的卡（实测 6 条记忆里 3 条是城市）。
+        # 而注入 prompt 时本来就是按键聚合的 —— 聚合才是这些键的真实语义。
+        # 改为一行一个键之后：展示是一张卡、注入是一行、唯一约束也真正生效。
         if self.repo.is_multi_value_key(key):
-            await self.repo.insert(
-                user_id=user_id,
-                fact_key=key,
-                fact_value=value,
-                confidence=confidence,
-                evidence=(evidence or "")[:500] or None,
-                source_conversation_id=conversation_id,
-                hit_count=1,
-            )
-            stats["inserted"] += 1
+            row = await self._find_by_key(user_id, key)
+            if row is None:
+                await self.repo.insert(
+                    user_id=user_id,
+                    fact_key=key,
+                    fact_value=value,
+                    confidence=confidence,
+                    evidence=(evidence or "")[:500] or None,
+                    source_conversation_id=conversation_id,
+                    hit_count=1,
+                )
+                stats["inserted"] += 1
+                return
+            before = split_values(row.fact_value)
+            merged = merge_values(row.fact_value, value)
+            if len(merged) == len(before):
+                # 归一后已存在（如「北京」与「北京市」）→ 只累加命中次数
+                row.hit_count = (row.hit_count or 1) + 1
+                stats["deduped"] += 1
+                return
+            row.fact_value = pack_values(merged)
+            # 一次提炼里出现的新项也算一次命中；置信度取高者
+            row.hit_count = (row.hit_count or 1) + 1
+            if confidence > (row.confidence or 0):
+                row.confidence = confidence
+            if evidence:
+                row.evidence = evidence[:500]
+            # 用户之前停用过这一项，说明他不认可；但新项是他这次说的，
+            # 重新生效更符合预期（与标量键换值一致）
+            row.is_active = True
+            stats["appended"] += 1
             return
 
         # 分支三：标量键换值 → 覆盖当前值并留痕旧值
@@ -232,10 +258,17 @@ class MemoryService(TransactionMixin):
         而实测的重复多来自措辞差异 ——「美食」与「美食。」、「北京」与「北京市」。
         精确匹配挡不住，会各存一条，于是同一个偏好显示两遍。
 
-        这里只能把该键下的行全取出来在 Python 里比：归一后的比较无法下推到
-        SQL（要剔除标点、后缀，还要统一大小写）。单个用户的记忆条数受
-        MEMORY_MAX_ITEMS 上限约束（几十条量级），全量取出比对比代价可接受。
+        多值键现在是「一行一个键、取值用分隔符挤在一起」，所以比对要逐项做
+        （见 _find_value_in_multi），不能拿整串比。
         """
+        if self.repo.is_multi_value_key(key):
+            row = await self._find_by_key(user_id, key)
+            if row is None:
+                return None
+            target = self._canonical(value)
+            hit = any(self._canonical(v) == target for v in split_values(row.fact_value))
+            return row if hit else None
+
         rows = list(
             (
                 await self.db.execute(
@@ -253,6 +286,10 @@ class MemoryService(TransactionMixin):
             if self._canonical(row.fact_value) == target:
                 return row
         return None
+
+    async def _find_by_key(self, user_id: int, key: str) -> UserMemory | None:
+        """取某键的那一行（多值键与标量键都是「一键一行」）。"""
+        return await self.repo.find_scalar(user_id, key)
 
     async def extract_from_text(
         self, *, user_id: int, text: str, conversation_id: str | None = None
@@ -360,6 +397,33 @@ class MemoryService(TransactionMixin):
         memory = await self._require_own(user_id, memory_id)
         async with self.transaction_scope():
             await self.db.delete(memory)
+
+    async def remove_value(self, *, user_id: int, memory_id: int, fact_value: str):
+        """从多值键里删掉**其中一项**（例如「去过的城市」里去掉一座城）。
+
+        为什么需要它：合并成一行之后，整条删除会把所有城市一起删掉 ——
+        用户想纠正「我没去过桂林」时只能全删再等它重新提炼，太粗暴。
+
+        只剩一项时再删就删整行：留一行空值没有意义，也会让面板显示一个空卡片。
+        """
+        memory = await self._require_own(user_id, memory_id)
+        if not self.repo.is_multi_value_key(memory.fact_key):
+            raise UserException(
+                code=BusinessCode.PARAM_INVALID,
+                msg="该记忆只有一个取值，请直接删除整条",
+            )
+        target = self._canonical(fact_value)
+        kept = [v for v in split_values(memory.fact_value) if self._canonical(v) != target]
+        if len(kept) == len(split_values(memory.fact_value)):
+            raise UserException(code=BusinessCode.NOT_FOUND, msg="该项不存在")
+
+        async with self.transaction_scope():
+            if not kept:
+                await self.db.delete(memory)
+                return None
+            memory.fact_value = pack_values(kept)
+            await self.db.flush()
+        return memory
 
     async def clear_all(self, user_id: int) -> int:
         """清空该用户的全部记忆（隐私诉求：用户有权抹掉画像）。"""

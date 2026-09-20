@@ -25,7 +25,8 @@ export function useLogout() {
    */
   async function doLogout(confirm = true) {
     if (confirm) {
-      const sure = await ui.confirm('确定退出登录吗？下次需要重新输入密码。')
+      // 只问一句：退出登录意味着要重新登录，这是常识，不必在确认框里解释
+      const sure = await ui.confirm('确定退出登录吗？')
       if (!sure) return
     }
 

@@ -96,13 +96,17 @@ const heroStats = computed(() => [
   { value: footprint.memories, label: '偏好记忆', to: '' }
 ])
 
-/** 新建行程：对话是唯一的生成入口，故带着一句起始语过去 */
-function newTrip() {
-  router.push({ path: '/chat', query: { example: '帮我规划一次新的旅行' } })
-}
-
-function continueChat() {
-  router.push('/chat')
+/**
+ * 查看行程：直接去行程列表。
+ *
+ * 原先是「新建行程」并跳到对话页（带一句起始语）。改成查看是因为
+ * 这个按钮在个人主页属于**回看自己的成果**这一类动作 ——
+ * 主页上半部分展示的是足迹、统计与偏好，用户在这里想看的是
+ * 「我攒下了什么」，而不是再开一次新的规划。
+ * 新建行程的入口在导航栏「规划」与行程页，那才是它的归属。
+ */
+function viewTrips() {
+  router.push('/itineraries')
 }
 
 /**
@@ -291,14 +295,17 @@ async function handleDeleteAccount() {
               </ul>
             </div>
 
+            <!--
+              这里原先并列两个按钮：「继续对话」（去 /chat）与「查看行程」。
+              前者与导航栏的「进入规划」目标完全相同，属于重复入口 ——
+              个人主页的职责是回看自己的资料与成果，去规划应该走导航栏。
+              故只留「查看行程」，图标用 map 与导航栏「行程」一致
+              （此前误用了 route，那是「规划」的图标）。
+            -->
             <div class="hero-cta">
-              <button class="btn btn-primary" @click="continueChat">
-                <TravelIcon name="chat" :size="16" />
-                继续对话
-              </button>
-              <button class="btn btn-ghost" @click="newTrip">
-                <TravelIcon name="plane" :size="16" />
-                新建行程
+              <button class="btn btn-primary" @click="viewTrips">
+                <TravelIcon name="map" :size="16" />
+                查看行程
               </button>
             </div>
           </div>

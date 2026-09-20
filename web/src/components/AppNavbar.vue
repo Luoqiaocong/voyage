@@ -21,11 +21,18 @@ const scrolled = ref(false)
  * 未登录时干脆不显示主导航，让首屏的焦点落在右侧的行动按钮上。
  *
  * 已登录时才出现主导航，此时「首页」是**从别的页面回到首页**的入口，
- * 与「助手」「行程」并列有意义。
+ * 与「规划」「行程」并列有意义。
  */
 const links = [
   { label: '首页', to: '/', auth: false, icon: 'compass' },
-  { label: '助手', to: '/chat', auth: true, icon: 'chat' },
+  /*
+   * 「规划」而不是「助手」：这一页用户做的事是**规划行程**（描述需求、
+   * 排日程、查车次），「助手」描述的是工具的身份而不是用户的目的。
+   * 图标同步从 chat（对话气泡）换成 route（路线）—— 气泡强调「聊天」，
+   * 容易让人以为只是个聊天框；路线强调「排出行程」这个结果。
+   * 与「行程」也不撞：规划 = 生成，行程 = 已生成的收藏。
+   */
+  { label: '规划', to: '/chat', auth: true, icon: 'route' },
   { label: '行程', to: '/itineraries', auth: true, icon: 'map' }
 ]
 
@@ -158,7 +165,7 @@ onUnmounted(() => {
         <ThemeToggle />
         <template v-if="user.isLoggedIn">
           <RouterLink to="/chat" class="btn btn-primary btn--sm" @click="close">
-            进入助手
+            进入规划
           </RouterLink>
 
           <!--
@@ -283,7 +290,7 @@ onUnmounted(() => {
         抽屉里的导航项按登录态区分：
         未登录时只列「首页」—— 与桌面端不同，抽屉是个独立面板，
         空着会显得没内容，列一行「首页」比什么都不给更清楚；
-        而「助手」「行程」在未登录时点进去也会被守卫弹回登录页，
+        而「规划」「行程」在未登录时点进去也会被守卫弹回登录页，
         列出来只是徒增困惑，故不显示。
       -->
       <RouterLink
@@ -307,7 +314,7 @@ onUnmounted(() => {
             带文字标签而不是纯图标：抽屉里图标按钮不易辨认。
           -->
           <RouterLink to="/chat" class="btn btn-primary btn--sm nav__mobile-full" @click="close">
-            进入助手
+            进入规划
           </RouterLink>
 
           <div class="nav__mobile-usermenu">
@@ -902,7 +909,7 @@ onUnmounted(() => {
 
 .nav__mobile-actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
 
-/* 「进入助手」占整行：它是移动端的主操作，与账号菜单并列会显得同等重要 */
+/* 「进入规划」占整行：它是移动端的主操作，与账号菜单并列会显得同等重要 */
 .nav__mobile-full { width: 100%; justify-content: center; }
 
 /* 移动端账号菜单：抽屉里不放浮层，改为内联展开 ——

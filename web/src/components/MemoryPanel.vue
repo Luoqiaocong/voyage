@@ -15,6 +15,7 @@ import {
   deleteMemory,
   listMemories,
   MEMORY_VALUE_OPTIONS,
+  removeMemoryValue,
   toggleMemory,
   updateMemoryValue,
   type MemoryItem,
@@ -124,6 +125,26 @@ async function removeOne(m: MemoryItem) {
   }
 }
 
+/**
+ * 只删多值记忆里的一项（如「去过的城市」里去掉一座城）。
+ *
+ * 不弹确认框：这个动作影响范围小（只少一项，不是整条消失），
+ * 且删错了再聊一次就会重新记住。给每项都套一层确认会让面板变得很吵。
+ * 整条删除（removeOne）仍然确认 —— 那个动作会丢失整类信息。
+ */
+async function removeValue(m: MemoryItem, value: string) {
+  busyId.value = m.id
+  try {
+    await removeMemoryValue(m.id, value)
+    ui.toast(`不再记住「${value}」`, 'success')
+    await load()
+  } catch (e: any) {
+    ui.toast(e?.message ?? '删除失败', 'error')
+  } finally {
+    busyId.value = null
+  }
+}
+
 async function removeAll() {
   const ok = await ui.confirm(
     '清空全部记忆后，助手将不再记得你的偏好（不影响已有对话与行程）。确认清空？'
@@ -199,7 +220,30 @@ onMounted(load)
 
             <!-- 展示态 -->
             <template v-else>
-              <span class="mem__value">
+              <!--
+                多值键（偏好 / 饮食 / 去过的城市 / 同行人）逐项渲染成小标签。
+                后端把这些项合并存成一行（一行一个键），所以这里是**一张卡
+                多项**；每项都能单独删除 —— 否则用户想纠正「我没去过桂林」
+                只能把整条（含北京、成都）一起删掉。
+              -->
+              <span v-if="m.is_multi" class="mem__values">
+                <span v-for="v in m.values" :key="v" class="mem__chip">
+                  {{ v }}
+                  <button
+                    class="mem__chip-x"
+                    type="button"
+                    :disabled="busyId === m.id"
+                    :aria-label="`不再记住「${v}」`"
+                    :title="`不再记住「${v}」`"
+                    @click="removeValue(m, v)"
+                  >✕</button>
+                </span>
+                <span v-if="m.previous_value" class="mem__prev" :title="`原为「${m.previous_value}」`">
+                  ← {{ m.previous_value }}
+                </span>
+              </span>
+
+              <span v-else class="mem__value">
                 {{ m.fact_value }}
                 <span v-if="m.previous_value" class="mem__prev" :title="`原为「${m.previous_value}」`">
                   ← {{ m.previous_value }}
@@ -298,6 +342,57 @@ onMounted(load)
   white-space: nowrap;
 }
 .mem__value { font-size: 0.9rem; font-weight: 600; display: inline-flex; align-items: baseline; gap: 8px; }
+
+/*
+ * 多值键的逐项标签。
+ *
+ * 与「行程标签」(.ptag) 不同，这里刻意用中性浅色而不是语义彩：
+ * .ptag 的颜色表达「这是什么偏好」，而记忆面板的每一项只是**用户数据**，
+ * 上色反而会让人以为颜色有含义。这里靠形状（胶囊 + ✕）表达可删除。
+ */
+.mem__values {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.mem__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+/* ✕ 只在悬停/聚焦时显形：常驻会让一排标签看起来像一堆按钮 */
+.mem__chip-x {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text3);
+  font-size: 0.62rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background-color 0.15s, color 0.15s;
+}
+.mem__chip:hover .mem__chip-x,
+.mem__chip-x:focus-visible { opacity: 1; }
+.mem__chip-x:hover:not(:disabled) { background: var(--slate-200); color: var(--gold-600); }
+.mem__chip-x:disabled { cursor: not-allowed; }
+/* 触屏没有 hover：✕ 常驻，否则这一项根本删不掉 */
+@media (hover: none) {
+  .mem__chip-x { opacity: 0.7; }
+}
 .mem__prev {
   font-size: 0.76rem;
   font-weight: 400;

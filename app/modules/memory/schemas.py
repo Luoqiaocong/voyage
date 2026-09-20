@@ -66,6 +66,75 @@ KEY_LABELS: dict[str, str] = {
     "companion": "同行人",
 }
 
+# ==================== 多值键的存储形态 ====================
+#
+# 多值键（preference / dietary / visited_city / companion）在库里**一行一个键**，
+# 多个取值挤在同一行的 fact_value 里，用 VALUE_SEP 连接。
+#
+# 为什么不「一个取值一行」：
+#   1. 注入 prompt 时本来就是按键聚合的（service.build_memory_context 会
+#      「北京、上海、广州」拼成一行），所以聚合才是这些键的真实语义 ——
+#      一个取值一行反而与使用方式自相矛盾。
+#   2. 用户看到的记忆面板是按「一件事一张卡」组织的，「去过的城市」
+#      拆成三行会呈现为三张几乎相同的卡（用户反馈过这个问题）。
+#   3. 唯一约束 (user_id, fact_key, fact_value) 也就真正生效了：同键必然同一行。
+#
+# 代价：手动修正取值时不能只改其中一项，需要整体重写（见 service.remove_value）。
+# 这是可接受的 —— 多值键的编辑动作实际只有「删掉某一项」这一种。
+VALUE_SEP = "、"
+
+
+def merge_values(existing: str | None, *new: str) -> list[str]:
+    """把新取值并入已有取值，按归一去重，返回合并后的有序列表。
+
+    去重与 service._canonical 同口径（剔除标点/空白/行政区后缀），
+    所以「北京」与「北京市」不会并存。
+
+    顺序：**已有在前、新增在后**。让用户看惯的那几项保持原位，
+    新记住的追加在后面，面板不会因为一次提炼就整体重排。
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in [*(split_values(existing) if existing else []), *new]:
+        item = (raw or "").strip()
+        if not item:
+            continue
+        k = _canonical_value(item)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(item)
+    return out
+
+
+def split_values(packed: str | None) -> list[str]:
+    """把一行里挤着的多个取值拆开（与 merge_values 互逆）。"""
+    if not packed:
+        return []
+    return [p.strip() for p in packed.split(VALUE_SEP) if p and p.strip()]
+
+
+def pack_values(values: list[str]) -> str:
+    """把多个取值合并成一行可存的字符串。"""
+    return VALUE_SEP.join(v for v in values if v and v.strip())
+
+
+def _canonical_value(value: str) -> str:
+    """宽松归一：剔除标点空白与行政区后缀，用于判定「同一项」。
+
+    与 service.MemoryService._canonical 保持同一口径。放在这里是因为
+    merge_values 需要它，而 service 依赖 schemas（不能反向导入）。
+    """
+    import re
+
+    v = re.sub(r"[\s，,。.、；;：:！!？?（）()【】\[\]\"'“”‘’~·\-—_/]+", "", value)
+    v = re.sub(r"(市|省|自治州|地区)$", "", v)
+    return v.lower()
+
+
+# service 层用的名字（对外暴露，避免它自己再写一份）
+canonical_value = _canonical_value
+
 # 置信度：用户明确表述 vs 模型推断。阈值用于注入时的排序与过滤。
 CONFIDENCE_EXPLICIT = 0.9   # 用户直接说"我预算有限"
 CONFIDENCE_INFERRED = 0.6   # 从上下文推断（如频繁问便宜青旅 → 穷游）
