@@ -454,8 +454,8 @@ async function handleDelete(conv: Conversation) {
 /**
  * 判断当前会话里是否已有 AI 回复（提取按钮的可用条件）。
  *
- * 提取范围是整个会话，由后端在对话历史中挑选与总结；前端只负责判断
- * 「有没有内容可提取」，不需要也不能指定某条消息。
+ * 提取范围是整个会话：由后端在对话历史中挑出最像行程的一条 AI 回复再提取；
+ * 前端只负责判断「有没有内容可提取」，不需要也不能指定某条消息。
  */
 function lastAiMessage(): RdMsg | null {
   for (let i = messages.value.length - 1; i >= 0; i--) {
@@ -505,7 +505,7 @@ async function handleExtract() {
   // 是否含时段等要素判断，真行程会被误拦、车次表反而会被放行）。
   // 真正的判定器在后端：抽取失败返回 None 并报错，不会编造内容。
   // 前端只需告知提取范围是整个会话，由用户确认。
-  const sure = await ui.confirm('voyage 将总结对话内容提取相应行程，是否继续？')
+  const sure = await ui.confirm('voyage 会从对话中找出行程内容，整理成行程。是否继续？')
   if (!sure) return
 
   ui.toast('AI 正在提取行程，请稍候…', 'info')
@@ -1658,7 +1658,7 @@ watch(streaming, (v) => {
               <button
                 class="tool-btn tool-btn--accent"
                 :disabled="streaming || !canExtract"
-                :title="canExtract ? '总结对话内容，整理成行程' : '先让 AI 给出一份行程安排'"
+                :title="canExtract ? '从对话中找出行程，整理成行程' : '先让 AI 给出一份行程安排'"
                 @click="handleExtract"
               >
                 <TravelIcon name="luggage" :size="15" />
