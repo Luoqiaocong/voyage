@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppNavbar from '@/components/AppNavbar.vue'
+import BackToTop from '@/components/BackToTop.vue'
 import NavButton from '@/components/NavButton.vue'
 import SharePanel from '@/components/SharePanel.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
@@ -508,6 +509,9 @@ function cancelEdit() {
         </template>
       </div>
     </main>
+
+    <!-- 返回顶部：行程详情按天铺开、还有清单与提醒，页面通常很长 -->
+    <BackToTop />
   </div>
 </template>
 
