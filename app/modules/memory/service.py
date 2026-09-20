@@ -404,17 +404,26 @@ class MemoryService(TransactionMixin):
         为什么需要它：合并成一行之后，整条删除会把所有城市一起删掉 ——
         用户想纠正「我没去过桂林」时只能全删再等它重新提炼，太粗暴。
 
-        只剩一项时再删就删整行：留一行空值没有意义，也会让面板显示一个空卡片。
+        **删到最后一个元素时整行一起删**（返回 None，路由转成 {deleted: true}）：
+        留一行空值没有意义，也会让面板显示一个空气泡。
+        这正是「所有元素删光后整条记忆自动消失」这条交互的落点 ——
+        前端不必自己判断「是不是最后一个」，交给这里统一处理。
+
+        标量键（预算档位这类）本就没有「元素」的概念，拒绝并提示删整条。
         """
         memory = await self._require_own(user_id, memory_id)
+        values = split_values(memory.fact_value)
+
+        # 标量键：值本身就是整体，没有可单独删除的一项
         if not self.repo.is_multi_value_key(memory.fact_key):
             raise UserException(
                 code=BusinessCode.PARAM_INVALID,
-                msg="该记忆只有一个取值，请直接删除整条",
+                msg="这条记忆没有可单独删除的元素，请直接删除整条",
             )
+        # 多值键只剩一项时也允许删 —— 它就是「最后一个元素」，删掉整行
         target = self._canonical(fact_value)
-        kept = [v for v in split_values(memory.fact_value) if self._canonical(v) != target]
-        if len(kept) == len(split_values(memory.fact_value)):
+        kept = [v for v in values if self._canonical(v) != target]
+        if len(kept) == len(values):
             raise UserException(code=BusinessCode.NOT_FOUND, msg="该项不存在")
 
         async with self.transaction_scope():

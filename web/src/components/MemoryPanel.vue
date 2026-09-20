@@ -9,7 +9,7 @@
  * 让用户能判断某条记忆是「自己明确说过的」还是「系统猜的」，
  * 从而决定要不要纠正——不透明的画像会让人不安。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   clearMemories,
   deleteMemory,
@@ -38,6 +38,132 @@ const savingValue = ref(false)
 
 const activeItems = computed(() => items.value.filter((m) => m.is_active))
 const inactiveItems = computed(() => items.value.filter((m) => !m.is_active))
+
+/* ==================== 气泡展示 ==================== */
+
+/**
+ * 气泡配色：一组柔和的浅色，按序号循环。
+ *
+ * 用**序号取模**而不是按键或取值取色：气泡颜色只是让一堆同质小卡片彼此
+ * 分开、不那么单调，**不承载语义**。若按 key 上色，用户会以为「蓝色代表
+ * 偏好、绿色代表城市」而去解读它 —— 那是误导。按序号循环时相邻气泡必然
+ * 不同色，观感上就够用了。
+ *
+ * 色板取自设计系统已有的浅色族，取值都在 50 级别附近，饱和度低、不刺眼。
+ */
+const BUBBLE_TONES = ['blue', 'cyan', 'green', 'gold', 'violet', 'amber'] as const
+
+function bubbleTone(index: number): string {
+  return `bubble--${BUBBLE_TONES[index % BUBBLE_TONES.length]}`
+}
+
+/* ==================== 气泡分列（瀑布流） ==================== */
+
+/**
+ * 气泡分两列。
+ *
+ * ## 为什么不用 CSS 多列（columns）
+ *
+ * 需求是「多列 + 限高 + 区域内竖向滚动」。实测过三种多列写法
+ * （max-height / 固定 height / 加 contain），结果一致：
+ * **内容不会竖向滚动，而是继续向右生成第 3、4 列**——
+ * 容器高度被限住后，多列布局把放不下的内容排到右侧的可滚动溢出区，
+ * 而不是往下排。于是出现「右半部分看不见、纵向又没得滚」。
+ * 这是多列布局在受限高度下的固有行为，不是写法问题。
+ *
+ * CSS 也做不出横向的多列瀑布流（fixed 高度会破坏等高列的外观）。
+ * 所以改为**受控分列**：自己把条目分到两个列容器里，列内是普通文档流，
+ * 外层限高滚动 —— 这时竖向滚动才是真的竖向滚动。
+ *
+ * ## 分配算法
+ *
+ * 贪心：按顺序把每个条目放进当前**较矮**的那一列。
+ * 先用文字长度估高排序一次（拿不到真实高度时的近似），
+ * 挂载后再按**实测高度**重排一次 —— 一次就足够接近最优，
+ * 反复迭代的收益很小，还会引入抖动。
+ */
+const colA = ref<MemoryItem[]>([])
+const colB = ref<MemoryItem[]>([])
+const colARef = ref<HTMLElement | null>(null)
+const colBRef = ref<HTMLElement | null>(null)
+
+/** 无实测高度时的估值：标题一行 + 正文按字数折行 + 间距 */
+function estimateH(m: MemoryItem): number {
+  const lines = Math.max(1, Math.ceil(m.fact_value.length / 14))
+  return 62 + lines * 21 + (m.hit_count > 1 ? 14 : 0)
+}
+
+function distribute(getH: (m: MemoryItem) => number) {
+  const a: MemoryItem[] = []
+  const b: MemoryItem[] = []
+  let ha = 0
+  let hb = 0
+  for (const m of activeItems.value) {
+    if (ha <= hb) {
+      a.push(m)
+      ha += getH(m)
+    } else {
+      b.push(m)
+      hb += getH(m)
+    }
+  }
+  colA.value = a
+  colB.value = b
+}
+
+/** 按实测高度再平衡：把较高列末尾的项搬给较低列，直到搬不动为止 */
+async function rebalance() {
+  await nextTick()
+  const ha = colARef.value?.offsetHeight ?? 0
+  const hb = colBRef.value?.offsetHeight ?? 0
+  if (Math.abs(ha - hb) < 40) return   // 已经很接近，别为几像素打乱顺序
+
+  const taller = ha > hb ? colA : colB
+  const shorter = ha > hb ? colB : colA
+  // 搬运量用估高近似 —— 只求「搬到接近」，不值得为精确高度反复量 DOM
+  let diff = Math.abs(ha - hb)
+
+  /*
+   * 逐个搬末尾项，直到「再搬一项反而更不均衡」为止。
+   * 只搬一项是不够的：两列差 250px 时搬一项只补上约 60~100px，
+   * 差值仍然明显（实测 A=659 / B=403 就是这么来的）。
+   */
+  while (taller.value.length > 1) {
+    const last = taller.value[taller.value.length - 1]
+    const h = estimateH(last)
+    if (Math.abs(diff - h) >= diff) break   // 搬过去不会更接近，停
+    taller.value.pop()
+    shorter.value.push(last)
+    diff = Math.abs(diff - h)
+  }
+}
+
+watch(activeItems, () => {
+  distribute(estimateH)
+  void rebalance()
+})
+
+/**
+ * 已展开元素操作的气泡 id。
+ *
+ * 交互分工（两种删除各司其职）：
+ *   · 右上角「×」  → 删除**整条**记忆，不需要展开，任何时候都在
+ *   · 点击气泡本体 → 展开每个元素的「−」，用于**逐项**删除
+ *
+ * 用「点击展开」而不是「悬停展开」：悬停态在触屏上不存在，
+ * 而且容易误触（鼠标划过就闪出一排 −）。点击是明确的意图表达，
+ * 两种设备行为一致。
+ */
+const openedId = ref<number | null>(null)
+
+function toggleOpen(m: MemoryItem) {
+  openedId.value = openedId.value === m.id ? null : m.id
+}
+
+/** 收起已展开的气泡（点空白处或按 Esc） */
+function closeOpened() {
+  openedId.value = null
+}
 
 /** 该键是否受枚举约束：受约束的用下拉，否则用输入框 */
 function optionsFor(key: string): string[] | null {
@@ -171,134 +297,294 @@ onMounted(load)
           助手会从对话中记住你的偏好，并在之后的对话里参考它们
         </p>
       </div>
-      <button v-if="activeItems.length" class="btn btn-ghost btn--sm" @click="removeAll">
+      <!--
+        「清空全部」固定在右上角（header 用 space-between，且它不参与换行），
+        与下方气泡区之间另有分隔线，避免误触。
+      -->
+      <button
+        v-if="activeItems.length"
+        class="btn btn-ghost btn--sm memory__clear"
+        @click="removeAll"
+      >
         清空全部
       </button>
     </header>
 
     <p v-if="loading" class="memory__empty">加载中…</p>
 
-    <template v-else-if="!items.length">
-      <p class="memory__empty">
-        还没有记忆。多聊几次旅行偏好（预算、节奏、饮食、去过的城市），助手就会慢慢记住。
-      </p>
-    </template>
+    <p v-else-if="!items.length" class="memory__empty">
+      还没有记忆。多聊几次旅行偏好（预算、节奏、饮食、去过的城市），助手就会慢慢记住。
+    </p>
 
     <template v-else>
+      <!-- 分隔线：把「清空全部」与气泡区分开，减少误触 -->
+      <div class="memory__rule"></div>
+
       <p v-if="stats" class="memory__stats">
         共 {{ stats.total }} 条 · 生效 {{ stats.active }} 条<template v-if="stats.inactive"> · 已停用 {{ stats.inactive }} 条</template>
       </p>
 
-      <!-- 生效中 -->
-      <ul class="mems">
-        <li v-for="m in activeItems" :key="m.id" class="mem">
-          <div class="mem__main">
-            <span class="mem__key">{{ m.fact_key_label }}</span>
-
-            <!-- 编辑态 -->
-            <template v-if="editingId === m.id">
-              <select
-                v-if="optionsFor(m.fact_key)"
-                v-model="draftValue"
-                class="select mem__input"
-                :aria-label="`修改「${m.fact_key_label}」的取值`"
-              >
-                <option v-for="o in optionsFor(m.fact_key)!" :key="o" :value="o">{{ o }}</option>
-              </select>
-              <input
-                v-else
-                v-model="draftValue"
-                class="input mem__input"
-                maxlength="40"
-                :aria-label="`修改「${m.fact_key_label}」的取值`"
-              />
-              <button class="btn btn-primary btn--xs" :disabled="savingValue" @click="saveValue(m)">
-                保存
-              </button>
-              <button class="btn btn-ghost btn--xs" @click="cancelEdit">取消</button>
-            </template>
-
-            <!-- 展示态 -->
-            <template v-else>
-              <!--
-                多值键（偏好 / 饮食 / 去过的城市 / 同行人）逐项渲染成小标签。
-                后端把这些项合并存成一行（一行一个键），所以这里是**一张卡
-                多项**；每项都能单独删除 —— 否则用户想纠正「我没去过桂林」
-                只能把整条（含北京、成都）一起删掉。
-              -->
-              <span v-if="m.is_multi" class="mem__values">
-                <span v-for="v in m.values" :key="v" class="mem__chip">
-                  {{ v }}
-                  <button
-                    class="mem__chip-x"
-                    type="button"
-                    :disabled="busyId === m.id"
-                    :aria-label="`不再记住「${v}」`"
-                    :title="`不再记住「${v}」`"
-                    @click="removeValue(m, v)"
-                  >✕</button>
-                </span>
-                <span v-if="m.previous_value" class="mem__prev" :title="`原为「${m.previous_value}」`">
-                  ← {{ m.previous_value }}
-                </span>
-              </span>
-
-              <span v-else class="mem__value">
-                {{ m.fact_value }}
-                <span v-if="m.previous_value" class="mem__prev" :title="`原为「${m.previous_value}」`">
-                  ← {{ m.previous_value }}
-                </span>
-              </span>
-            </template>
-          </div>
-
-          <div class="mem__meta">
-            <span class="mem__conf" :class="`mem__conf--${confidenceTone(m.confidence)}`">
-              {{ confidenceText(m.confidence) }}
-            </span>
-            <span v-if="m.hit_count > 1" class="mem__hit">提到过 {{ m.hit_count }} 次</span>
-            <span v-if="m.evidence" class="mem__evi" :title="m.evidence">「{{ m.evidence }}」</span>
-          </div>
-
-          <div v-if="editingId !== m.id" class="mem__ops">
-            <button class="btn btn-link btn--xs" @click="startEdit(m)">修正</button>
-            <button class="btn btn-link btn--xs" :disabled="busyId === m.id" @click="toggle(m)">
-              停用
-            </button>
-            <button
-              class="btn btn-link btn--xs is-danger"
-              :disabled="busyId === m.id"
-              @click="removeOne(m)"
+      <!--
+        气泡区：**局部滚动**。
+        max-height + overflow-y 让记忆多时只在这里滚，页面本身不动 ——
+        否则在个人主页往下滚会被这一块吸住，长列表还会把下方的
+        密码/账号卡片一路推到底。
+        点空白处或按 Esc 收起已展开的操作。
+      -->
+            <!--
+        气泡区：两列瀑布流 + **局部滚动**。
+        分列与限高滚动的理由见 script 里 distribute() 的注释
+        （简言之：CSS 多列在受限高度下会向右溢出而不会竖向滚动）。
+      -->
+      <div
+        class="bubbles"
+        @click.self="closeOpened"
+        @keydown.esc="closeOpened"
+      >
+        <div ref="colARef" class="bubbles__col" role="list" aria-label="记忆列表">
+            <div
+              v-for="m in colA"
+              :key="m.id"
+              class="bubble"
+              :class="[bubbleTone(m.id), { 'bubble--open': openedId === m.id }]"
             >
-              删除
-            </button>
-          </div>
-        </li>
-      </ul>
+              <!--
+                点击气泡本体展开/收起元素操作。
+                用 button 而不是 div + @click：键盘用户能 Tab 到、回车触发，
+                aria-expanded 也能如实播报当前状态。
+              -->
+              <button
+                class="bubble__body"
+                type="button"
+                :aria-expanded="openedId === m.id"
+                :aria-label="`${m.fact_key_label}：${m.fact_value}，点击${openedId === m.id ? '收起' : '展开'}元素操作`"
+                @click="toggleOpen(m)"
+              >
+                <span class="bubble__key">{{ m.fact_key_label }}</span>
+                <span class="bubble__value">{{ m.fact_value }}</span>
+                <span
+                  v-if="m.hit_count > 1"
+                  class="bubble__hit"
+                  :title="`被重复提到 ${m.hit_count} 次`"
+                >×{{ m.hit_count }}</span>
+              </button>
+
+              <!--
+                「×」删除整条记忆，**常驻**在右上角。
+                与点击气泡弹开的「−」分工明确：× 删整条、− 删单个元素。
+                整条删除不可逆，故仍走一次确认。
+              -->
+              <button
+                class="bubble__del"
+                type="button"
+                :disabled="busyId === m.id"
+                :aria-label="`删除整条记忆「${m.fact_key_label}：${m.fact_value}」`"
+                title="删除整条记忆"
+                @click.stop="removeOne(m)"
+              >×</button>
+
+              <!--
+                展开后的元素级操作：每个元素一行，行内右侧是「−」。
+                只在**多值且不止一个元素**时出现 —— 只有一个元素时
+                删掉它等于删整条，那条路径已经由右上角的 × 提供。
+              -->
+              <Transition name="bubble-act">
+                <div
+                  v-if="openedId === m.id && m.is_multi && m.values.length > 1"
+                  class="bubble__items"
+                >
+                  <div v-for="v in m.values" :key="v" class="bubble__item">
+                    <span class="bubble__item-text">{{ v }}</span>
+                    <button
+                      class="bubble__minus"
+                      type="button"
+                      :disabled="busyId === m.id"
+                      :aria-label="`不再记住「${v}」`"
+                      :title="`不再记住「${v}」（删完后整条会自动消失）`"
+                      @click.stop="removeValue(m, v)"
+                    >−</button>
+                  </div>
+                </div>
+              </Transition>
+
+              <!-- 次级信息与修正项：展开时才出现，平时让气泡保持干净 -->
+              <Transition name="bubble-act">
+                <div v-if="openedId === m.id" class="bubble__meta">
+                  <span class="bubble__conf" :class="`bubble__conf--${confidenceTone(m.confidence)}`">
+                    {{ confidenceText(m.confidence) }}
+                  </span>
+                  <span v-if="m.evidence" class="bubble__evi" :title="m.evidence">「{{ m.evidence }}」</span>
+                </div>
+              </Transition>
+
+              <Transition name="bubble-act">
+                <div v-if="openedId === m.id && editingId !== m.id" class="bubble__ops">
+                  <button class="bubble__op" type="button" @click.stop="startEdit(m)">修正</button>
+                  <button class="bubble__op" type="button" :disabled="busyId === m.id" @click.stop="toggle(m)">
+                    停用
+                  </button>
+                </div>
+              </Transition>
+
+              <!-- 修正态：原地变成输入框，不弹窗 -->
+              <div v-if="editingId === m.id" class="bubble__edit" @click.stop>
+                <select
+                  v-if="optionsFor(m.fact_key)"
+                  v-model="draftValue"
+                  class="select bubble__input"
+                  :aria-label="`修改「${m.fact_key_label}」的取值`"
+                >
+                  <option v-for="o in optionsFor(m.fact_key)!" :key="o" :value="o">{{ o }}</option>
+                </select>
+                <input
+                  v-else
+                  v-model="draftValue"
+                  class="input bubble__input"
+                  maxlength="40"
+                  :aria-label="`修改「${m.fact_key_label}」的取值`"
+                />
+                <button class="btn btn-primary btn--xs" :disabled="savingValue" @click="saveValue(m)">
+                  保存
+                </button>
+                <button class="btn btn-ghost btn--xs" @click="cancelEdit">取消</button>
+              </div>
+            </div>
+</div>
+        </div>
+        <div ref="colBRef" class="bubbles__col" role="list">
+            <div
+              v-for="m in colB"
+              :key="m.id"
+              class="bubble"
+              :class="[bubbleTone(m.id), { 'bubble--open': openedId === m.id }]"
+            >
+              <!--
+                点击气泡本体展开/收起元素操作。
+                用 button 而不是 div + @click：键盘用户能 Tab 到、回车触发，
+                aria-expanded 也能如实播报当前状态。
+              -->
+              <button
+                class="bubble__body"
+                type="button"
+                :aria-expanded="openedId === m.id"
+                :aria-label="`${m.fact_key_label}：${m.fact_value}，点击${openedId === m.id ? '收起' : '展开'}元素操作`"
+                @click="toggleOpen(m)"
+              >
+                <span class="bubble__key">{{ m.fact_key_label }}</span>
+                <span class="bubble__value">{{ m.fact_value }}</span>
+                <span
+                  v-if="m.hit_count > 1"
+                  class="bubble__hit"
+                  :title="`被重复提到 ${m.hit_count} 次`"
+                >×{{ m.hit_count }}</span>
+              </button>
+
+              <!--
+                「×」删除整条记忆，**常驻**在右上角。
+                与点击气泡弹开的「−」分工明确：× 删整条、− 删单个元素。
+                整条删除不可逆，故仍走一次确认。
+              -->
+              <button
+                class="bubble__del"
+                type="button"
+                :disabled="busyId === m.id"
+                :aria-label="`删除整条记忆「${m.fact_key_label}：${m.fact_value}」`"
+                title="删除整条记忆"
+                @click.stop="removeOne(m)"
+              >×</button>
+
+              <!--
+                展开后的元素级操作：每个元素一行，行内右侧是「−」。
+                只在**多值且不止一个元素**时出现 —— 只有一个元素时
+                删掉它等于删整条，那条路径已经由右上角的 × 提供。
+              -->
+              <Transition name="bubble-act">
+                <div
+                  v-if="openedId === m.id && m.is_multi && m.values.length > 1"
+                  class="bubble__items"
+                >
+                  <div v-for="v in m.values" :key="v" class="bubble__item">
+                    <span class="bubble__item-text">{{ v }}</span>
+                    <button
+                      class="bubble__minus"
+                      type="button"
+                      :disabled="busyId === m.id"
+                      :aria-label="`不再记住「${v}」`"
+                      :title="`不再记住「${v}」（删完后整条会自动消失）`"
+                      @click.stop="removeValue(m, v)"
+                    >−</button>
+                  </div>
+                </div>
+              </Transition>
+
+              <!-- 次级信息与修正项：展开时才出现，平时让气泡保持干净 -->
+              <Transition name="bubble-act">
+                <div v-if="openedId === m.id" class="bubble__meta">
+                  <span class="bubble__conf" :class="`bubble__conf--${confidenceTone(m.confidence)}`">
+                    {{ confidenceText(m.confidence) }}
+                  </span>
+                  <span v-if="m.evidence" class="bubble__evi" :title="m.evidence">「{{ m.evidence }}」</span>
+                </div>
+              </Transition>
+
+              <Transition name="bubble-act">
+                <div v-if="openedId === m.id && editingId !== m.id" class="bubble__ops">
+                  <button class="bubble__op" type="button" @click.stop="startEdit(m)">修正</button>
+                  <button class="bubble__op" type="button" :disabled="busyId === m.id" @click.stop="toggle(m)">
+                    停用
+                  </button>
+                </div>
+              </Transition>
+
+              <!-- 修正态：原地变成输入框，不弹窗 -->
+              <div v-if="editingId === m.id" class="bubble__edit" @click.stop>
+                <select
+                  v-if="optionsFor(m.fact_key)"
+                  v-model="draftValue"
+                  class="select bubble__input"
+                  :aria-label="`修改「${m.fact_key_label}」的取值`"
+                >
+                  <option v-for="o in optionsFor(m.fact_key)!" :key="o" :value="o">{{ o }}</option>
+                </select>
+                <input
+                  v-else
+                  v-model="draftValue"
+                  class="input bubble__input"
+                  maxlength="40"
+                  :aria-label="`修改「${m.fact_key_label}」的取值`"
+                />
+                <button class="btn btn-primary btn--xs" :disabled="savingValue" @click="saveValue(m)">
+                  保存
+                </button>
+                <button class="btn btn-ghost btn--xs" @click="cancelEdit">取消</button>
+              </div>
+            </div>
+</div>
+        </div>
+      </div>
 
       <!-- 已停用（折叠） -->
       <template v-if="inactiveItems.length">
         <button class="memory__toggle" @click="showInactive = !showInactive">
           {{ showInactive ? '▾' : '▸' }} 已停用的记忆（{{ inactiveItems.length }}）
         </button>
-        <ul v-if="showInactive" class="mems mems--off">
-          <li v-for="m in inactiveItems" :key="m.id" class="mem">
-            <div class="mem__main">
-              <span class="mem__key">{{ m.fact_key_label }}</span>
-              <span class="mem__value">{{ m.fact_value }}</span>
-            </div>
-            <div class="mem__ops">
-              <button class="btn btn-link btn--xs" :disabled="busyId === m.id" @click="toggle(m)">
+        <ul v-if="showInactive" class="off-list">
+          <li v-for="m in inactiveItems" :key="m.id" class="off-item">
+            <span class="off-item__key">{{ m.fact_key_label }}</span>
+            <span class="off-item__value">{{ m.fact_value }}</span>
+            <span class="off-item__ops">
+              <button class="bubble__op" type="button" :disabled="busyId === m.id" @click="toggle(m)">
                 重新启用
               </button>
               <button
-                class="btn btn-link btn--xs is-danger"
+                class="bubble__op bubble__op--danger"
+                type="button"
                 :disabled="busyId === m.id"
                 @click="removeOne(m)"
               >
                 删除
               </button>
-            </div>
+            </span>
           </li>
         </ul>
         <p class="memory__note">停用的记忆不会再影响对话，但仍保留在这里，随时可以重新启用。</p>
@@ -309,129 +595,313 @@ onMounted(load)
 
 <style scoped>
 .memory { padding: 20px 22px; }
+
 .memory__head {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
+  justify-content: space-between;   /* 「清空全部」固定在右上角 */
   gap: 14px;
-  margin-bottom: 14px;
 }
-.memory__head h2 { font-size: 0.98rem; font-weight: 700; }
-.memory__hint { font-size: 0.76rem; color: var(--text3); margin-top: 4px; line-height: 1.5; }
-
-.memory__empty { font-size: 0.85rem; color: var(--text3); line-height: 1.7; padding: 10px 0; }
-.memory__stats { font-size: 0.76rem; color: var(--text3); margin-bottom: 12px; }
-
-.mems { display: flex; flex-direction: column; }
-.mems--off { opacity: 0.75; }
-
-.mem {
-  padding: 12px 0;
-  border-bottom: 1px dashed var(--hairline);
-}
-.mem:last-child { border-bottom: none; }
-
-.mem__main { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
-.mem__key {
-  font-size: 0.76rem;
-  font-weight: 650;
-  padding: 2px 8px;
-  border-radius: 5px;
-  background: var(--primary-soft);
-  color: var(--prim);
-  white-space: nowrap;
-}
-.mem__value { font-size: 0.9rem; font-weight: 600; display: inline-flex; align-items: baseline; gap: 8px; }
+.memory__head h2 { font-size: 1.05rem; }
+.memory__hint { margin-top: 4px; font-size: 0.8rem; color: var(--text3); }
+/* 不参与换行：窗口变窄时它也不该掉到标题下面 */
+.memory__clear { flex-shrink: 0; }
 
 /*
- * 多值键的逐项标签。
- *
- * 与「行程标签」(.ptag) 不同，这里刻意用中性浅色而不是语义彩：
- * .ptag 的颜色表达「这是什么偏好」，而记忆面板的每一项只是**用户数据**，
- * 上色反而会让人以为颜色有含义。这里靠形状（胶囊 + ✕）表达可删除。
+ * 分隔线：把「清空全部」与气泡区分开。
+ * 清空是不可逆操作，需要一条明确边界把它与「点气泡删单条」区分开，避免误触。
  */
-.mem__values {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+.memory__rule {
+  height: 1px;
+  margin: 14px 0 12px;
+  background: var(--hairline);
 }
-.mem__chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px 4px 3px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--panel2);
+
+.memory__empty { padding: 22px 0; font-size: 0.85rem; color: var(--text3); }
+.memory__stats { margin-bottom: 10px; font-size: 0.74rem; color: var(--text3); }
+
+/* ============================================================
+   气泡区：两列瀑布流 + 局部滚动
+   ------------------------------------------------------------
+   列由 JS 分配（见 script 的 distribute），这里只负责排布与滚动。
+   不用 CSS 多列的原因见 script 注释：受限高度下多列会向右溢出、
+   不会竖向滚动，实测三种写法都不行。
+   ============================================================ */
+.bubbles {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  max-height: 340px;
+  overflow-y: auto;
+  /* 滚到边界时不把滚动传给页面，否则用户想继续看下面的卡片却被这里吸住 */
+  overscroll-behavior: contain;
+  padding: 2px 8px 2px 2px;   /* 右侧给滚动条留位置，别贴着气泡 */
+
+  /* 轻量滚动条：细、半透明 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.bubbles::-webkit-scrollbar { width: 6px; }
+.bubbles::-webkit-scrollbar-track { background: transparent; }
+.bubbles::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+.bubbles::-webkit-scrollbar-thumb:hover { background: var(--blue-300); }
+
+/* flex:1 + min-width:0：两列等宽，且长内容不会把列撑宽 */
+.bubbles__col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 窄屏单列：两列时气泡会被压得很窄，长值只能断成好几行 */
+@media (max-width: 620px) {
+  .bubbles { flex-direction: column; max-height: 300px; }
+  .bubbles__col { width: 100%; }
+}
+
+/* ============================================================
+   气泡
+   ============================================================ */
+.bubble {
+  position: relative;
+  margin-bottom: 10px;
+  border-radius: 13px;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+.bubble:hover { transform: translateY(-1px); }
+/* 展开时抬起来，与其它气泡区分 */
+.bubble--open { box-shadow: var(--shadow-lift); }
+
+.bubble__body {
+  display: block;
+  width: 100%;
+  text-align: left;
+  /* 右侧留出常驻 × 的位置，正文不会被它压住 */
+  padding: 9px 30px 10px 12px;
+  border: none;
+  border-radius: 13px;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
   color: var(--text);
-  font-size: 0.82rem;
+}
+.bubble__key {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  opacity: 0.62;   /* 用不透明度而不是固定灰：跟随气泡色走，更协调 */
+}
+.bubble__value {
+  display: block;
+  font-size: 0.84rem;
   font-weight: 600;
   line-height: 1.5;
+  /* 长值换行而不是撑破气泡 */
+  overflow-wrap: anywhere;
 }
-/* ✕ 只在悬停/聚焦时显形：常驻会让一排标签看起来像一堆按钮 */
-.mem__chip-x {
+/* 命中次数：小角标 */
+.bubble__hit {
+  display: inline-block;
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  opacity: 0.5;
+}
+.bubble__body:focus-visible {
+  outline: 2px solid var(--prim);
+  outline-offset: 2px;
+  border-radius: 13px;
+}
+
+/* ---------- 配色：6 组浅色循环 ---------- */
+.bubble--blue   { background: var(--blue-50);  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.06); }
+.bubble--cyan   { background: #eaf7fb;         box-shadow: 0 1px 2px rgba(14, 165, 233, 0.07); }
+.bubble--green  { background: #eefaf1;         box-shadow: 0 1px 2px rgba(56, 161, 105, 0.07); }
+.bubble--gold   { background: #fdf7e9;         box-shadow: 0 1px 2px rgba(214, 158, 46, 0.08); }
+.bubble--violet { background: #f5f1fe;         box-shadow: 0 1px 2px rgba(139, 92, 246, 0.07); }
+.bubble--amber  { background: #fff6ec;         box-shadow: 0 1px 2px rgba(217, 119, 6, 0.07); }
+
+/* 悬停加深一档：用同色系阴影而不是加边框，避免整体发灰 */
+.bubble--blue:hover   { box-shadow: 0 4px 12px rgba(37, 99, 235, 0.14); }
+.bubble--cyan:hover   { box-shadow: 0 4px 12px rgba(14, 165, 233, 0.14); }
+.bubble--green:hover  { box-shadow: 0 4px 12px rgba(56, 161, 105, 0.14); }
+.bubble--gold:hover   { box-shadow: 0 4px 12px rgba(214, 158, 46, 0.16); }
+.bubble--violet:hover { box-shadow: 0 4px 12px rgba(139, 92, 246, 0.14); }
+.bubble--amber:hover  { box-shadow: 0 4px 12px rgba(217, 119, 6, 0.14); }
+
+/* 深色主题：浅底在暗背景上发闷，改半透明底 */
+:root[data-theme='dark'] .bubble--blue   { background: rgba(37, 99, 235, 0.16); }
+:root[data-theme='dark'] .bubble--cyan   { background: rgba(14, 165, 233, 0.16); }
+:root[data-theme='dark'] .bubble--green  { background: rgba(56, 161, 105, 0.16); }
+:root[data-theme='dark'] .bubble--gold   { background: rgba(214, 158, 46, 0.16); }
+:root[data-theme='dark'] .bubble--violet { background: rgba(139, 92, 246, 0.16); }
+:root[data-theme='dark'] .bubble--amber  { background: rgba(217, 119, 6, 0.16); }
+
+/* ---------- 右上角「×」：删整条，常驻 ---------- */
+.bubble__del {
+  position: absolute;
+  top: 5px;
+  right: 5px;
   display: grid;
   place-items: center;
-  width: 17px;
-  height: 17px;
-  border: none;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--text3);
-  font-size: 0.62rem;
+  font-size: 0.86rem;
   line-height: 1;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, background-color 0.15s, color 0.15s;
+  /*
+   * 常驻但很轻：默认透明度偏低，悬停/聚焦时才完全显形。
+   * 完全隐藏会让人找不到这条路径；完全不透明又会让整片气泡显得全是按钮。
+   */
+  opacity: 0.55;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s, background-color 0.15s;
 }
-.mem__chip:hover .mem__chip-x,
-.mem__chip-x:focus-visible { opacity: 1; }
-.mem__chip-x:hover:not(:disabled) { background: var(--slate-200); color: var(--gold-600); }
-.mem__chip-x:disabled { cursor: not-allowed; }
-/* 触屏没有 hover：✕ 常驻，否则这一项根本删不掉 */
-@media (hover: none) {
-  .mem__chip-x { opacity: 0.7; }
+.bubble:hover .bubble__del,
+.bubble--open .bubble__del,
+.bubble__del:focus-visible { opacity: 1; }
+.bubble__del:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--panel);
 }
-.mem__prev {
-  font-size: 0.76rem;
-  font-weight: 400;
-  color: var(--text3);
-  text-decoration: line-through;
-}
-.mem__input { max-width: 180px; padding: 5px 9px; font-size: 0.82rem; }
+.bubble__del:disabled { cursor: not-allowed; }
 
-.mem__meta {
+/* ---------- 元素级「−」：展开后每个元素一行 ---------- */
+.bubble__items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 10px 8px 12px;
+}
+/*
+ * 每个元素一行、行内右侧放「−」。
+ * 不做成「元素上方浮一个小按钮」：绝对定位会盖住相邻元素，
+ * 元素一多就互相压。行内右侧既不遮挡，点击目标也更明确。
+ */
+.bubble__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.62);
+}
+:root[data-theme='dark'] .bubble__item { background: rgba(255, 255, 255, 0.06); }
+.bubble__item-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.78rem;
+  color: var(--text2);
+  overflow-wrap: anywhere;
+}
+.bubble__minus {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text2);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+}
+.bubble__minus:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.bubble__minus:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---------- 展开后的次级信息 ---------- */
+.bubble__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 12px;
-  margin-top: 6px;
-  font-size: 0.73rem;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 0 12px 6px;
+  font-size: 0.68rem;
   color: var(--text3);
 }
-.mem__conf { font-weight: 600; }
-.mem__conf--high { color: var(--success); }
-.mem__conf--mid { color: var(--text2); }
-.mem__conf--low { color: var(--warn); }
-.mem__evi {
+.bubble__conf--high { color: var(--green-600); }
+.bubble__conf--mid { color: var(--text2); }
+.bubble__conf--low { color: var(--gold-600); }
+.bubble__evi {
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 100%;
+  opacity: 0.85;
 }
 
-.mem__ops { display: flex; gap: 4px; margin-top: 6px; }
-.btn--xs { font-size: 0.76rem; padding: 2px 6px; }
-.btn--xs.is-danger { color: var(--danger); }
+.bubble__ops { display: flex; gap: 10px; padding: 0 12px 10px; }
+.bubble__op {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--prim);
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.bubble__op:hover:not(:disabled) { text-decoration: underline; }
+.bubble__op:disabled { opacity: 0.5; cursor: not-allowed; }
+.bubble__op--danger { color: var(--danger); }
 
+.bubble__edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 10px;
+}
+.bubble__input { max-width: 150px; padding: 4px 8px; font-size: 0.78rem; }
+
+/* 展开内容的进出：轻微上移淡入 */
+.bubble-act-enter-active,
+.bubble-act-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.bubble-act-enter-from,
+.bubble-act-leave-to { opacity: 0; transform: translateY(-3px); }
+
+/* ---------- 已停用（沿用简洁列表：次要信息，不做气泡） ---------- */
 .memory__toggle {
   margin-top: 12px;
   border: none;
   background: transparent;
-  font-size: 0.8rem;
-  color: var(--text2);
-  padding: 4px 0;
+  padding: 0;
+  color: var(--text3);
+  font-size: 0.78rem;
+  cursor: pointer;
 }
 .memory__toggle:hover { color: var(--prim); }
-.memory__note { margin-top: 8px; font-size: 0.74rem; color: var(--text3); line-height: 1.6; }
+.memory__note { margin-top: 8px; font-size: 0.72rem; color: var(--text3); line-height: 1.7; }
+
+.off-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.off-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 0.78rem;
+  border-bottom: 1px solid var(--hairline);
+}
+.off-item:last-child { border-bottom: none; }
+.off-item__key { flex-shrink: 0; color: var(--text3); }
+.off-item__value { flex: 1; min-width: 0; color: var(--text2); }
+.off-item__ops { display: flex; gap: 10px; flex-shrink: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble,
+  .bubble-act-enter-active,
+  .bubble-act-leave-active { transition: none; }
+  .bubble:hover { transform: none; }
+}
 </style>
