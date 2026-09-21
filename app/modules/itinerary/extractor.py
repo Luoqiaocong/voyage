@@ -112,7 +112,9 @@ _EXTRACT_SYSTEM_PROMPT = """你是一个旅行行程总结器。下面会给出�
 5. 所有嵌套结构（accommodation、daily_plans 中的每个活动）都必须以真正的 JSON 对象/数组形式存在，禁止用字符串包裹
 6. time_slot 只能是三个英文值之一：morning / afternoon / evening
 7. kind 只能是五个英文值之一：attraction（景点/观光/购物）、restaurant（餐厅/美食）、hotel（住宿）、transport（交通）、rest（休息/自由活动）
-8. 每个活动必须包含 name 字段，给一个真实合理的场所名称
+8. 每个活动的 name 必须取自对话原文（助手建议的景点/餐厅，或用户自己提到的地名）；
+   不要因为「这一天应该有活动」就补一个听起来合理的场所 —— 说不出具体场所时，
+   省略该活动或只写主题，宁可当天安排少一些
 9. daily_plans 的数量等于对话里提到的行程天数，day_no 从 1 开始连续编号
 10. tips 是字符串数组，每条是一句完整提醒
 11. 只输出纯 JSON，不要 Markdown 代码块，不要任何多余文字
