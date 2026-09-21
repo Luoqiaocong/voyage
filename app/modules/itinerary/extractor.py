@@ -4,8 +4,6 @@
 """
 from datetime import date
 
-from pydantic import BaseModel, Field
-
 from app.core.ai.date_context import current_date_line
 from app.core.ai.tasks import extract_structured
 
@@ -66,7 +64,7 @@ def _sanitize_plan_dates(plan: ItineraryPlan) -> ItineraryPlan:
     return plan
 
 # 关键：把完整输出结构写死在提示词里，防止模型不遵守 tool schema 绑定而自由发挥字段名
-_EXTRACT_SYSTEM_PROMPT = """你是一个旅行攻略结构化提取器。请根据用户提供的 Markdown 攻略，提取关键信息并按 JSON 格式输出。
+_EXTRACT_SYSTEM_PROMPT = """你是一个旅行行程总结器。下面会给出一段用户与助手的对话记录（每段标注了说话人）。请把对话中关于这次旅行的信息**总结**成一份结构化行程，并按 JSON 格式输出。
 
 【输出结构】
 {
@@ -107,28 +105,31 @@ _EXTRACT_SYSTEM_PROMPT = """你是一个旅行攻略结构化提取器。请根�
 }
 
 【字段要求】
-1. 只提取攻略中明确提到的信息，不要编造或补全；攻略里没有的字段直接省略（不要填 null 或空字符串）
-2. accommodation 是一个 JSON 对象，必须用大括号 {} 输出，绝不能写成字符串；攻略没有明确住宿建议时，省略整个 accommodation 字段
-3. 所有嵌套结构（accommodation、daily_plans 中的每个活动）都必须以真正的 JSON 对象/数组形式存在，禁止用字符串包裹
-4. time_slot 只能是三个英文值之一：morning / afternoon / evening
-5. kind 只能是五个英文值之一：attraction（景点/观光/购物）、restaurant（餐厅/美食）、hotel（住宿）、transport（交通）、rest（休息/自由活动）
-6. 每个活动必须包含 name 字段，给一个真实合理的场所名称
-7. daily_plans 的数量等于攻略中实际提到的天数，day_no 从 1 开始连续编号
-8. tips 是字符串数组，每条是一句完整提醒
-9. 只输出纯 JSON，不要 Markdown 代码块，不要任何多余文字
+1. 只总结对话中明确提到的信息，不要编造或补全；对话里没有的字段直接省略（不要填 null 或空字符串）
+2. 目的地、天数、预算、出行偏好常出现在**用户**说的话里（如「想去杭州 3 天，预算 3000」），景点、餐厅、住宿、交通常出现在**助手**的回复里，需要综合对话两侧的信息来总结
+3. 若对话里先后出现过不同方案，以**最新**的一套为准
+4. accommodation 是一个 JSON 对象，必须用大括号 {} 输出，绝不能写成字符串；对话没有明确住宿建议时，省略整个 accommodation 字段
+5. 所有嵌套结构（accommodation、daily_plans 中的每个活动）都必须以真正的 JSON 对象/数组形式存在，禁止用字符串包裹
+6. time_slot 只能是三个英文值之一：morning / afternoon / evening
+7. kind 只能是五个英文值之一：attraction（景点/观光/购物）、restaurant（餐厅/美食）、hotel（住宿）、transport（交通）、rest（休息/自由活动）
+8. 每个活动必须包含 name 字段，给一个真实合理的场所名称
+9. daily_plans 的数量等于对话里提到的行程天数，day_no 从 1 开始连续编号
+10. tips 是字符串数组，每条是一句完整提醒
+11. 只输出纯 JSON，不要 Markdown 代码块，不要任何多余文字
 
 【关于 date 字段（重要）】
-- 攻略里**明确写出**了日期（如「9 月 21 日」「2026-09-21」）才填 date，否则省略。
-- 攻略里出现「第一天」「第二天」这类相对表述时，**不要**自行推算日期，省略该字段。
+- 对话里**明确写出**了日期（如「9 月 21 日」「2026-09-21」）才填 date，否则省略。
+- 对话里出现「第一天」「第二天」这类相对表述时，**不要**自行推算日期，省略该字段。
 - 需要填写时，年份必须与下方给出的「当前日期」一致或在其之后 ——
-  行程不会发生在过去。若攻略只给了月日，按当前日期判断应是今年还是明年。
+  行程不会发生在过去。若只给了月日，按当前日期判断应是今年还是明年。
 - 绝不要使用你自己记忆中的年份，一律以上方提供的当前日期为准。
 """
 
 
-async def extract_itinerary_plan(recommend_txt: str) -> ItineraryPlan | None:
-    """攻略 Markdown → ItineraryPlan；失败返回 None（不打断对话）。
+async def extract_itinerary_plan(conversation_txt: str) -> ItineraryPlan | None:
+    """会话转录 → ItineraryPlan；失败返回 None（不打断对话）。
 
+    输入是「用户/助手」标注的整段会话历史，由模型总结出结构化行程。
     提示词里注入当前日期：对话中的「后天出发」会被模型换算成具体日期，
     若不给今天，模型会拿记忆里的年份去填，产出落后一整年的日期。
     """
@@ -137,67 +138,9 @@ async def extract_itinerary_plan(recommend_txt: str) -> ItineraryPlan | None:
         f"【当前日期】今天是 {current_date_line()}。\n"
     )
     plan = await extract_structured(
-        recommend_txt,
+        conversation_txt,
         ItineraryPlan,
         system_instructions=prompt,
     )
     # 代码层兜底：即便提示词说清了，模型仍可能填错年份
     return _sanitize_plan_dates(plan) if plan is not None else None
-
-
-# 候选编号的选择结果：只让模型回一个序号，避免它复述整篇文本
-class _PickChoice(BaseModel):
-    """大模型在候选回复中挑选的结果。"""
-
-    index: int = Field(description="最像旅行行程的那条候选的编号；都不像时填 -1")
-
-
-_PICK_SYSTEM_PROMPT = """你是一个旅行对话的内容筛选器。
-
-下面会给你同一段对话里的若干条 AI 回复，每条带编号。请判断**哪一条包含了一份可以
-落成行程表的旅行安排**——即按天或按时段列出了要去哪、做什么的那种回复。
-
-【判断要点】
-1. 要的是「行程安排」，不是泛泛聊旅行、不是只给车次表、不是只推荐酒店
-2. 若多条都像行程，选**编号最大**的那条（编号越大越新，用户要的是最新那份）
-3. 若都不像行程，index 填 -1
-
-只输出 JSON，不要解释。"""
-
-
-async def pick_itinerary_reply(candidates: list[str]) -> int | None:
-    """让大模型在候选回复中挑出最像行程的一条。
-
-    何时需要它：本地打分器（selector.py）完全没有找到行程特征的回复时。
-    典型场景是用户让 AI 用**散文**写行程——没有 Day 标记、没有列表，
-    关键词规则看不见，但语义上确实是一份行程。
-
-    这条路径是**兜底**，不是主路径：多数情况打分器已能定案，
-    多调一次大模型只是徒增延迟与成本。
-
-    Args:
-        candidates: 候选回复文本（按时间顺序，旧 → 新）
-
-    Returns:
-        选中候选在 candidates 中的下标；判不出或失败时返回 None。
-    """
-    if not candidates:
-        return None
-
-    # 带上编号，并只保留末尾若干条：越新的越可能是用户想要的那份
-    numbered = "\n\n".join(
-        f"【候选 {i}】\n{text[:1200]}" for i, text in enumerate(candidates)
-    )
-    result = await extract_structured(
-        numbered,
-        _PickChoice,
-        temperature=0.0,
-        system_instructions=_PICK_SYSTEM_PROMPT,
-    )
-    if result is None:
-        return None
-
-    idx = result.index
-    if 0 <= idx < len(candidates):
-        return idx
-    return None

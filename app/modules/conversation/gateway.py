@@ -34,6 +34,12 @@ def _thread_config(conversation_id: str) -> RunnableConfig:
     }
 
 
+#: 会话转录文本的总字符上限；超出时从最早的轮次开始丢弃。
+_TRANSCRIPT_MAX_CHARS = 24000
+#: 单条消息写入转录前的截断上限，避免一条超长回复挤掉其它轮次。
+_TRANSCRIPT_MAX_MESSAGE_CHARS = 4000
+
+
 class ConversationGateway:
     """对话网关：封装与 langgraph Agent 的交互（流式对话、历史读取、线程删除）。"""
 
@@ -134,12 +140,7 @@ class ConversationGateway:
         return cleaned
 
     async def get_last_ai_text(self, conversation_id: str) -> str:
-        """取最后一条含文本内容的 AI 回复；没有则返回空串。
-
-        保留此方法供「就是想要最后一条」的调用方使用。
-        行程提取已改用 get_ai_texts（需要在整个历史里挑选），
-        见 app/modules/itinerary/service.py 的 _select_source_text。
-        """
+        """取最后一条含文本内容的 AI 回复；没有则返回空串。"""
         messages = await self.get_messages(conversation_id)
         for message in reversed(messages):
             if message.get("role") != "assistant":
@@ -149,24 +150,39 @@ class ConversationGateway:
                 return content
         return ""
 
-    async def get_ai_texts(self, conversation_id: str) -> list[str]:
-        """按时间顺序（旧 → 新）返回全部含文本的 AI 回复。
+    async def get_conversation_transcript(self, conversation_id: str) -> str:
+        """把会话历史整理成「用户/助手」标注的转录文本，供行程总结使用。
 
-        供需要在整段历史里挑选的调用方使用（如行程提取要找出
-        「最像行程的那条」而不是固定的最后一条）。
+        为什么同时收用户消息：像「想去杭州 3 天、预算 3000」这类关键约束
+        只出现在用户侧，只喂 AI 回复会丢掉目的地、天数、预算等核心信息。
 
-        多模态消息的 content 是数组，这里只收纯文本——
-        行程提取只对文本有意义，数组形态留给前端渲染。
+        文本按时间顺序（旧 → 新）排列；多模态消息的 content 是数组，
+        这里只收纯文本。总长度超上限时保留最近的轮次，避免长对话撑爆提示词。
         """
         messages = await self.get_messages(conversation_id)
-        texts: list[str] = []
+        lines: list[str] = []
         for message in messages:
-            if message.get("role") != "assistant":
+            role = message.get("role")
+            if role not in ("user", "assistant"):
                 continue
             content = message.get("content")
-            if isinstance(content, str) and content.strip():
-                texts.append(content)
-        return texts
+            if not isinstance(content, str) or not content.strip():
+                continue
+            text = content.strip()
+            if len(text) > _TRANSCRIPT_MAX_MESSAGE_CHARS:
+                text = text[:_TRANSCRIPT_MAX_MESSAGE_CHARS] + "…"
+            lines.append(f"{'用户' if role == 'user' else '助手'}：{text}")
+
+        # 从最新往回累加，超出总上限就丢弃更早的轮次（近期上下文优先）
+        kept: list[str] = []
+        total = 0
+        for line in reversed(lines):
+            if kept and total + len(line) > _TRANSCRIPT_MAX_CHARS:
+                break
+            kept.append(line)
+            total += len(line)
+        kept.reverse()
+        return "\n\n".join(kept)
 
     # -------------------- 2. 流式发送消息 --------------------
     async def stream_message(self, message: str, conversation_id: str, user_id: int = 0):

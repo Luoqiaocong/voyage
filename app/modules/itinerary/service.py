@@ -7,16 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.business import BusinessCode, ItineraryException
 from app.modules.conversation.gateway import ConversationGateway
 from app.shared.db import get_db
-from app.shared.utils import TransactionMixin, log
+from app.shared.utils import TransactionMixin
 
-from .extractor import extract_itinerary_plan, pick_itinerary_reply
+from .extractor import extract_itinerary_plan
 from .repo import ItineraryRepo
 from .schemas import ItineraryPatch, ItineraryPlan
-from .selector import ScoredReply, pick_best
-
-#: 规则完全找不到行程特征时，最多送给大模型多少条近期回复做语义检索。
-#: 设上限的原因：既控制提示词长度，也避免把长对话里几十条无关回复都塞进去。
-SEMANTIC_FALLBACK_LIMIT = 6
 
 
 class ItineraryService(TransactionMixin):
@@ -94,13 +89,15 @@ class ItineraryService(TransactionMixin):
 
     async def save_from_conversation(self, conversation_id: str, user_id: int):
         # 会话归属与存在的校验已由路由层 conversation 域的 verify_conversation_owner 完成，
-        # service 只负责：选出最像行程的 AI 回复 → 结构化提取 → 落库。
+        # service 只负责：总结会话历史 → 结构化提取 → 落库。
 
-        # 1. 选出要提取的那条回复
-        recommend_text = await self._select_source_text(conversation_id)
+        # 1. 取整段会话转录（含用户与助手两侧文本）
+        transcript = await self.conv_gateway.get_conversation_transcript(conversation_id)
+        if not transcript.strip():
+            raise ItineraryException(BusinessCode.ITINERARY_GEN_FAILED)
 
-        # 2. 结构化提取
-        plan = await extract_itinerary_plan(recommend_text)
+        # 2. 结构化提取（由模型总结会话，产出结构化行程）
+        plan = await extract_itinerary_plan(transcript)
 
         # 3. 先检查是否成功
         if plan is None or self._looks_fabricated(plan):
@@ -116,61 +113,6 @@ class ItineraryService(TransactionMixin):
                 user_id=user_id,
                 plan=plan_dict,
             )
-
-    async def _select_source_text(self, conversation_id: str) -> str:
-        """在对话历史里挑出「最像行程」的那条 AI 回复。
-
-        为什么不再固定取最后一条：真实使用时用户拿到行程后常常再追问
-        「那酒店呢」「谢谢」，行程就被挤出末位。此时取最后一条会
-        要么提取失败、要么把一句寒暄当攻略去结构化（后者更糟，会编造出行程）。
-
-        三级策略，逐级变重：
-          1. 结构打分（selector.py）：命中即可定案，零额外成本
-          2. 打分无法定案时，交给大模型在候选里裁决（少数情况）
-          3. 完全找不到行程特征时，也让大模型在近期回复里语义检索一次——
-             应对「行程写成散文、没有 Day 与列表」这类规则看不见的情况
-
-        任一环节失败都不抛错，按「找不到行程」处理，由上层统一报
-        ITINERARY_GEN_FAILED。
-        """
-        texts = await self.conv_gateway.get_ai_texts(conversation_id)
-        if not texts:
-            return ""
-
-        # 1. 结构打分
-        result = pick_best(texts)
-        if result.decided and result.reply:
-            log.info(
-                f"[itinerary] 选中第 {result.reply.index + 1}/{len(texts)} 条 AI 回复"
-                f"（{result.reason}，得分 {result.reply.score:.1f}）"
-            )
-            return result.reply.text
-
-        # 2 & 3. 规则定不了案，交给大模型
-        candidates = (
-            result.ambiguous
-            if result.reason == "ambiguous"
-            # 规则没找到时，给大模型最近若干条，让语义来判
-            else [
-                ScoredReply(index=i, text=t, score=0.0, signals={})
-                for i, t in list(enumerate(texts))[-SEMANTIC_FALLBACK_LIMIT:]
-            ]
-        )
-        if not candidates:
-            return ""
-
-        # 按时间顺序（旧 → 新）送进去，提示词里要求优先选编号更大的那条
-        ordered = sorted(candidates, key=lambda c: c.index)
-        picked = await pick_itinerary_reply([c.text for c in ordered])
-        if picked is None:
-            log.info("[itinerary] 大模型未能判定哪条是行程")
-            return ""
-
-        chosen = ordered[picked]
-        log.info(
-            f"[itinerary] 大模型选中第 {chosen.index + 1}/{len(texts)} 条 AI 回复"
-        )
-        return chosen.text
 
     # ---------- 查询 ----------
     async def get_itineraries(self, user_id: int):
