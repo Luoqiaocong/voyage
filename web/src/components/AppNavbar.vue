@@ -140,10 +140,10 @@ onUnmounted(() => {
                资源分工：apple-touch-icon / favicon-32 / voyage-mark 三件套
                由 voyage-mark.jpeg 扩展而来，用于站点与导航栏；
                voyage-mark-2.* 专供对话页与登录页。
-               此版内边距仅 1.5%/边，内容占画布 88%/97%——
-               横向做不到 100% 是因为源内容本身是 646x713 的竖形，
-               塞进正方形只能横向多留一点（要铺满就得裁掉内容）。
-               34px 显示、3 倍屏需 102px，128 足够且体积只有 15.5 KB。 -->
+               此版已去白边并满幅裁切：内容铺满整个画布，
+               源图 646x713 偏竖，故裁掉少量上下边缘换取横向铺满；
+               圆角处的白点由容器自身的圆角遮挡。
+               34px 显示、3 倍屏需 102px，128 足够且体积可控。 -->
           <img src="/voyage-mark-128.png" alt="" />
         </span>
         <span class="brand__text">Voyage <em>AI</em></span>

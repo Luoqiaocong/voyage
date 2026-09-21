@@ -38,7 +38,9 @@ export function useLogout() {
     }
     user.clearAuth()
     ui.toast('已退出登录', 'success')
-    router.replace('/login')
+    // 统一回主页（游客态首页）：不必把用户推到登录页，
+    // 首页本身可浏览，用户想继续用再自行去登录。
+    router.replace('/')
   }
 
   return { doLogout }
