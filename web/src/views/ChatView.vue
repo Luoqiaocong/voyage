@@ -1713,11 +1713,12 @@ watch(streaming, (v) => {
                 class="msg"
                 :class="`msg--${msg.role}`"
               >
-                <!-- 助手头像：用站点图标组的 voyage-mark-128
-                     （30px 显示，3 倍屏需 90px；图标已满幅，
-                      在 30px 方块里不会被空白缩掉一圈） -->
+                <!-- 助手头像：voyage-icon-2.png（128x128，带透明底）。
+                     30px 显示、3 倍屏需 90px，128 足够；
+                     用透明版是因为头像落在消息区背景上，
+                     透明底在浅色与深色主题下都能自然贴合。 -->
                 <span v-if="msg.role === 'assistant'" class="msg__avatar" aria-hidden="true">
-                  <img src="/voyage-mark-128.png" alt="" />
+                  <img src="/voyage-icon-2.png" alt="" />
                 </span>
 
                 <div class="msg__col">
@@ -1779,7 +1780,7 @@ watch(streaming, (v) => {
                    （解析需求 / 核对天气 / 查车次），等待才不焦躁 -->
               <div v-if="thinking" class="msg msg--assistant">
                 <span class="msg__avatar" aria-hidden="true">
-                  <img src="/voyage-mark-128.png" alt="" />
+                  <img src="/voyage-icon-2.png" alt="" />
                 </span>
                 <div class="msg__col">
                   <div class="waiting" role="status" aria-live="polite">

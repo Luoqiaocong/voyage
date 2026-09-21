@@ -136,15 +136,11 @@ onUnmounted(() => {
     <div class="nav__inner">
       <RouterLink to="/" class="brand" @click="close">
         <span class="brand__mark" aria-hidden="true">
-          <!-- 站点图标组的 voyage-mark-128.png（128x128，15.5 KB）。
-               资源分工：apple-touch-icon / favicon-32 / voyage-mark 三件套
-               由 voyage-mark.jpeg 扩展而来，用于站点与导航栏；
-               voyage-mark-2.* 专供对话页与登录页。
-               此版已去白边并满幅裁切：内容铺满整个画布，
-               源图 646x713 偏竖，故裁掉少量上下边缘换取横向铺满；
-               圆角处的白点由容器自身的圆角遮挡。
-               34px 显示、3 倍屏需 102px，128 足够且体积可控。 -->
-          <img src="/voyage-mark-128.png" alt="" />
+          <!-- 站点图标 voyage-icon-3.png（64x64，6 KB）。
+               导航栏的标记只显示 34px，用 64px 源图即可覆盖 2 倍屏，
+               体积也比 128px 版本小得多；128px 那两个版本留给
+               登录页（voyage-icon-1）与对话页头像（voyage-icon-2）。 -->
+          <img src="/voyage-icon-3.png" alt="" />
         </span>
         <span class="brand__text">Voyage <em>AI</em></span>
       </RouterLink>

@@ -363,13 +363,11 @@ function handleThirdParty() {
 
       <!-- 品牌落款 -->
       <RouterLink to="/" class="auth__brand" @click.stop>
-        <!-- 登录页属 voyage-mark-2 系列（该系列专供登录页与对话页）。
-             voyage-mark-2-128.png 是由该系列源图裁好的 128x128 版本：
-             内容铺满画布无留白，体积 27.8 KB。
-             这里显示 36px（3 倍屏需 108px），128 足够；
-             若直接引 512 的 voyage-mark-2.png 要下 207.9 KB，不成比例。 -->
+        <!-- 品牌落款用的 voyage-icon-1.png（128x128，19.2 KB）。
+             这里显示 36px，3 倍屏需 108px，128 足够；
+             登录页是品牌露出最完整的一屏，故用 128px 版本而非 64px 的。 -->
         <span class="auth__brand-mark">
-          <img src="/voyage-mark-2-128.png" alt="" />
+          <img src="/voyage-icon-1.png" alt="" />
         </span>
         <span class="auth__brand-text">Voyage <em>AI</em></span>
       </RouterLink>
