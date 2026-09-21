@@ -32,3 +32,6 @@ web/.env.*
 
 # 本地审计日志导出（一次性清理的备份，不入库）
 audit_orphans_backup.json
+
+# AI ���ߵĹ������ļ������˼����м̣�����⣩
+.monkeycode/

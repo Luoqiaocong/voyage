@@ -108,20 +108,29 @@ POSTGRES_PASSWORD=<用 openssl rand -hex 16 生成>
 ALLOWED_ORIGINS=["https://<你的域名>"]
 
 # ---- 模型与邮件密钥（沿用你现有的值）----
-# 当前只有 OpenCode Go 一个 LLM 通道在用，配这三项即可
+# 默认走 OpenCode Go 通道，配这三项即可
 OPENCODE_GO_URL=...
 OPENCODE_API_KEY=...
 RESEND_API_KEY=...
 ```
 
-> **`DEEPSEEK_API_KEY` / `DASHSCOPE_API_KEY` 不用填**（此处原列了它们，已删）：
-> `DASHSCOPE_API_KEY` 已从代码中移除（全项目零引用）；
-> `DEEPSEEK_API_KEY` 保留在配置里但**当前未启用** —— `get_llm()` 无条件走
-> OpenCode 通道，没有降级分支。按旧版文档填了它们，会误以为配好了备用通道。
+> **LLM 通道可切换**：由 `LLM_CHANNEL` 决定，可选
+> `opencode`（默认）/ `deepseek` / `senseaudio` / `zhipu`。
+> 切到别的通道时，填对应的 `*_API_KEY` 与 `*_BASE_URL`（见 `.env.example`），
+> 未选中的通道其密钥留空不影响启动。解析逻辑在 `app/core/ai/llm.py`。
+>
+> 关闭思考的参数因网关而异：智谱用 `extra_body={"thinking":{"type":"disabled"}}`，
+> 其余通道用 `reasoning_effort="none"`。
+> **注意 glm-5.x 系（含 glm-5.3-flash）是「始终思考」，不接受关闭思考并直接返回 400**，
+> 智谱通道请用 `glm-4.5-air` 这类可关思考的模型。
 
 > **`DATABASE_URL` / `REDIS_URL` 不用填**：compose 已覆盖为容器内的
 > postgres 与 redis 服务地址（见 docker-compose.yml 的 environment 段）。
 > 留空或用 .env.example 里的占位值都不影响容器部署。
+
+> **邮件发件地址**：`MAIL_FROM_ADDRESS` 必须是 Resend 已验证域名下的地址。
+> 用了未验证的地址时，接口仍返回成功（`mailer.py` 会吞掉 SMTP 异常），
+> 但邮件永远收不到 —— 表现为「验证码发不出去又看不到报错」。
 
 ### 3.3 收紧文件权限
 
@@ -332,6 +341,32 @@ docker compose logs --tail=80 backend  # 看报错
 docker compose logs --tail=50 backend | grep -iE "error|exception"
 ```
 Redis 相关报错居多。确认 redis 容器 healthy：`docker compose ps`。
+
+### 启动日志报文件日志不可用（PermissionError: '/app/data/output'）
+`/app/data` 是宿主 bind mount，会覆盖镜像内已授权好的目录；容器以
+`voyage(uid 10001)` 运行，宿主目录若属 root 就写不进去（日志降级为仅控制台）。
+在宿主机执行后重启即可，重建数据目录后需重复一次：
+```bash
+mkdir -p data/output/logs data/exports && chown -R 10001:10001 data
+docker compose restart backend
+```
+
+### backend 反复 Restarting，日志报 `alembic: not found`
+说明构建镜像用的 `uv.lock` 里没有 alembic（后端 CMD 会先跑 `alembic upgrade head`）。
+确认 `alembic` 已在 `pyproject.toml` 的 dependencies 中并更新锁文件后重新构建。
+
+### 对话没有内容返回 / 日志报 MCP 命名空间不可用
+先确认容器能否访问模型网关与 MCP 依赖源：
+```bash
+docker exec voyage-backend sh -c \
+  'curl -sS -o /dev/null -w "%{http_code} %{time_total}\n" --max-time 12 \
+   https://opencode.ai/zen/go/v1/models'
+```
+超时说明出口被限制（此时 LLM 调用会挂起：SSE 已返回 200 但正文为空，
+最终由 `conversation/service.py` 报「AI 服务暂时不可用」）。
+同类现象是日志出现 `[mcp] namespace 'travel' 不可用`、工具数为 0 ——
+DuckDuckGo MCP 需要在容器内联网下载。二者都需平台侧放行出口，
+容器内改不了；临时办法是切到可达的 LLM 通道（见 3.2）。
 
 ---
 
