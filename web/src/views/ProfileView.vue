@@ -20,7 +20,7 @@ import MemoryPanel from '@/components/MemoryPanel.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
 import { AVATAR_BASE_URL } from '@/constants'
 import { changePassword, deleteAccount, getAvatars, sendCode, updateProfile } from '@/api/user'
-import { listItineraries } from '@/api/itinerary'
+import { countItineraries } from '@/api/itinerary'
 import { listConversations } from '@/api/conversation'
 import { listMemories } from '@/api/memory'
 import { useUiStore } from '@/stores/ui'
@@ -76,7 +76,7 @@ onMounted(async () => {
   // 头像库与足迹数据互不依赖，并行拉取
   const [lib, its, convs, mems] = await Promise.allSettled([
     getAvatars(),
-    listItineraries(),
+    countItineraries(),
     listConversations(),
     listMemories(false)
   ])
@@ -85,7 +85,7 @@ onMounted(async () => {
   else ui.toast('头像库加载失败，可稍后重试', 'error')
   loadingAvatars.value = false
 
-  if (its.status === 'fulfilled') footprint.itineraries = its.value.length
+  if (its.status === 'fulfilled') footprint.itineraries = its.value
   if (convs.status === 'fulfilled') footprint.conversations = convs.value.length
   if (mems.status === 'fulfilled') footprint.memories = mems.value.memories.length
   loadingFootprint.value = false

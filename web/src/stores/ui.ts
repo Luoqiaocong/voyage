@@ -9,11 +9,23 @@ export interface ToastItem {
   message: string
 }
 
+export interface ConfirmChoice {
+  label: string
+  value: string
+  kind?: 'primary' | 'ghost' | 'danger'
+}
+
+export interface ConfirmState {
+  message: string
+  choices?: ConfirmChoice[]
+  resolve: (v: boolean | string | null) => void
+}
+
 let toastSeq = 0
 
 export const useUiStore = defineStore('ui', () => {
   const toasts = ref<ToastItem[]>([])
-  const confirmState = ref<{ message: string; resolve: (v: boolean) => void } | null>(null)
+  const confirmState = ref<ConfirmState | null>(null)
 
   function toast(message: string, type: ToastType = 'info', duration = 3200) {
     const id = ++toastSeq
@@ -25,14 +37,27 @@ export const useUiStore = defineStore('ui', () => {
 
   function confirm(message: string): Promise<boolean> {
     return new Promise((resolve) => {
-      confirmState.value = { message, resolve }
+      confirmState.value = {
+        message,
+        resolve: (v) => resolve(v === true)
+      }
     })
   }
 
-  function resolveConfirm(v: boolean) {
+  function confirmChoices(message: string, choices: ConfirmChoice[]): Promise<string | null> {
+    return new Promise((resolve) => {
+      confirmState.value = {
+        message,
+        choices,
+        resolve: (v) => resolve(typeof v === 'string' ? v : null)
+      }
+    })
+  }
+
+  function resolveConfirm(v: boolean | string | null) {
     confirmState.value?.resolve(v)
     confirmState.value = null
   }
 
-  return { toasts, confirmState, toast, confirm, resolveConfirm }
+  return { toasts, confirmState, toast, confirm, confirmChoices, resolveConfirm }
 })

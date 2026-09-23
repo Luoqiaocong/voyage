@@ -1,32 +1,38 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AppNavbar from '@/components/AppNavbar.vue'
 import BackToTop from '@/components/BackToTop.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
-import { listItineraries, type ItineraryDetail } from '@/api/itinerary'
+import { deleteItinerary, listItineraries, type ItineraryDetail } from '@/api/itinerary'
 import { useUiStore } from '@/stores/ui'
 import { formatDateTime } from '@/utils/datetime'
 import { PAGE_COPY } from '@/constants/copy'
 import { preferenceTone } from '@/utils/preferenceTone'
 import { parseTransport } from '@/utils/transportParse'
 
+const PAGE_SIZE = 12
+
 const router = useRouter()
 const ui = useUiStore()
 const items = ref<ItineraryDetail[]>([])
 const loading = ref(true)
+const page = ref(1)
+const total = ref(0)
+const keyword = ref('')
+const query = ref('')
+const deletingId = ref<number | null>(null)
 
-/**
- * 每张卡片的解析结果。
- *
- * 在卡片渲染前一次性算好，而不是把 parseTransport 写进模板里调用 ——
- * 模板每次重渲染都会重新解析，而列表可能有几十条。
- */
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
+const hasPrev = computed(() => page.value > 1)
+const hasNext = computed(() => page.value < totalPages.value)
+const isEmpty = computed(() => !loading.value && items.value.length === 0 && !query.value)
+const isNoMatch = computed(() => !loading.value && items.value.length === 0 && !!query.value)
+
 const cards = computed(() =>
   items.value.map((it) => ({
     it,
     transport: parseTransport(it.plan.transport),
-    // 只展示前 4 个标签：再多会挤成两行，反而看不清重点
     prefs: (it.plan.preferences ?? []).slice(0, 4),
     extraPrefs: Math.max((it.plan.preferences ?? []).length - 4, 0)
   }))
@@ -36,15 +42,65 @@ function go(id: number) {
   router.push(`/itineraries/${id}`)
 }
 
-onMounted(async () => {
+async function load() {
+  loading.value = true
   try {
-    items.value = await listItineraries()
+    const data = await listItineraries({
+      page: page.value,
+      page_size: PAGE_SIZE,
+      q: query.value
+    })
+    items.value = data.itineraries
+    total.value = data.total
+    page.value = data.page
   } catch (e: any) {
     ui.toast(e?.message ?? '行程列表加载失败', 'error')
   } finally {
     loading.value = false
   }
+}
+
+function applySearch() {
+  query.value = keyword.value.trim()
+  page.value = 1
+  void load()
+}
+
+function gotoPage(next: number) {
+  if (next < 1 || next > totalPages.value) return
+  page.value = next
+  void load()
+}
+
+async function removeCard(it: ItineraryDetail, e: Event) {
+  e.stopPropagation()
+  const dest = it.plan.destination || '未命名'
+  const sure = await ui.confirm(`确定删除「${dest}」的行程吗？`)
+  if (!sure) return
+  deletingId.value = it.id
+  try {
+    await deleteItinerary(it.id)
+    ui.toast('行程已删除', 'success')
+    if (items.value.length === 1 && page.value > 1) page.value -= 1
+    await load()
+  } catch (err: any) {
+    ui.toast(err?.message ?? '删除失败', 'error')
+  } finally {
+    deletingId.value = null
+  }
+}
+
+let searchTimer: number | null = null
+watch(keyword, () => {
+  if (searchTimer) window.clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(() => {
+    const next = keyword.value.trim()
+    if (next === query.value) return
+    applySearch()
+  }, 320)
 })
+
+onMounted(load)
 </script>
 
 <template>
@@ -58,11 +114,22 @@ onMounted(async () => {
             <h1 class="page-title">我的行程</h1>
             <p class="section-sub">AI 从对话里替你整理出的结构化出行方案</p>
           </div>
-          <RouterLink to="/chat" class="btn btn-primary">
+          <RouterLink to="/chat" class="btn btn-primary it-head-cta">
             <TravelIcon name="plane" :size="17" />
             去规划新的旅程
           </RouterLink>
         </div>
+
+        <form class="it-search" @submit.prevent="applySearch">
+          <input
+            v-model="keyword"
+            class="input it-search__input"
+            type="search"
+            placeholder="搜索目的地或交通"
+            aria-label="搜索行程"
+          />
+          <button class="btn btn-ghost" type="submit">搜索</button>
+        </form>
 
         <!-- 加载态：旅行语气 -->
         <div v-if="loading" class="empty">
@@ -79,8 +146,17 @@ onMounted(async () => {
           <p>{{ PAGE_COPY.itinerariesLoading }}</p>
         </div>
 
+        <!-- 搜索无结果 -->
+        <div v-else-if="isNoMatch" class="card empty empty--rich">
+          <h3>没有匹配的行程</h3>
+          <p>换个目的地关键词试试，或清空搜索查看全部。</p>
+          <button class="btn btn-ghost btn-gap" type="button" @click="keyword = ''; applySearch()">
+            清空搜索
+          </button>
+        </div>
+
         <!-- 空状态：邀请再次出发 -->
-        <div v-else-if="items.length === 0" class="card empty empty--rich">
+        <div v-else-if="isEmpty" class="card empty empty--rich">
           <span class="empty__art" aria-hidden="true">
             <svg viewBox="0 0 120 96" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
               <path d="M10 78 L 40 34 L 60 62 L 78 38 L 110 78 Z" />
@@ -204,13 +280,34 @@ onMounted(async () => {
                 <TravelIcon name="clock" :size="13" />
                 {{ formatDateTime(c.it.updated_at) }}
               </span>
-              <span class="it-card__go">
-                查看行程
-                <TravelIcon name="arrow-right" :size="15" />
-              </span>
+              <div class="it-card__foot-ops">
+                <button
+                  class="it-card__del"
+                  type="button"
+                  :disabled="deletingId === c.it.id"
+                  :aria-label="`删除 ${c.it.plan.destination}`"
+                  @click="removeCard(c.it, $event)"
+                >
+                  {{ deletingId === c.it.id ? '删除中…' : '删除' }}
+                </button>
+                <span class="it-card__go">
+                  查看行程
+                  <TravelIcon name="arrow-right" :size="15" />
+                </span>
+              </div>
             </footer>
           </article>
         </div>
+
+        <nav v-if="total > PAGE_SIZE" class="it-pager" aria-label="行程分页">
+          <button class="btn btn-ghost btn--sm" type="button" :disabled="!hasPrev" @click="gotoPage(page - 1)">
+            上一页
+          </button>
+          <span class="it-pager__info">第 {{ page }} / {{ totalPages }} 页 · 共 {{ total }} 份</span>
+          <button class="btn btn-ghost btn--sm" type="button" :disabled="!hasNext" @click="gotoPage(page + 1)">
+            下一页
+          </button>
+        </nav>
       </div>
     </main>
 
@@ -220,6 +317,23 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.it-search {
+  display: flex;
+  gap: 10px;
+  margin: -8px 0 22px;
+}
+.it-search__input { flex: 1; min-width: 0; }
+
+.it-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin: 28px 0 8px;
+  flex-wrap: wrap;
+}
+.it-pager__info { font-size: 0.84rem; color: var(--text2); }
+
 .it-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -233,6 +347,30 @@ onMounted(async () => {
   transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.22s, border-color 0.22s;
   overflow: hidden;
 }
+
+.it-card__foot-ops {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.it-card__del {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text3);
+  font-size: 0.76rem;
+  opacity: 0;
+  transition: opacity 0.18s, color 0.18s, background-color 0.18s;
+}
+.it-card:hover .it-card__del,
+.it-card:focus-within .it-card__del { opacity: 1; }
+.it-card__del:hover:not(:disabled) {
+  color: var(--danger);
+  background: rgba(224, 82, 82, 0.1);
+}
+.it-card__del:disabled { opacity: 0.7; cursor: not-allowed; }
 
 /* 顶部渐变纸条：像行程票据的抬头 */
 .it-card::before {
@@ -563,5 +701,14 @@ onMounted(async () => {
 
 .empty--rich h3 { font-family: var(--font-display); font-size: 1.3rem; }
 .empty--rich p { max-width: 32em; margin: 8px auto 0; line-height: 1.75; }
+
+@media (max-width: 720px) {
+  .page-head { flex-direction: column; align-items: stretch; gap: 14px; }
+  .it-head-cta { width: 100%; justify-content: center; }
+  .it-search { flex-direction: column; margin-top: 0; }
+  .it-grid { grid-template-columns: 1fr; gap: 14px; }
+  .it-card__del { opacity: 1; }
+  .it-pager { gap: 10px; }
+}
 </style>
 

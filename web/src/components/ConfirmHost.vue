@@ -7,7 +7,10 @@ function ok() {
   ui.resolveConfirm(true)
 }
 function cancel() {
-  ui.resolveConfirm(false)
+  ui.resolveConfirm(null)
+}
+function pick(value: string) {
+  ui.resolveConfirm(value)
 }
 </script>
 
@@ -18,8 +21,25 @@ function cancel() {
         <h3 class="confirm-title">请确认</h3>
         <p class="confirm-msg">{{ ui.confirmState.message }}</p>
         <div class="confirm-actions">
-          <button class="btn btn-ghost" @click="cancel">取消</button>
-          <button class="btn btn-danger" @click="ok">确定</button>
+          <template v-if="ui.confirmState.choices?.length">
+            <button
+              v-for="c in ui.confirmState.choices"
+              :key="c.value"
+              class="btn"
+              :class="{
+                'btn-primary': c.kind === 'primary' || !c.kind,
+                'btn-ghost': c.kind === 'ghost',
+                'btn-danger': c.kind === 'danger'
+              }"
+              @click="pick(c.value)"
+            >
+              {{ c.label }}
+            </button>
+          </template>
+          <template v-else>
+            <button class="btn btn-ghost" @click="cancel">取消</button>
+            <button class="btn btn-danger" @click="ok">确定</button>
+          </template>
         </div>
       </div>
     </div>
@@ -39,20 +59,28 @@ function cancel() {
 }
 
 .confirm-box {
-  width: min(420px, 100%);
+  width: min(440px, 100%);
   padding: 26px 26px 22px;
   text-align: center;
 }
 
 .confirm-title { font-size: 1.25rem; }
 
-.confirm-msg { margin-top: 10px; color: var(--ink-soft); }
+.confirm-msg { margin-top: 10px; color: var(--ink-soft); line-height: 1.65; }
 
 .confirm-actions {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   justify-content: center;
+  flex-wrap: wrap;
   margin-top: 22px;
+}
+
+.confirm-actions .btn { min-width: 96px; }
+
+@media (max-width: 480px) {
+  .confirm-actions { flex-direction: column; }
+  .confirm-actions .btn { width: 100%; }
 }
 
 @keyframes fade {

@@ -18,8 +18,9 @@ import {
   type Conversation,
   type MessagesPage
 } from '@/api/conversation'
-import { extractItinerary } from '@/api/itinerary'
+import { extractItinerary, getItineraryByConversation } from '@/api/itinerary'
 import { useUiStore } from '@/stores/ui'
+import { useChatAutoScroll } from '@/composables/useChatAutoScroll'
 import { suggestFromContext } from '@/utils/quickSuggest'
 import { formatRelative } from '@/utils/datetime'
 import { groupByTime, isToday } from '@/utils/conversationGroup'
@@ -49,6 +50,8 @@ const historyTruncated = ref(false)
 const input = ref('')
 const loadingList = ref(false)
 const streaming = ref(false)
+/** 提取行程进行中：锁按钮，避免连点落多份行程 */
+const extracting = ref(false)
 
 const activeConversation = computed(
   () => conversations.value.find((c) => c.id === activeId.value) ?? null
@@ -92,98 +95,19 @@ const streamPhase = computed(() => {
 })
 
 /**
- * 用户是否**主动**滚离了底部。
- *
- * 它同时决定两件事：「要不要自动跟随流式输出」与「是否显示回到底部按钮」。
- *
- * ## 为什么必须是「用户意图」而不是「容器位置」
- *
- * 原实现是在容器的 scroll 事件里按间距判断（gap > 80px 即视为离开底部），
- * 看起来合理，但**在流式输出下必然失效**：
- *
- *   AI 每吐一段字，内容就变长 → 容器位置被动改变 → 触发 scroll 事件
- *   → 重新计算 gap → 一旦落回 80px 内就把本标志置回 false
- *   → 自动跟随恢复 → 用户刚拉上去又被拽回底部
- *
- * 也就是说，用户想往上读时，只要 AI 还在输出，就永远「甩不掉」底部。
- *
- * 现在改为：**只有用户的滚动动作才能把它置为 true**（滚轮向上、触摸下拉、
- * 键盘上翻）。程序性的内容增长不再影响它。
- * 复位只发生在两个明确的时刻：用户点「回到底部」、或用户发送新消息。
+ * 自动跟随滚动（滚轮/触摸/键盘意图识别、是否跟随流式输出、回到底部）。
+ * 实现与设计说明见 composables/useChatAutoScroll.ts。
  */
-const awayFromBottom = ref(false)
-
-/** 距底部多少像素内仍视为「在底部」（仅用于判断按钮显隐，不再用于自动复位） */
-const NEAR_BOTTOM_PX = 80
-
-/**
- * 容器滚动时只维护一个事实：**用户如果已经滚回最底，就恢复自动跟随**。
- *
- * 注意方向是单向的 —— 这里只可能把 true 变 false，绝不由位置把 false 变 true。
- * 置 true 只由下面的用户意图处理函数负责。
- */
-function onStreamScroll() {
-  const el = scrollEl.value
-  if (!el) return
-  const gap = el.scrollHeight - el.scrollTop - el.clientHeight
-  // 已到底（容差内）→ 视为用户回到了跟随状态
-  if (awayFromBottom.value && gap <= NEAR_BOTTOM_PX) {
-    awayFromBottom.value = false
-  }
-}
-
-/** 用户往上滚 → 停止自动跟随 */
-function markUserScrolledUp() {
-  awayFromBottom.value = true
-}
-
-/** 滚轮：只认向上的滚动（往下滚交给 onStreamScroll 的到底复位） */
-function onWheelIntent(e: WheelEvent) {
-  if (e.deltaY < 0) markUserScrolledUp()
-}
-
-let touchStartY: number | null = null
-function onTouchStartIntent(e: TouchEvent) {
-  touchStartY = e.touches[0]?.clientY ?? null
-}
-/** 触摸：手指下拉（y 变大）表示在看上面的内容 */
-function onTouchMoveIntent(e: TouchEvent) {
-  if (touchStartY === null) return
-  const y = e.touches[0]?.clientY
-  if (y === undefined) return
-  if (y - touchStartY > 12) markUserScrolledUp()
-}
-
-/** 键盘：PageUp / 方向键上 / Home 都是「往上读」的明确意图 */
-function onKeyIntent(e: KeyboardEvent) {
-  if (['PageUp', 'ArrowUp', 'Home'].includes(e.key)) markUserScrolledUp()
-}
-
-/**
- * 滚动到底部。
- *
- * @param smooth 是否平滑滚动
- * @param force  是否无视「用户已滚上去」强制拉到底
- *
- * 默认**只在用户本来就在底部时才自动跟随**。
- * 原先是无条件跟随：用户往回翻看历史时，新生成的内容会不断把他拽回底部，
- * 根本读不了上面的内容 —— 这是流式输出场景的经典体验问题。
- * 用户主动触发的操作（发送、点箭头、切换会话）则用 force 强制到底。
- */
-function scrollToBottom(smooth = false, force = false) {
-  nextTick(() => {
-    const el = scrollEl.value
-    if (!el) return
-    if (!force && awayFromBottom.value) return
-    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
-    awayFromBottom.value = false
-  })
-}
-
-/** 点箭头：回到底部并恢复自动跟随 */
-function jumpToBottom() {
-  scrollToBottom(true, true)
-}
+const {
+  awayFromBottom,
+  onStreamScroll,
+  onWheelIntent,
+  onTouchStartIntent,
+  onTouchMoveIntent,
+  onKeyIntent,
+  scrollToBottom,
+  jumpToBottom
+} = useChatAutoScroll(scrollEl)
 
 /* ---------------- 数据加载 ---------------- */
 async function loadConversations() {
@@ -492,7 +416,7 @@ const rounds = computed(
 const canExtract = computed(() => lastAiMessage() !== null)
 
 async function handleExtract() {
-  if (!activeId.value || streaming.value) return
+  if (!activeId.value || streaming.value || extracting.value) return
 
   const target = lastAiMessage()
   if (!target) {
@@ -500,22 +424,46 @@ async function handleExtract() {
     return
   }
 
-  // 这里刻意不做内容预判。
-  //
-  // 能否被抽成行程，本质上无法靠文本特征猜出来（试过按是否出现 Day N、
-  // 是否含时段等要素判断，真行程会被误拦、车次表反而会被放行）。
-  // 真正的判定器在后端：抽取失败返回 None 并报错，不会编造内容。
-  // 前端只需告知会总结会话历史，由用户确认。
-  const sure = await ui.confirm('voyage将总结会话历史以提取合适的行程，是否继续？')
-  if (!sure) return
-
-  ui.toast('AI 正在总结会话历史并提取行程，请稍候…', 'info')
+  let overwrite = false
   try {
-    const it = await extractItinerary(activeId.value)
-    ui.toast(`行程已提取：${it.plan.destination}（${it.plan.days} 天）`, 'success', 4200)
-    router.push(`/itineraries/${it.id}`)
+    const existing = await getItineraryByConversation(activeId.value)
+    if (existing) {
+      const dest = existing.plan.destination || '未命名'
+      const choice = await ui.confirmChoices(
+        `该会话已有行程「${dest}」（${existing.plan.days} 天）。voyage 将总结会话历史再提取，请选择覆盖或另存。`,
+        [
+          { label: '覆盖原行程', value: 'overwrite', kind: 'primary' },
+          { label: '另存一份', value: 'copy', kind: 'ghost' },
+          { label: '取消', value: 'cancel', kind: 'ghost' }
+        ]
+      )
+      if (!choice || choice === 'cancel') return
+      overwrite = choice === 'overwrite'
+    } else {
+      const sure = await ui.confirm('voyage将总结会话历史以提取合适的行程，是否继续？')
+      if (!sure) return
+    }
+  } catch {
+    const sure = await ui.confirm('voyage将总结会话历史以提取合适的行程，是否继续？')
+    if (!sure) return
+  }
+
+  extracting.value = true
+  ui.toast('正在后台总结会话并生成行程，稍后可在「我的行程」查看', 'info', 4200)
+  try {
+    const it = await extractItinerary(activeId.value, overwrite)
+    const go = await ui.confirmChoices(
+      `行程已生成：${it.plan.destination}（${it.plan.days} 天）。可稍后在行程页查看，也可以现在前往。`,
+      [
+        { label: '前往行程', value: 'go', kind: 'primary' },
+        { label: '留在对话', value: 'stay', kind: 'ghost' }
+      ]
+    )
+    if (go === 'go') router.push(`/itineraries/${it.id}`)
   } catch (e: any) {
     ui.toast(e?.message ?? '行程提取失败，请确认对话中包含完整的行程安排', 'error')
+  } finally {
+    extracting.value = false
   }
 }
 
@@ -1260,20 +1208,21 @@ onMounted(async () => {
 
   user.fetchUserInfo().catch(() => {})
   await loadConversations()
-  if (conversations.value.length > 0) {
-    await openConversation(conversations.value[0].id)
-  }
 
-  // 首页示例胶囊带来的问题：填进输入框并聚焦，用户确认后直接回车发送。
-  // 这里刻意不自动发送——自动发出去会让用户失去修改措辞的机会，
-  // 而示例文案本就是给人改的起点。
   const raw = route.query.example
   const example = Array.isArray(raw) ? raw[0] : raw
-  if (typeof example === 'string' && example.trim()) {
-    input.value = example.trim()
+  const autoText = typeof example === 'string' ? example.trim() : ''
+
+  if (autoText) {
     await nextTick()
-    // 进入时清掉 query，避免刷新或返回时重复填充
     router.replace({ path: route.path })
+    await newConversation()
+    await runTurn(autoText, true)
+    return
+  }
+
+  if (conversations.value.length > 0) {
+    await openConversation(conversations.value[0].id)
   }
 })
 
@@ -1658,12 +1607,12 @@ watch(streaming, (v) => {
               -->
               <button
                 class="tool-btn tool-btn--accent"
-                :disabled="streaming || !canExtract"
-                :title="canExtract ? '总结对话历史，整理成行程' : '先让 AI 给出一份行程安排'"
+                :disabled="streaming || extracting || !canExtract"
+                :title="extracting ? '正在生成行程' : canExtract ? '总结对话历史，整理成行程' : '先让 AI 给出一份行程安排'"
                 @click="handleExtract"
               >
                 <TravelIcon name="luggage" :size="15" />
-                提取行程
+                <span>{{ extracting ? '生成中…' : '提取行程' }}</span>
               </button>
             </div>
           </div>
@@ -3664,7 +3613,6 @@ watch(streaming, (v) => {
   }
 
   .tool-btn { padding: 8px 10px; font-size: 0.78rem; }
-  .tool-btn span { display: none; }   /* 窄屏只留图标，靠 title 提示 */
   .msg__col { max-width: 92%; }
   .msg--user .msg__col { max-width: 88%; }
   /* 窄屏没有物理键盘，键帽提示没有意义，收起以省一行高度 */
@@ -3675,8 +3623,10 @@ watch(streaming, (v) => {
 }
 
 @media (max-width: 560px) {
-  .chat-toolbar { padding: 10px 12px; }
+  .chat-toolbar { padding: 10px 12px; gap: 8px; }
   .chat-toolbar__title { font-size: 0.9rem; }
+  .chat-toolbar__status { display: none; }
   .chat-scroll { padding: 18px 14px; }
+  .tool-btn { flex-shrink: 0; }
 }
 </style>

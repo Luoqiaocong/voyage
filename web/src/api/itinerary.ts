@@ -45,20 +45,61 @@ export interface ItineraryPatch {
   accommodation?: ItineraryActivity | null
 }
 
-export async function listItineraries(): Promise<ItineraryDetail[]> {
-  const data = (await http.get('/itineraries/')) as unknown as { itineraries?: ItineraryDetail[] }
-  return data.itineraries ?? []
+export interface ItineraryListPage {
+  itineraries: ItineraryDetail[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export async function listItineraries(params?: {
+  page?: number
+  page_size?: number
+  q?: string
+}): Promise<ItineraryListPage> {
+  const data = (await http.get('/itineraries/', {
+    params: {
+      page: params?.page ?? 1,
+      page_size: params?.page_size ?? 12,
+      q: params?.q?.trim() || undefined
+    }
+  })) as unknown as Partial<ItineraryListPage>
+  return {
+    itineraries: data.itineraries ?? [],
+    total: data.total ?? 0,
+    page: data.page ?? 1,
+    page_size: data.page_size ?? 12
+  }
+}
+
+export async function countItineraries(): Promise<number> {
+  const data = (await http.get('/itineraries/count')) as unknown as { total?: number }
+  return data.total ?? 0
 }
 
 export async function getItinerary(id: number): Promise<ItineraryDetail> {
   return (await http.get(`/itineraries/${id}`)) as unknown as ItineraryDetail
 }
 
-export async function extractItinerary(conversationId: string): Promise<ItineraryDetail> {
+export async function getItineraryByConversation(
+  conversationId: string
+): Promise<ItineraryDetail | null> {
+  const data = (await http.get(`/itineraries/by-conversation/${conversationId}`)) as unknown as {
+    itinerary?: ItineraryDetail | null
+  }
+  return data.itinerary ?? null
+}
+
+export async function extractItinerary(
+  conversationId: string,
+  overwrite = false
+): Promise<ItineraryDetail> {
   // 提取是一次同步 LLM 调用，耗时可达数十秒；http 实例默认 20s 会误判超时。
-  return (await http.post(`/itineraries/extract/${conversationId}`, undefined, {
-    timeout: 120000
-  })) as unknown as ItineraryDetail
+  return (await http.post(
+    `/itineraries/extract/${conversationId}`,
+    { overwrite },
+    { timeout: 120000 }
+  )) as unknown as ItineraryDetail
 }
 
 export async function updateItinerary(id: number, plan: ItineraryPlan): Promise<ItineraryDetail> {

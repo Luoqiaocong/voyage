@@ -115,11 +115,18 @@ const showPlaceholder = computed(() => draft.value.length === 0 && !inputFocused
 const draft = ref('')
 const inputEl = ref<HTMLInputElement | null>(null)
 
-/** 带着这句话进对话；未登录先去登录（沿用既有 example 参数约定） */
+/** 带着这句话进规划页；未登录先去登录，登录后开新会话并自动发送。 */
 function submitPlan() {
   const text = draft.value.trim()
-  const target = startHref()
-  router.push(text ? { path: target, query: { example: text } } : { path: target })
+  if (user.isLoggedIn) {
+    router.push(text ? { path: '/chat', query: { example: text } } : { path: '/chat' })
+    return
+  }
+  router.push(
+    text
+      ? { path: '/login', query: { example: text, redirect: '/chat' } }
+      : { path: '/login', query: { redirect: '/chat' } }
+  )
 }
 
 /** 想不到问题就点示例，填进输入框并聚焦，用户可再改 */
@@ -694,16 +701,6 @@ onUnmounted(() => {
   recognition = null
 })
 
-/**
- * 未登录先去登录页，已登录直接进对话页。
- *
- * 抽成函数而不是在调用处内联三元表达式：这个判断原先写了两遍
- * （一个已删除的「或用账号登录后再规划」入口 + submitPlan），
- * 两处重复意味着将来改跳转规则必须记得同时改两个地方。
- */
-function startHref(): string {
-  return user.isLoggedIn ? '/chat' : '/login'
-}
 </script>
 
 <template>
