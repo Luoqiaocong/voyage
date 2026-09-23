@@ -54,6 +54,14 @@ RESET_EMAIL_WINDOW = 600  # 秒
 RESET_IP_LIMIT = 10       # 同一 IP 10 分钟内最多 10 次重置相关请求
 RESET_IP_WINDOW = 600     # 秒
 
+# 行程提取
+#
+# 为什么必须限流：每次提取都是一次同步的 LLM 调用（超时 120s），
+# 成本与耗时都远高于普通接口。会话级锁只拦「同一会话并发」，
+# 同一用户对不同会话并发仍会各自打一次模型，因此这里按**用户**限流。
+EXTRACT_USER_LIMIT = 10   # 同一用户 1 小时内最多提取 10 次
+EXTRACT_USER_WINDOW = 3600  # 秒
+
 # ===================== 2. 限流判定（计数原语在 redis 层） =====================
 
 
@@ -115,3 +123,12 @@ def reset_token_email_key(email: str) -> str:
 def login_fail_key(email: str) -> str:
     """登录失败计数的邮箱维度键。"""
     return f"rate:login_fail:email:{email.lower()}"
+
+
+def extract_user_key(user_id: int) -> str:
+    """行程提取的用户维度键。
+
+    用用户而非 IP：提取发生在登录后，IP 维度会把同一出口 NAT 下的
+    多个正常用户算作一个，而成本真正归属的维度是账号。
+    """
+    return f"rate:extract:user:{user_id}"
