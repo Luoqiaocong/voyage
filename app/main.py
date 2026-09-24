@@ -107,6 +107,22 @@ app.add_middleware(
 )
 
 register_exception(app)
+
+
+@app.get("/health", include_in_schema=False)
+def health() -> dict[str, str]:
+    """存活探针。
+
+    刻意不查数据库 / Redis：编排系统关心的是「进程还在不在、能否响应」，
+    真正的依赖可用性由业务请求自然暴露。把下游挂进探针会让某个依赖抖动
+    误判成「本服务该被杀掉重启」，反而放大故障。
+
+    路径放在根级而非 /api/v1：探针是基础设施接口，不该带业务版本前缀；
+    也不进 OpenAPI 文档（include_in_schema=False），避免污染接口清单。
+    """
+    return {"status": "ok"}
+
+
 @app.get("/")
 def read_root():
     return RedirectResponse(url="/docs")

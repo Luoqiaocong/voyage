@@ -101,10 +101,10 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 EXPOSE 8000
 
-# 复用已有的 /docs，无需为此新增端点。
-# start-period 留足时间给数据库迁移与 Redis 建连。
+# 打 /health（轻量存活探针），而不是 /docs：
+# /docs 需要渲染整个 OpenAPI 文档，既慢又会在文档生成出错时误报不健康。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8000/docs || exit 1
+    CMD curl -fsS http://127.0.0.1:8000/health || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 # 先执行数据库迁移再启动服务：新部署或代码升级后表结构自动就绪。
