@@ -5,8 +5,9 @@
 1. 令牌用 secrets.token_urlsafe(32)（约 256 bit 熵），不可枚举、不可猜测；
    对外不暴露行程 ID，拿到链接也推不出其他行程。
 2. 密码只存 argon2 哈希（复用用户模块实现），校验用恒定时间比较。
-   同时另存明文以便分享者"再次查看"，这是与项目既有 REFRESH_TOKEN 存储一致的
-   权衡；属于已知弱点，已在模型注释中标注生产环境应移除。
+   明文一律不落库：一旦保存原文，任何能读到数据库的途径（备份、只读副本、
+   运维导出）都能直接看到访问密码。分享者忘记密码时走「重置」，
+   而不是「回看原文」。
 3. 失效判定统一在 _resolve_share 里完成（不存在/已撤销/已过期），
    调用方拿到的必然是可用分享，避免各处重复判断而遗漏某一分支。
 4. 「不存在」与「已撤销」对外返回同一个业务码，避免被用来枚举有效令牌。
@@ -113,7 +114,6 @@ class ShareService(TransactionMixin):
                 allow_copy=allow_copy,
                 allow_edit=allow_edit,
                 password_hash=PasswordManager.hash(password) if password else None,
-                password_plain=password or None,
                 expires_at=expires_at,
             )
 
@@ -148,10 +148,12 @@ class ShareService(TransactionMixin):
 
         if clear_password:
             share.password_hash = None
+            # 顺带清掉历史遗留明文：停下新写入之外，也在改动时就地抹除旧值，
+            # 让存量库里的明文随用户操作逐步消失
             share.password_plain = None
         elif password:
             share.password_hash = PasswordManager.hash(password)
-            share.password_plain = password
+            share.password_plain = None
 
         if clear_expiry:
             share.expires_at = None

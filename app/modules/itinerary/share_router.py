@@ -54,7 +54,6 @@ def _share_item(share) -> ShareItem:
         allow_copy=share.allow_copy,
         allow_edit=share.allow_edit,
         has_password=bool(share.password_hash),
-        password=share.password_plain,
         expires_at=share.expires_at,
         revoked_at=share.revoked_at,
         view_count=share.view_count or 0,

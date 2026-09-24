@@ -282,9 +282,10 @@ class ItineraryShare(Base):
     设计要点
     --------
     - token 用 secrets.token_urlsafe(32) 生成，高熵不可猜；不直接暴露行程 ID。
-    - 密码只存哈希（复用用户模块的 argon2 实现），绝不落明文；
-      另设 password_plain 便于"再次查看"时回显，与 REFRESH_TOKEN 的既有做法一致。
-      ⚠ 该字段是已知的明文存储弱点，若本项目进入真实生产环境应移除并改为只允许重置密码。
+    - 密码只存哈希（复用用户模块的 argon2 实现），校验用恒定时间比较；
+      明文不落库，分享者忘记密码时重置而非回看。
+    - password_plain 为历史遗留列：早期为「再次查看」回显保存过明文，
+      现已停写、停读。保留列定义是为了避免对存量库做迁移，后续再清理。
     - allow_copy / allow_edit 两个布尔位而非单一枚举：
       "可复制但不可改" 与 "可改" 是正交的，用位组合更自然。
     - 所有人用 owner_id 冗余记录，便于"我分享出去的全部链接"一次性查询与撤销。
@@ -318,7 +319,7 @@ class ItineraryShare(Base):
         String(255), nullable=True, comment="访问密码哈希（argon2）；为空表示无需密码"
     )
     password_plain: Mapped[str | None] = mapped_column(
-        String(64), nullable=True, comment="访问密码明文（便于分享者再次查看）"
+        String(64), nullable=True, comment="[已废弃] 早期保存的访问密码明文；现已停写停读，保留列以免迁移"
     )
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True, comment="过期时间（UTC）；为空表示永不过期"

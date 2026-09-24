@@ -28,8 +28,10 @@ const shares = ref<ShareItem[]>([])
 const loading = ref(false)
 const creating = ref(false)
 const busyId = ref<number | null>(null)
-/** 已展开密码的分享 id 集合 */
-const revealed = ref(new Set<number>())
+/** 正在改密码的分享 id；null 表示当前没有在编辑 */
+const pwdEditId = ref<number | null>(null)
+/** 新密码草稿。只在这次请求里存在：服务端不回传明文，提交后即清空。 */
+const pwdDraft = ref('')
 
 const EXPIRY_OPTIONS = [
   { value: 1, label: '1 天' },
@@ -128,11 +130,55 @@ async function revoke(s: ShareItem) {
   }
 }
 
-function toggleReveal(id: number) {
-  const next = new Set(revealed.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  revealed.value = next
+function startPwdEdit(s: ShareItem) {
+  pwdEditId.value = s.id
+  pwdDraft.value = ''
+}
+
+function cancelPwdEdit() {
+  pwdEditId.value = null
+  pwdDraft.value = ''
+}
+
+/**
+ * 设置或重置访问密码。
+ *
+ * 服务端只保存哈希、不回传明文，所以这里提交后立即清空草稿：
+ * 密码只存在于这一次请求里。忘记密码的兜底是「重新设置」，
+ * 与「回看原文」相比少了一条明文泄漏路径。
+ */
+async function savePassword(s: ShareItem) {
+  const pwd = pwdDraft.value.trim()
+  if (pwd.length < 4) {
+    ui.toast('密码至少 4 位', 'error')
+    return
+  }
+  busyId.value = s.id
+  try {
+    await updateShare(s.id, { password: pwd })
+    s.has_password = true
+    ui.toast('访问密码已更新', 'success')
+    cancelPwdEdit()
+  } catch (e: any) {
+    ui.toast(e?.message ?? '修改失败', 'error')
+  } finally {
+    busyId.value = null
+  }
+}
+
+async function clearPassword(s: ShareItem) {
+  const ok = await ui.confirm('清除后任何人凭链接即可访问，不再需要密码。确认清除？')
+  if (!ok) return
+  busyId.value = s.id
+  try {
+    await updateShare(s.id, {}, { clearPassword: true })
+    s.has_password = false
+    ui.toast('已清除访问密码', 'success')
+  } catch (e: any) {
+    ui.toast(e?.message ?? '清除失败', 'error')
+  } finally {
+    busyId.value = null
+  }
 }
 
 /** 有效期显示成「还剩几天」比一串时间戳更直观 */
@@ -297,14 +343,44 @@ defineExpose({ reload: load })
             <i aria-hidden="true">·</i>
             <span>{{ expiryText(s) }}</span>
             <i aria-hidden="true">·</i>
-            <span v-if="s.has_password" class="row__pwd">
-              密码
-              <b>{{ revealed.has(s.id) ? s.password : '••••••' }}</b>
-              <button class="linkbtn" @click="toggleReveal(s.id)">
-                {{ revealed.has(s.id) ? '隐藏' : '显示' }}
-              </button>
+            <span class="row__pwd">
+              <template v-if="pwdEditId === s.id">
+                <input
+                  v-model="pwdDraft"
+                  class="input input--sm row__pwd-input"
+                  type="text"
+                  placeholder="新密码（4-32 位）"
+                  maxlength="32"
+                  @keydown.enter="savePassword(s)"
+                  @keydown.esc="cancelPwdEdit"
+                />
+                <button
+                  class="linkbtn"
+                  :disabled="busyId === s.id || pwdDraft.trim().length < 4"
+                  @click="savePassword(s)"
+                >
+                  保存
+                </button>
+                <button class="linkbtn" :disabled="busyId === s.id" @click="cancelPwdEdit">
+                  取消
+                </button>
+              </template>
+              <template v-else-if="s.has_password">
+                已设密码
+                <button class="linkbtn" :disabled="busyId === s.id" @click="startPwdEdit(s)">
+                  改密码
+                </button>
+                <button class="linkbtn" :disabled="busyId === s.id" @click="clearPassword(s)">
+                  清除
+                </button>
+              </template>
+              <template v-else>
+                免密码
+                <button class="linkbtn" :disabled="busyId === s.id" @click="startPwdEdit(s)">
+                  设密码
+                </button>
+              </template>
             </span>
-            <span v-else>免密码</span>
           </div>
         </div>
       </li>
@@ -476,7 +552,7 @@ defineExpose({ reload: load })
 }
 .row__stat i { font-style: normal; opacity: 0.45; }
 .row__pwd { color: var(--text2); }
-.row__pwd b { font-family: var(--mono); font-weight: 600; }
+.row__pwd-input { width: 150px; margin-left: 6px; vertical-align: middle; }
 
 /* ---- 开关 ----
    用开关而不是按钮表达授权：开关的形态本身就说明「这是一项持续生效的设置」，
