@@ -60,6 +60,33 @@ const activeConversation = computed(
 const scrollEl = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
 
+/**
+ * 输入框高度上限，必须与样式里的 .composer__box max-height 保持一致。
+ * 到顶后交回 textarea 自己的内部滚动，避免多行输入把消息区一路挤没。
+ */
+const INPUT_MAX_HEIGHT = 180
+
+/**
+ * 让输入框随内容行数长高。
+ *
+ * 固定高度时多出来的行会藏进 textarea 的内部滚动区，用户得在框里上下滑
+ * 才能看到自己写了什么 —— 这里按 scrollHeight 撑开，写到上限才转内部滚动。
+ *
+ * 先把 height 置 auto 再读 scrollHeight：否则上一次设的 height 会被算进
+ * 内容高度，删行时高度收不回去（只会越撑越高）。
+ */
+function resizeInput() {
+  const el = inputEl.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${Math.min(el.scrollHeight, INPUT_MAX_HEIGHT)}px`
+}
+
+watch(input, () => nextTick(resizeInput))
+watch(inputEl, (el) => {
+  if (el) nextTick(resizeInput)
+})
+
 /* ---------------- 流式临时状态 ---------------- */
 const streamText = ref('')
 const streamReasoning = ref('')
@@ -3361,7 +3388,10 @@ watch(streaming, (v) => {
   width: 100%;
   /* 单行时约 40px 高，比原先的 34px 更好点、也更接近常见的聊天输入框 */
   min-height: 40px;
+  /* 高度由 JS 按内容撑开（见 resizeInput），到 INPUT_MAX_HEIGHT 封顶后
+     转为内部滚动；这里的上限是 JS 失效时的兜底，两处数值需保持一致 */
   max-height: 180px;
+  overflow-y: auto;
   resize: none;
   border: none;
   background: transparent;
