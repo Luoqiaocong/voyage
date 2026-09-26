@@ -15,6 +15,7 @@ from langchain.chat_models import init_chat_model
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from app.config import config
+from app.shared.utils import log
 
 from .opencode import build_http_client, build_sync_http_client
 from .token import token_counter
@@ -99,11 +100,26 @@ TASK_TEMPERATURES: dict[TaskKind, float] = {
 
 # 需要关闭「思考模式」的任务。
 #
-# 原因：该通道的 deepseek-v4.1-flash 默认开启思考，而思考模式下强制指定
+# 原因：deepseek-v4.1-flash 等模型默认开启思考，而思考模式下强制指定
 # tool_choice 会被上游拒绝（400 Thinking mode does not support this tool_choice）。
-# 结构化提取依赖强制工具调用，故必须关闭思考；其余任务保留思考，
-# 以便前端展示推理过程并提升复杂规划质量。
+# 结构化提取依赖强制工具调用，故必须关闭思考；其余任务是否思考由
+# config.LLM_DISABLE_REASONING 决定。
 TASK_REASONING_OFF: frozenset[TaskKind] = frozenset({TaskKind.EXTRACT})
+
+
+# 已就「始终思考」警告过的模型：避免每次提取都重复刷日志
+_warned_always_thinking: set[str] = set()
+
+
+def _zhipu_always_thinking(model_name: str) -> bool:
+    """智谱直连网关下，该模型是否「始终思考」（无法关闭）。
+
+    glm-5.x 系（如 glm-5.3-flash）不接受 thinking={"type":"disabled"}，
+    传了会直接 400（"该模型始终思考..."）。glm-4.x / glm-5-turbo 可以关闭。
+    注意：这条限制只属于**智谱直连**；同一模型经 SenseAudio 网关时
+    支持 reasoning_effort="none"（实测），故不要在别处复用此判断。
+    """
+    return model_name == "glm-5" or model_name.startswith("glm-5.")
 
 
 def get_task_llm(task: TaskKind, **overrides) -> BaseChatModel:
@@ -140,18 +156,35 @@ def get_llm(
     resolved_base_url = base_url or channel_base_url
     resolved_api_key = api_key or channel_api_key
 
-    # 关闭思考模式的参数因网关而异：
-    # - 智谱：用 thinking={"type":"disabled"}；其 glm-4.x/5-turbo 接受该参数，
-    #   而 glm-5.x 系属「始终思考」，传了会 400，故换模型而非换参数。
-    #   同时不能再下发 reasoning_effort，否则智谱会以参数冲突报错。
-    # - 其它（DeepSeek/SenseAudio/OpenCode）：用 OpenAI 兼容的 reasoning_effort。
+    # 思考模式参数因网关与模型而异（结论均来自实测）：
+    # - 智谱直连 glm-5.x：「始终思考」，只接受 reasoning_effort 的 low/high/max，
+    #   传 thinking=disabled 或 reasoning_effort=none 会 400。不传则走默认档，
+    #   实测会大量思考（正文首字 40s+）。故这里统一落到一个合法档位（默认 low），
+    #   在「关不掉思考」的前提下把延迟与 reasoning token 压下来；low 档下强制
+    #   tool_choice 仍返回原生 tool_calls（EXTRACT 主路径可用）。
+    # - 智谱直连 glm-4.x / glm-5-turbo：用 thinking={"type":"disabled"} 真正关闭。
+    # - 其它（DeepSeek/SenseAudio/OpenCode）：用 reasoning_effort="none"；
+    #   实测 SenseAudio 的 glm-5.3-flash 接受 none 并真正关闭思考。
+    channel = config.LLM_CHANNEL.strip().lower()
     extra_body = None
-    if reasoning_effort == "none":
-        if config.LLM_CHANNEL.strip().lower() == "zhipu":
+    if channel == "zhipu":
+        if _zhipu_always_thinking(model_name):
+            # 始终思考模型无法关闭思考，统一固定到配置档位（默认 low=最低），
+            # 不沿用调用方传入的 high/max —— 需求就是把思考强度压到最低。
+            reasoning_effort = config.ZHIPU_ALWAYS_THINKING_EFFORT
+            if reasoning_effort not in ("low", "high", "max"):
+                reasoning_effort = "low"
+            if model_name not in _warned_always_thinking:
+                _warned_always_thinking.add(model_name)
+                log.info(
+                    f"智谱直连模型 {model_name} 为「始终思考」，无法完全关闭；"
+                    f"已使用 reasoning_effort={reasoning_effort}"
+                )
+        elif reasoning_effort == "none":
             extra_body = {"thinking": {"type": "disabled"}}
             reasoning_effort = None
-        else:
-            extra_body = {"reasoning_effort": "none"}
+    elif reasoning_effort == "none":
+        extra_body = {"reasoning_effort": "none"}
 
     return init_chat_model(
         model=model_name,

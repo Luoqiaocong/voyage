@@ -121,8 +121,19 @@ RESEND_API_KEY=...
 >
 > 关闭思考的参数因网关而异：智谱用 `extra_body={"thinking":{"type":"disabled"}}`，
 > 其余通道用 `reasoning_effort="none"`。
-> **注意 glm-5.x 系（含 glm-5.3-flash）是「始终思考」，不接受关闭思考并直接返回 400**，
-> 智谱通道请用 `glm-4.5-air` 这类可关思考的模型。
+>
+> **glm-5.3-flash 的思考能力因网关而异（均已实测）**：
+> - 智谱直连：`glm-5.3-flash` 为「始终思考」，只接受 `reasoning_effort` 的
+>   `low/high/max`，传 `thinking={"type":"disabled"}` 或 `reasoning_effort="none"`
+>   直接 400。框架会按模型名自动改用 `ZHIPU_ALWAYS_THINKING_EFFORT`（默认 `low`），
+>   其强制 `tool_choice` 原生可用。**务必保留 low 档**：实测不传档位时走默认档，
+>   正文首字可到 40s+、reasoning token 很高；`low` 档 reasoning token 归零、
+>   正文首字约 0.7s。
+> - SenseAudio 网关：同名模型接受 `reasoning_effort="none"` 并真正关闭思考，
+>   强制 `tool_choice` 也返回原生 `tool_calls`。**要在 glm-5.3-flash 上不思考，
+>   请用 `LLM_CHANNEL=senseaudio`**。
+> - 智谱直连若必须关思考：改用 `glm-4.5-air`（实测可关，无 `reasoning_content`），
+>   但它的强制 `tool_choice` 不返回原生 `tool_calls`，提取会退到提示词回退路径。
 
 > **`DATABASE_URL` / `REDIS_URL` 不用填**：compose 已覆盖为容器内的
 > postgres 与 redis 服务地址（见 docker-compose.yml 的 environment 段）。

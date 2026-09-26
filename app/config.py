@@ -18,6 +18,13 @@ class VoyageConfig(BaseSettings):
     # 说明：EXTRACT（结构化提取）因强制 tool_choice 必须关闭思考，不受此开关影响。
     LLM_DISABLE_REASONING: bool = False
 
+    # 智谱直连「始终思考」模型（glm-5.x）使用的思考档位。
+    # 该类模型只接受 low/high/max，无法关闭思考。实测不传档位时走默认档，
+    # 会大量思考（正文首字可到 40s+、reasoning token 很高）；low 档实测
+    # reasoning token 归零、正文首字约 0.7s。仅在 LLM_CHANNEL=zhipu 且
+    # 模型命中 glm-5.x 时生效，用于在「关不掉思考」前提下把成本与延迟压下来。
+    ZHIPU_ALWAYS_THINKING_EFFORT: str = "low"
+
     # ---------- 模型配置 ----------
     # 全任务统一使用该模型（OpenCode Go 通道）：速度快、成本低、月度额度高
     OPENCODE_LLM_MODEL: str = "deepseek-v4.1-flash"
@@ -53,6 +60,8 @@ class VoyageConfig(BaseSettings):
 
     # ---------- SenseAudio 通道（通过 LLM_CHANNEL=senseaudio 启用）----------
     # OpenAI 兼容网关，模型 id 形如 glm-5.3-flash（注意官方 id 带连字符）。
+    # 该网关的 glm-5.3-flash 支持 reasoning_effort="none" 真正关闭思考，
+    # 且强制 tool_choice 返回原生 tool_calls（实测）。
     # 与 DeepSeek 通道同理：未启用时这些配置不参与调用，故默认给空值。
     SENSEAUDIO_API_KEY: str = ""
     SENSEAUDIO_BASE_URL: str = "https://api.senseaudio.cn/v1"
@@ -61,7 +70,10 @@ class VoyageConfig(BaseSettings):
     # ---------- 智谱 BigModel 通道（通过 LLM_CHANNEL=zhipu 启用）----------
     # OpenAI 兼容网关；默认选 GLM-4.5-Air：0.8/2 元每百万 token，可关闭思考
     # （thinking={"type":"disabled"}），实测多工具调用稳定、首字延迟低。
-    # 注意：glm-5.x 系为「始终思考」，不接受关闭思考，不要用作本通道模型。
+    # 注意：glm-5.x 系（如 glm-5.3-flash）为「始终思考」，不接受关闭思考；
+    # 选用它时由 llm._zhipu_always_thinking 自动跳过禁用参数（思考保持开启），
+    # 否则每次请求都会 400。glm-4.5-air 的强制 tool_choice 不返回原生
+    # tool_calls，提取会退到提示词回退路径；glm-5.3-flash 则原生可用。
     ZHIPU_API_KEY: str = ""
     ZHIPU_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
     ZHIPU_LLM_MODEL: str = "glm-4.5-air"
