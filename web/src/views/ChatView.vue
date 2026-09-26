@@ -2,10 +2,12 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppNavbar from '@/components/AppNavbar.vue'
-import MessageBody from '@/components/MessageBody.vue'
-import ToolTimeline from '@/components/ToolTimeline.vue'
 import TravelIcon from '@/components/TravelIcon.vue'
+import SearchModal from '@/components/SearchModal.vue'
+import ChatComposer from '@/components/ChatComposer.vue'
+import MessageStream from '@/components/MessageStream.vue'
 import type { ToolStep } from '@/types/tool'
+import type { RdMsg } from '@/types/message'
 import {
   createConversation,
   deleteConversations,
@@ -14,25 +16,18 @@ import {
   renameConversation,
   streamChat,
   toolLabel,
-  type ChatMessage,
   type Conversation,
   type MessagesPage
 } from '@/api/conversation'
-import { extractItinerary, getItineraryByConversation } from '@/api/itinerary'
 import { useUiStore } from '@/stores/ui'
 import { useChatAutoScroll } from '@/composables/useChatAutoScroll'
+import { useItineraryExtract } from '@/composables/useItineraryExtract'
 import { suggestFromContext } from '@/utils/quickSuggest'
 import { formatRelative } from '@/utils/datetime'
 import { groupByTime, isToday } from '@/utils/conversationGroup'
 import { shouldShowWelcome as shouldShowWelcomePure } from '@/utils/welcomeGate'
 import { useUserStore } from '@/stores/user'
 import { PAGE_COPY } from '@/constants/copy'
-
-/** 会话消息：assistant 消息可携带本轮的工具调用与思考过程 */
-interface RdMsg extends ChatMessage {
-  tools?: ToolStep[]
-  reasoning?: string
-}
 
 /** 打开会话时默认加载的历史轮次（一轮 = 一条用户消息及其后的回复） */
 const HISTORY_ROUNDS = 30
@@ -50,49 +45,24 @@ const historyTruncated = ref(false)
 const input = ref('')
 const loadingList = ref(false)
 const streaming = ref(false)
-/** 提取行程进行中：锁按钮，避免连点落多份行程 */
-const extracting = ref(false)
 
 const activeConversation = computed(
   () => conversations.value.find((c) => c.id === activeId.value) ?? null
 )
 
 const scrollEl = ref<HTMLElement | null>(null)
-const inputEl = ref<HTMLTextAreaElement | null>(null)
 
 /**
- * 输入框高度上限，必须与样式里的 .composer__box max-height 保持一致。
- * 到顶后交回 textarea 自己的内部滚动，避免多行输入把消息区一路挤没。
+ * 输入区组件实例。焦点管理需要跨组件：欢迎屏关闭、切会话、生成结束
+ * 这些时机都要把光标交回输入框，而输入框已收进 ChatComposer。
  */
-const INPUT_MAX_HEIGHT = 180
-
-/**
- * 让输入框随内容行数长高。
- *
- * 固定高度时多出来的行会藏进 textarea 的内部滚动区，用户得在框里上下滑
- * 才能看到自己写了什么 —— 这里按 scrollHeight 撑开，写到上限才转内部滚动。
- *
- * 先把 height 置 auto 再读 scrollHeight：否则上一次设的 height 会被算进
- * 内容高度，删行时高度收不回去（只会越撑越高）。
- */
-function resizeInput() {
-  const el = inputEl.value
-  if (!el) return
-  el.style.height = 'auto'
-  el.style.height = `${Math.min(el.scrollHeight, INPUT_MAX_HEIGHT)}px`
-}
-
-watch(input, () => nextTick(resizeInput))
-watch(inputEl, (el) => {
-  if (el) nextTick(resizeInput)
-})
+const composerRef = ref<InstanceType<typeof ChatComposer> | null>(null)
 
 /* ---------------- 流式临时状态 ---------------- */
 const streamText = ref('')
 const streamReasoning = ref('')
 const streamTools = ref<ToolStep[]>([])
 const streamError = ref('')
-const showReasoning = ref(false)
 
 /**
  * 当前生成的中断控制器。
@@ -255,7 +225,6 @@ function resetStream() {
   streamReasoning.value = ''
   streamTools.value = []
   streamError.value = ''
-  showReasoning.value = false
 }
 
 /**
@@ -302,7 +271,7 @@ async function newConversation() {
    */
   if (isDraft.value) {
     await nextTick()
-    inputEl.value?.focus()
+    composerRef.value?.focus()
     return
   }
   activeId.value = null
@@ -310,7 +279,7 @@ async function newConversation() {
   resetStream()
   historyTruncated.value = false
   await nextTick()
-  inputEl.value?.focus()
+  composerRef.value?.focus()
 }
 
 /**
@@ -403,96 +372,17 @@ async function handleDelete(conv: Conversation) {
 }
 
 /**
- * 判断当前会话里是否已有 AI 回复（提取按钮的可用条件）。
+ * 行程提取：把当前会话的历史总结成行程。
  *
- * 提取范围是整个会话：后端读取整段对话历史（含用户提出的目的地、天数、
- * 预算等约束），由 AI 总结后整理成行程；前端只负责判断「有没有内容可提取」，
- * 不需要也不能指定某条消息。
+ * 判断条件、二次确认、调用提取、结果引导都在
+ * composables/useItineraryExtract.ts；视图只消费它的返回值。
  */
-function lastAiMessage(): RdMsg | null {
-  for (let i = messages.value.length - 1; i >= 0; i--) {
-    const m = messages.value[i]
-    if (m.role === 'assistant' && typeof m.content === 'string' && m.content.trim()) {
-      return m
-    }
-  }
-  return null
-}
-
-/**
- * 对话轮数（一问一答算一轮）。
- *
- * 用助手回复条数而非用户消息条数：用户可能连发几条才得到一次回答，
- * 按用户消息数会高估进度。
- */
-const rounds = computed(
-  () =>
-    messages.value.filter(
-      (m) => m.role === 'assistant' && typeof m.content === 'string' && m.content.trim()
-    ).length
-)
-
-/**
- * 是否具备提取条件（存在 AI 回复）。
- *
- * 只判断「有没有可提取的文本」，不判断「像不像行程」——
- * 内容预判已被证明两个方向都会出错（见 handleExtract 里的说明），
- * 真正的判定器在后端。这里仅用于把按钮置灰并给出提示，
- * 让用户在点之前就知道为什么不能点。
- */
-const canExtract = computed(() => lastAiMessage() !== null)
-
-async function handleExtract() {
-  if (!activeId.value || streaming.value || extracting.value) return
-
-  const target = lastAiMessage()
-  if (!target) {
-    ui.toast('这个会话里还没有 AI 回复，无法提取', 'error')
-    return
-  }
-
-  let overwrite = false
-  try {
-    const existing = await getItineraryByConversation(activeId.value)
-    if (existing) {
-      const dest = existing.plan.destination || '未命名'
-      const choice = await ui.confirmChoices(
-        `该会话已有行程「${dest}」（${existing.plan.days} 天）。voyage 将总结会话历史再提取，请选择覆盖或另存。`,
-        [
-          { label: '覆盖原行程', value: 'overwrite', kind: 'primary' },
-          { label: '另存一份', value: 'copy', kind: 'ghost' },
-          { label: '取消', value: 'cancel', kind: 'ghost' }
-        ]
-      )
-      if (!choice || choice === 'cancel') return
-      overwrite = choice === 'overwrite'
-    } else {
-      const sure = await ui.confirm('voyage将总结会话历史以提取合适的行程，是否继续？')
-      if (!sure) return
-    }
-  } catch {
-    const sure = await ui.confirm('voyage将总结会话历史以提取合适的行程，是否继续？')
-    if (!sure) return
-  }
-
-  extracting.value = true
-  ui.toast('正在后台总结会话并生成行程，稍后可在「我的行程」查看', 'info', 4200)
-  try {
-    const it = await extractItinerary(activeId.value, overwrite)
-    const go = await ui.confirmChoices(
-      `行程已生成：${it.plan.destination}（${it.plan.days} 天）。可稍后在行程页查看，也可以现在前往。`,
-      [
-        { label: '前往行程', value: 'go', kind: 'primary' },
-        { label: '留在对话', value: 'stay', kind: 'ghost' }
-      ]
-    )
-    if (go === 'go') router.push(`/itineraries/${it.id}`)
-  } catch (e: any) {
-    ui.toast(e?.message ?? '行程提取失败，请确认对话中包含完整的行程安排', 'error')
-  } finally {
-    extracting.value = false
-  }
-}
+const { extracting, rounds, canExtract, handleExtract } = useItineraryExtract({
+  messages,
+  activeId,
+  streaming,
+  router
+})
 
 /* ---------------- 发送 ---------------- */
 async function send() {
@@ -616,7 +506,7 @@ async function runTurn(text: string, echoUser: boolean) {
       abortCtl = null
       resetStream()
       scrollToBottom(true)
-      inputEl.value?.focus()
+      composerRef.value?.focus()
     }
   }
 }
@@ -761,108 +651,15 @@ const filteredConversations = computed(() => {
 /**
  * 搜索弹窗是否打开。
  *
+ * 弹窗的展示、内容检索、命中片段等逻辑都在 components/SearchModal.vue，
+ * 这里只保留开关状态，供侧栏/工具栏按钮触发。
  * 与侧栏内联搜索不同：弹窗支持**搜索对话内容**（用户要求），
  * 而内容不在列表接口里 —— 必须按会话逐条拉取消息。
- * 弹窗形态给了这件事空间：有标题栏、有结果区、有加载提示，
- * 内联在侧栏里做这些会把列表挤得没法看。
  */
 const searchOpen = ref(false)
-const searchEl = ref<HTMLInputElement | null>(null)
-/** 弹窗里的关键词。与侧栏内联搜索用的 convKeyword 分开 ——
- *  两者生命周期不同：弹窗关闭即清空，侧栏那份是列表过滤态 */
-const searchKeyword = ref('')
-
-/**
- * 会话内容缓存：{ 会话 id -> 全部消息文本（小写，便于匹配） }。
- * 首次打开弹窗时按需拉取，之后复用；切换会话不影响它。
- */
-const convContent = ref<Record<string, string>>({})
-/** 内容是否已拉过（避免重复请求；空内容也要记，否则会反复重试） */
-const contentLoaded = ref<Set<string>>(new Set())
-const contentLoading = ref(false)
-
-/**
- * 并行拉取所有会话的消息内容。
- *
- * 为什么不做后端搜索：消息存在 langgraph 的 checkpointer 表里
- * （会话表只有 id/title/created_at），要后端搜就得查它的内部结构，
- * 与第三方实现细节耦合。而会话量级是「几十条」，
- * 并发拉取 + 前端过滤足够快，改动面也小得多。
- *
- * 并发上限 6：一次性打几十个请求会把浏览器与服务端都压住，
- * 而这个量级下 6 并发已经能在 1~2 秒内跑完。
- */
-const CONTENT_CONCURRENCY = 6
-
-async function loadContents() {
-  const todo = conversations.value.filter((c) => !contentLoaded.value.has(c.id))
-  if (!todo.length) return
-  contentLoading.value = true
-  let cursor = 0
-  const worker = async () => {
-    while (cursor < todo.length) {
-      const conv = todo[cursor++]
-      try {
-        const page = (await getMessagesPage(conv.id)) as MessagesPage
-        // 只保留纯文本消息：多模态消息的 content 是数组，没有可搜的文本
-        const text = (page.messages ?? [])
-          .map((m) => (typeof m.content === 'string' ? m.content : ''))
-          .join('\n')
-          .toLowerCase()
-        convContent.value = { ...convContent.value, [conv.id]: text }
-      } catch {
-        // 单条失败不该影响整体搜索：记为「已拉过、内容为空」
-        convContent.value = { ...convContent.value, [conv.id]: '' }
-      } finally {
-        contentLoaded.value = new Set(contentLoaded.value).add(conv.id)
-      }
-    }
-  }
-  try {
-    await Promise.all(Array.from({ length: Math.min(CONTENT_CONCURRENCY, todo.length) }, worker))
-  } finally {
-    contentLoading.value = false
-  }
-}
-
-/** 弹窗搜索结果：标题或**内容**命中 */
-const searchResults = computed(() => {
-  const kw = searchKeyword.value.trim().toLowerCase()
-  if (!kw) return conversations.value
-  return conversations.value.filter((c) => {
-    const title = (c.title ?? '').toLowerCase()
-    if (title.includes(kw)) return true
-    return (convContent.value[c.id] ?? '').includes(kw)
-  })
-})
-
-/** 命中片段：把内容里关键词周围的一小段截出来做预览 */
-function hitSnippet(id: string, kw: string): string {
-  const text = convContent.value[id] ?? ''
-  const k = kw.trim().toLowerCase()
-  if (!k) return ''
-  const i = text.indexOf(k)
-  if (i < 0) return ''
-  const start = Math.max(0, i - 24)
-  const raw = text.slice(start, i + k.length + 40).replace(/\s+/g, ' ').trim()
-  return (start > 0 ? '…' : '') + raw + '…'
-}
 
 function openSearch() {
   searchOpen.value = true
-  void loadContents()
-  void nextTick(() => searchEl.value?.focus())
-}
-
-function closeSearchModal() {
-  searchOpen.value = false
-  searchKeyword.value = ''
-}
-
-/** 点搜索结果：打开该会话并关掉弹窗 */
-function pickResult(id: string) {
-  closeSearchModal()
-  void openConversation(id)
 }
 
 /* ==================== 欢迎屏 / 草稿态 ==================== */
@@ -954,14 +751,11 @@ const isDraft = computed(() => !activeId.value && !shouldShowWelcome.value)
 /** 侧栏列表按时间分组（今天/昨天/7 天内/30 天内/更早） */
 const groupedConversations = computed(() => groupByTime(filteredConversations.value))
 
-/** 弹窗结果同样分组，便于在长列表里定位 */
-const groupedResults = computed(() => groupByTime(searchResults.value))
-
 /**
  * 把一段文案填进输入框并聚焦。
  *
  * 欢迎屏上的引导卡会用到它 —— 而欢迎屏那一分支**没有输入框**
- * （composer 在另一个分支里），直接 inputEl?.focus() 会静默失败。
+ * （composer 在另一个分支里），直接 focus 会静默失败。
  * 所以先离开欢迎屏（它已经完成使命：用户选好了起点），
  * 等输入框渲染出来再聚焦。
  */
@@ -971,7 +765,7 @@ async function fillInput(text: string) {
   // 于是关掉欢迎屏（同时落一条当天记录），让 composer 分支渲染出来
   if (shouldShowWelcome.value) dismissWelcome()
   await nextTick()
-  inputEl.value?.focus()
+  composerRef.value?.focus()
 }
 
 /**
@@ -1062,72 +856,6 @@ const quickPrompts = computed(() => {
   return contextual.length ? contextual : QUICK_PROMPTS
 })
 
-/**
- * 快捷芯片的配色。
- *
- * ## 为什么可以按关键词上色（而不是纯按序号）
- *
- * 这层颜色是**纯装饰**：它不承载语义，用户也不需要通过颜色去理解建议。
- * 所以可以大方地用「关键词命中」这种近似 —— 猜错了只是颜色不那么贴切，
- * 不会误导（对比：状态色猜错会让人误判系统状态）。
- *
- * ## 为什么要按关键词而不是按序号循环
- *
- * 按序号循环（i % 5）虽然简单，但同一句话在不同会话里会换颜色，
- * 换一批建议时颜色也跟着洗牌，看起来像随机噪声。
- * 按内容决定则同一句建议始终是同一个颜色，视觉上「稳定」得多。
- *
- * 顺序即优先级：越靠前的主题越具辨识度（吃 > 爬山 > 预算 …）。
- * 一个都命中不了时按序号回退，保证**同屏三张卡颜色一定不同**。
- */
-const CHIP_TONES: { keys: string[]; tone: string }[] = [
-  { keys: ['吃', '美食', '小吃', '火锅', '餐厅'], tone: 'food' },
-  { keys: ['预算', '多少钱', '花费', '省钱', '便宜'], tone: 'budget' },
-  { keys: ['天气', '下雨', '气温'], tone: 'weather' },
-  { keys: ['爬山', '徒步', '自然', '风景', '海岛', '看海'], tone: 'nature' },
-  { keys: ['古迹', '历史', '博物馆', '文化', '古镇'], tone: 'history' },
-  { keys: ['拍照', '摄影', '夜景'], tone: 'photo' },
-  { keys: ['亲子', '带娃', '老人', '带父母'], tone: 'family' },
-  { keys: ['几天', '日程', '安排', '路线', '行程'], tone: 'plan' }
-]
-const FALLBACK_TONES = ['plan', 'food', 'nature', 'budget', 'history']
-
-function chipTone(text: string, index: number): string {
-  for (const group of CHIP_TONES) {
-    if (group.keys.some((k) => text.includes(k))) return group.tone
-  }
-  return FALLBACK_TONES[index % FALLBACK_TONES.length]
-}
-
-/**
- * 是否展示快捷示例。
- * 只在「没在生成」且「输入框为空」时出现：用户一开始打字，
- * 建议就从帮助变成了干扰，而且那一行会把输入框顶上去。
- */
-const showQuickChips = computed(() => !streaming.value && !input.value.trim())
-
-/**
- * 底部提示行的显示时机。
- *
- * 原先提示行**常驻**，但它平时只是重复表头已经写过的 placeholder，
- * 真正有信息量的时刻是「光标已在输入框里、却还没想好写什么」。
- * 所以改为：聚焦时显示，或已经在输入内容时显示（此时提示的是换行方式）。
- * 好处是静息状态下输入区更干净，底部也不再多占一行。
- */
-const showInputHint = computed(() => inputFocused.value || !!input.value.trim())
-
-/** 输入框是否获得焦点：用于提示行显隐，以及键盘/触屏下的聚焦态表现 */
-const inputFocused = ref(false)
-
-/**
- * 是否可以发送。
- *
- * 抽成 computed 而不是在模板里写两遍 `input.trim()` ——
- * 按钮的 disabled 与 send-btn--ready（高亮态）必须用**同一个判断**，
- * 否则会出现「看起来可点但点了没反应」这类不一致。
- */
-const canSend = computed(() => input.value.trim().length > 0)
-
 /** 把工具事件合并进当前时间线：result 会回填到同名且仍在运行的步骤 */
 function applyToolChunk(name: string, label: string, phase: 'call' | 'result', content?: string) {
   if (phase === 'call') {
@@ -1173,20 +901,6 @@ function commitAssistant() {
     tools: hasTools ? streamTools.value.map((t) => ({ ...t, status: t.status === 'running' ? 'done' : t.status })) : undefined,
     reasoning: streamReasoning.value || undefined
   })
-}
-
-function onKeydown(e: KeyboardEvent) {
-  // Esc 停止生成：长回答时用户的手通常还在键盘上，
-  // 强制去够鼠标点停止按钮是多余的
-  if (e.key === 'Escape' && streaming.value) {
-    e.preventDefault()
-    stopStreaming()
-    return
-  }
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-    e.preventDefault()
-    send()
-  }
 }
 
 /**
@@ -1663,111 +1377,19 @@ watch(streaming, (v) => {
             @touchstart.passive="onTouchStartIntent"
             @touchmove.passive="onTouchMoveIntent"
           >
-            <div class="chat-stream">
-              <!--
-                草稿态的问候。
-                点「新会话」后消息区是空的，只有一个输入框会显得冷清、
-                也让人不确定「这里是不是坏了、能不能说话」。
-                一句问候把这件事说清楚，语气与欢迎屏一致（不说教、不堆字）。
-
-                位置刻意放在**消息区**而不是输入框里：
-                与欢迎屏同处一栏，视觉上前后连贯；输入区保持轻，
-                不被一行文字压得拥挤。
-              -->
-              <div v-if="isDraft" class="draft-hello">
-                <h2 class="draft-hello__title">{{ PAGE_COPY.chatDraftGreeting }}</h2>
-                <p class="draft-hello__hint">{{ PAGE_COPY.chatDraftHint }}</p>
-              </div>
-
-              <!-- 历史被截断时的提示：后端按轮次分页，更早的内容不在此次响应里 -->
-              <p v-if="historyTruncated" class="chat-truncated">
-                仅显示最近 {{ HISTORY_ROUNDS }} 轮对话
-              </p>
-              <div
-                v-for="(msg, i) in renderedMessages"
-                :key="i"
-                class="msg"
-                :class="`msg--${msg.role}`"
-              >
-                <!-- 助手头像：voyage-icon-2.png（128x128，带透明底）。
-                     30px 显示、3 倍屏需 90px，128 足够；
-                     用透明版是因为头像落在消息区背景上，
-                     透明底在浅色与深色主题下都能自然贴合。 -->
-                <span v-if="msg.role === 'assistant'" class="msg__avatar" aria-hidden="true">
-                  <img src="/voyage-icon-2.png" alt="" />
-                </span>
-
-                <div class="msg__col">
-                  <!-- 思考过程：默认折叠，不抢视线 -->
-                  <details v-if="msg.reasoning" class="reason">
-                    <summary>
-                      <span class="reason__dot"></span>
-                      思考过程
-                      <span class="reason__len">{{ msg.reasoning.length }} 字</span>
-                    </summary>
-                    <p>{{ msg.reasoning }}</p>
-                  </details>
-
-                  <!-- 工具调用：鲜明的时间线 -->
-                  <ToolTimeline v-if="msg.tools && msg.tools.length" :steps="msg.tools" />
-
-                  <!--
-                    正文：助手走结构化渲染，用户走纯文本。
-                    助手不再用气泡装 markdown —— 那会让用户看到满屏 ** 与 -，
-                    像在读源码。MessageBody 把它解析成小节标题、条目列表、
-                    行程片段与提示块，读起来像顾问给的方案。
-                  -->
-                  <MessageBody
-                    v-if="msg.content && msg.role === 'assistant'"
-                    class="msg__card"
-                    :class="{ 'msg__card--err': !!streamError && i === renderedMessages.length - 1 && streaming }"
-                    :text="msg.content"
-                    :streaming="streaming && i === renderedMessages.length - 1"
-                    @extract="handleExtract"
-                  />
-                  <div v-else-if="msg.content" class="msg__bubble">{{ msg.content }}</div>
-
-                  <!--
-                    流式光标已由 MessageBody 内部处理（末块不结构化），
-                    这里不再单独渲染，避免出现两个光标。
-                  -->
-
-                  <!-- 消息操作条：悬停浮现，避免常驻占用视线 -->
-                  <div v-if="msg.content && !streaming" class="msg__ops">
-                    <button class="op-btn" title="复制内容" @click="copyMessage(msg)">
-                      <TravelIcon name="check" :size="13" />
-                      复制
-                    </button>
-                    <button
-                      v-if="msg.role === 'assistant'"
-                      class="op-btn"
-                      title="用同一个问题再问一次"
-                      @click="regenerate(i)"
-                    >
-                      <TravelIcon name="compass" :size="13" />
-                      重新生成
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 首字等待：三点 + 当前阶段
-                   只说「正在生成」等于没说；告诉用户此刻在做什么
-                   （解析需求 / 核对天气 / 查车次），等待才不焦躁 -->
-              <div v-if="thinking" class="msg msg--assistant">
-                <span class="msg__avatar" aria-hidden="true">
-                  <img src="/voyage-icon-2.png" alt="" />
-                </span>
-                <div class="msg__col">
-                  <div class="waiting" role="status" aria-live="polite">
-                    <span class="waiting__dots" aria-hidden="true">
-                      <i></i><i></i><i></i>
-                    </span>
-                    <span class="waiting__text">{{ streamPhase }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <MessageStream
+              :messages="renderedMessages"
+              :streaming="streaming"
+              :stream-error="streamError"
+              :thinking="thinking"
+              :stream-phase="streamPhase"
+              :is-draft="isDraft"
+              :history-truncated="historyTruncated"
+              :history-rounds="HISTORY_ROUNDS"
+              @copy="copyMessage"
+              @regenerate="regenerate"
+              @extract="handleExtract"
+            />
           </div>
 
           <!--
@@ -1795,109 +1417,18 @@ watch(streaming, (v) => {
           </Transition>
 
           <!--
-            输入区：快捷提示与输入框**收在同一个容器里**，共享一层边框与聚焦环。
-            原先两者是上下相邻的两个独立块（快捷条在外、输入框自己带边框），
-            视觉上只是「挨着」；合起来之后它们是一组，聚焦时整组一起高亮，
-            「这些芯片是用来填这个框的」这层关系就不用靠猜。
+            输入区已拆到 ChatComposer：快捷芯片、自适应高度、按键处理
+            都封装在组件内，视图只负责把输入内容与生成状态接进来。
           -->
-          <div class="composer">
-            <!--
-              快捷示例：只在输入框为空且没在生成时出现。
-              用户一旦开始打字就收起 —— 那时的建议会变成干扰。
-              横向滚动（不换行）：窄屏下不会挤成多行把输入框顶上去。
-            -->
-            <Transition name="chips">
-              <div v-if="showQuickChips" class="composer__chips">
-                <span class="composer__chips-label">试试</span>
-                <div class="composer__chips-scroll">
-                  <button
-                    v-for="(q, qi) in quickPrompts"
-                    :key="q"
-                    type="button"
-                    class="quick-chip"
-                    :class="`quick-chip--${chipTone(q, qi)}`"
-                    @click="fillInput(q)"
-                  >
-                    {{ q }}
-                  </button>
-                </div>
-              </div>
-            </Transition>
-
-            <div class="composer__row">
-              <textarea
-                ref="inputEl"
-                v-model="input"
-                class="composer__box"
-                rows="1"
-                :placeholder="
-                  streaming
-                    ? '正在回答，稍候可以继续追问…'
-                    : '说说你想去哪、几天、预算多少…'
-                "
-                :disabled="streaming"
-                @keydown="onKeydown"
-                @focus="inputFocused = true"
-                @blur="inputFocused = false"
-                aria-label="输入你的旅行需求"
-              ></textarea>
-
-              <!--
-                底部条：左侧是快捷键与字数，右侧是发送按钮。
-                按钮**收在框内**（而不是框外另起一列）——
-                放在外面会把输入框挤短、整块拉得很长；收进来之后
-                输入框能用满整行宽度，视觉上也更像常见的对话输入框。
-
-                键帽提示按需淡出（不是 v-if 移除）：位置始终占着，
-                否则按钮会随提示显隐左右跳动。
-              -->
-              <div class="composer__foot">
-                <span class="kbd-hint" :class="{ 'kbd-hint--hidden': !showInputHint }">
-                  <template v-if="!streaming">
-                    <kbd>Enter</kbd> 发送
-                    <span class="kbd-hint__sep">·</span>
-                    <kbd>Shift</kbd><kbd>Enter</kbd> 换行
-                  </template>
-                  <!-- 生成中改提示「可中断」，否则用户不知道有这条快捷方式 -->
-                  <template v-else>
-                    <kbd>Esc</kbd> 停止生成
-                  </template>
-                </span>
-
-                <span class="composer__foot-right">
-                  <span v-if="input.trim()" class="charcount">{{ input.length }}</span>
-                  <!--
-                    流式期间同一个按钮变为「停止生成」。
-                    用同一个位置而不是新增按钮：这里本就是「提交/取消本次生成」的位置，
-                    语义随状态切换比并排两个按钮更符合直觉。
-                  -->
-                  <button
-                    v-if="streaming"
-                    class="send-btn send-btn--stop"
-                    type="button"
-                    aria-label="停止生成"
-                    title="停止生成（已生成的内容会保留）"
-                    @click="stopStreaming"
-                  >
-                    <span class="send-btn__stop" aria-hidden="true"></span>
-                  </button>
-                  <button
-                    v-else
-                    class="send-btn"
-                    :class="{ 'send-btn--ready': canSend }"
-                    :disabled="!canSend"
-                    aria-label="发送消息"
-                    title="发送（Enter）"
-                    @click="send"
-                  >
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M5 12h14M13 6l6 6-6 6" />
-                    </svg>
-                  </button>
-                </span>
-              </div>
-            </div>
-          </div>
+          <ChatComposer
+            ref="composerRef"
+            v-model="input"
+            :streaming="streaming"
+            :quick-prompts="quickPrompts"
+            @send="send"
+            @stop="stopStreaming"
+            @pick="fillInput"
+          />
         </template>
       </section>
     </main>
@@ -1905,94 +1436,15 @@ watch(streaming, (v) => {
     <!--
       搜索弹窗（屏幕中央 + 背景遮罩）。
 
-      为什么做成弹窗而不是侧栏内联：
-        · 用户要求「点击搜索后在屏幕中央弹出」
-        · 更重要的是它要**搜索对话内容** —— 那需要展示命中片段，
-          侧栏那点宽度放不下；弹窗有完整的宽度与结果区。
-      遮罩同时承担两件事：视觉上把背后的对话区淡化（聚焦搜索本身），
-      以及点击空白处关闭。
+      做成弹窗的原因：用户要求「点击搜索后在屏幕中央弹出」，
+      而且它要**搜索对话内容**，需要展示命中片段，侧栏宽度放不下。
+      具体实现见 components/SearchModal.vue。
     -->
-    <Transition name="modal">
-      <div
-        v-if="searchOpen"
-        class="search-mask"
-        role="dialog"
-        aria-modal="true"
-        aria-label="搜索会话"
-        @click.self="closeSearchModal"
-      >
-        <div class="search-box">
-          <div class="search-box__head">
-            <TravelIcon name="search" :size="17" />
-            <input
-              ref="searchEl"
-              v-model="searchKeyword"
-              class="search-box__input"
-              type="search"
-              placeholder="搜索会话标题或对话内容…"
-              aria-label="搜索会话标题或对话内容"
-              @keydown.esc.prevent="closeSearchModal"
-            />
-            <button
-              v-if="searchKeyword"
-              class="search-box__clear"
-              type="button"
-              aria-label="清除关键词"
-              @click="searchKeyword = ''"
-            >
-              ✕
-            </button>
-            <kbd class="search-box__esc">Esc</kbd>
-          </div>
-
-          <div class="search-box__body">
-            <!-- 内容仍在拉取时给提示：否则用户以为「内容搜不到」 -->
-            <p v-if="contentLoading" class="search-box__hint">
-              正在读取对话内容…
-            </p>
-            <p v-else-if="!searchKeyword.trim()" class="search-box__hint">
-              输入关键词，可搜索会话标题与对话内容
-            </p>
-
-            <p
-              v-if="searchKeyword.trim() && !groupedResults.length && !contentLoading"
-              class="search-box__empty"
-            >
-              没有匹配的会话
-            </p>
-
-            <div class="search-box__results">
-              <section
-                v-for="g in groupedResults"
-                :key="g.key"
-                class="search-group"
-              >
-                <h3 class="search-group__label">{{ g.label }}</h3>
-                <ul class="search-group__list" :aria-label="g.label">
-                  <li v-for="conv in g.items" :key="conv.id">
-                    <button
-                      type="button"
-                      class="search-hit"
-                      @click="pickResult(conv.id)"
-                    >
-                      <span class="search-hit__title">{{ conv.title || '新会话' }}</span>
-                      <span class="search-hit__meta">
-                        {{ convTime(conv.created_at) }}
-                      </span>
-                      <!-- 命中内容时给出片段；只命中标题时没有片段 -->
-                      <span
-                        v-if="hitSnippet(conv.id, searchKeyword)"
-                        class="search-hit__snippet"
-                      >{{ hitSnippet(conv.id, searchKeyword) }}</span>
-                    </button>
-                  </li>
-                </ul>
-              </section>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Transition>
+    <SearchModal
+      v-model:open="searchOpen"
+      :conversations="conversations"
+      @select="openConversation"
+    />
   </div>
 </template>
 
@@ -2248,161 +1700,6 @@ watch(streaming, (v) => {
   letter-spacing: 0.04em;
   color: var(--text3);
   background: var(--bg2);
-}
-
-/* ============================================================
-   搜索弹窗
-   ------------------------------------------------------------
-   居中浮层 + 半透明遮罩：遮罩把背后的对话区淡化（用户要求的
-   「背后淡化/遮罩处理」），同时点击空白可关闭。
-   ============================================================ */
-.search-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: flex;
-  /* 顶部对齐而非正中：键盘弹出时（移动端）居中会让输入框被顶出视野 */
-  align-items: flex-start;
-  justify-content: center;
-  padding: 12vh 20px 20px;
-  background: rgba(15, 23, 42, 0.36);
-  -webkit-backdrop-filter: blur(2px);
-  backdrop-filter: blur(2px);
-}
-.search-box {
-  width: min(620px, 100%);
-  max-height: 70vh;
-  display: flex;
-  flex-direction: column;
-  border-radius: 16px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
-  overflow: hidden;
-}
-.search-box__head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--hairline);
-  color: var(--text3);
-}
-.search-box__input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  background: transparent;
-  font-size: 0.98rem;
-  color: var(--text);
-  outline: none;
-}
-.search-box__input::placeholder { color: var(--text3); }
-.search-box__clear {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  border: none;
-  background: var(--panel2);
-  color: var(--text3);
-  font-size: 0.72rem;
-  cursor: pointer;
-}
-.search-box__clear:hover { color: var(--prim); }
-/* Esc 键帽：告诉用户还有这条退出路径 */
-.search-box__esc {
-  font-family: var(--mono);
-  font-size: 0.64rem;
-  padding: 3px 6px;
-  border-radius: 5px;
-  border: 1px solid var(--border);
-  background: var(--panel2);
-  color: var(--text3);
-}
-
-.search-box__body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 8px 0 12px;
-}
-.search-box__hint,
-.search-box__empty {
-  padding: 18px 18px;
-  font-size: 0.84rem;
-  color: var(--text3);
-  text-align: center;
-}
-.search-group + .search-group { margin-top: 10px; }
-.search-group__label {
-  margin: 0;
-  padding: 6px 18px;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--text3);
-}
-.search-group__list { list-style: none; margin: 0; padding: 0; }
-
-.search-hit {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  width: 100%;
-  padding: 9px 18px;
-  border: none;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color 0.16s;
-}
-.search-hit:hover,
-.search-hit:focus-visible {
-  background: var(--primary-soft);
-  outline: none;
-}
-.search-hit__title {
-  font-size: 0.9rem;
-  font-weight: 650;
-  color: var(--text);
-}
-.search-hit__meta {
-  font-size: 0.72rem;
-  color: var(--text3);
-}
-/* 命中片段：让用户看到「为什么这条匹配」，而不是只给一个标题 */
-.search-hit__snippet {
-  margin-top: 2px;
-  font-size: 0.78rem;
-  line-height: 1.6;
-  color: var(--text2);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-/* 弹窗进出：淡入 + 轻微上浮 */
-.modal-enter-active,
-.modal-leave-active { transition: opacity 0.18s ease; }
-.modal-enter-active .search-box,
-.modal-leave-active .search-box {
-  transition: transform 0.2s cubic-bezier(0.2, 0.7, 0.2, 1);
-}
-.modal-enter-from,
-.modal-leave-to { opacity: 0; }
-.modal-enter-from .search-box,
-.modal-leave-to .search-box { transform: translateY(-8px) scale(0.99); }
-
-@media (prefers-reduced-motion: reduce) {
-  .modal-enter-active,
-  .modal-leave-active,
-  .modal-enter-active .search-box,
-  .modal-leave-active .search-box { transition: none; }
-  .modal-enter-from .search-box,
-  .modal-leave-to .search-box { transform: none; }
 }
 
 /* ============================================================
@@ -2836,70 +2133,6 @@ watch(streaming, (v) => {
   .jump-bottom__text { display: none; }
 }
 
-.chat-empty__quick {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
-  max-width: 44em;
-  margin: 6px 0 4px;
-}
-
-.quick-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  /*
-   * ⚠️ flex-shrink: 0 与 white-space: nowrap 是「横向滚动」能否成立的关键。
-   *
-   * flex 项默认 flex-shrink: 1，而 min-width: auto 又允许它被压到内容
-   * 最小宽度以下 —— 结果在窄容器里芯片会被压窄、文字在里面折行：
-   * 实测容器 420px 时单个芯片从 37px 高变成 94px 高，整行变成一堵墙，
-   * 而 overflow-x: auto 根本没机会生效（因为内容被压缩到不溢出了）。
-   * 加上这两条后芯片保持自身宽度、容器真正横向溢出，横滚才起作用。
-   */
-  flex-shrink: 0;
-  white-space: nowrap;
-  padding: 8px 14px;
-  border-radius: 999px;
-  font-size: 0.81rem;
-  transition: color 0.18s, border-color 0.18s, background-color 0.18s, transform 0.18s,
-              box-shadow 0.18s;
-}
-/*
- * 彩色芯片：8 个语义色，浅底 + 同族深字 + 稍深的边框。
- *
- * 底色都取 *-50 级别（或等价的极浅色），文字取 *-600/700 ——
- * 与行程标签（.ptag）用同一套「浅底深字」规则，所以两处放在一起不打架。
- * 边框用比底色略深一档的同族色，让芯片在浅色背景上有轮廓、不糊成一片。
- */
-.quick-chip--food    { background: #fdf6e7; color: var(--gold-600);   border: 1px solid #f5e6c8; }
-.quick-chip--budget  { background: var(--blue-50); color: var(--blue-700); border: 1px solid var(--blue-100); }
-.quick-chip--weather { background: #eaf7fb; color: var(--cyan-600);   border: 1px solid #cdeaf3; }
-.quick-chip--nature  { background: #eefaf1; color: var(--green-600);  border: 1px solid #d6f0de; }
-.quick-chip--history { background: #f5f1fe; color: var(--purple-600); border: 1px solid #e6dcfb; }
-.quick-chip--photo   { background: #fef3f8; color: var(--rose-600);   border: 1px solid #fbd9e8; }
-.quick-chip--family  { background: #fff7ed; color: var(--amber-600);  border: 1px solid #fde8cf; }
-.quick-chip--plan    { background: #eef4fb; color: #31527a;           border: 1px solid #d5e3f2; }
-
-/* 深色主题：浅底深字在暗背景上发闷，改成半透明底 + 提亮文字 */
-:root[data-theme='dark'] .quick-chip--food    { background: rgba(214, 158, 46, 0.16); color: var(--gold-400);   border-color: rgba(214, 158, 46, 0.3); }
-:root[data-theme='dark'] .quick-chip--budget  { background: rgba(37, 99, 235, 0.16);  color: var(--blue-300);   border-color: rgba(37, 99, 235, 0.3); }
-:root[data-theme='dark'] .quick-chip--weather { background: rgba(14, 165, 233, 0.16); color: var(--cyan-400);   border-color: rgba(14, 165, 233, 0.3); }
-:root[data-theme='dark'] .quick-chip--nature  { background: rgba(56, 161, 105, 0.16); color: var(--green-400);  border-color: rgba(56, 161, 105, 0.3); }
-:root[data-theme='dark'] .quick-chip--history { background: rgba(139, 92, 246, 0.16); color: var(--purple-400); border-color: rgba(139, 92, 246, 0.3); }
-:root[data-theme='dark'] .quick-chip--photo   { background: rgba(244, 114, 182, 0.16); color: var(--rose-400);  border-color: rgba(244, 114, 182, 0.3); }
-:root[data-theme='dark'] .quick-chip--family  { background: rgba(251, 191, 36, 0.16); color: var(--amber-400);  border-color: rgba(251, 191, 36, 0.3); }
-:root[data-theme='dark'] .quick-chip--plan    { background: rgba(127, 168, 248, 0.14); color: var(--blue-300);  border-color: rgba(127, 168, 248, 0.28); }
-
-/* 悬停：底色压深一档、边框用主色，明确「可点」 */
-.quick-chip:hover {
-  color: var(--prim);
-  border-color: var(--blue-300);
-  transform: translateY(-1px);
-  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.12);
-}
-
 /* ---- 工具栏 ---- */
 .chat-toolbar {
   display: flex;
@@ -3011,548 +2244,11 @@ watch(streaming, (v) => {
    （.phase / .phase__wave / keyframes wave / phase-enter|leave）全部删除，
    避免留下永不命中的死样式。 */
 
-/* ---- 消息区 ---- */
-/* ============================================================
-   草稿态的问候
-   ------------------------------------------------------------
-   点「新会话」后消息区是空的，只给一个输入框会显得冷清，
-   用户也不确定「这里能不能说话」。一句问候把这件事讲清楚。
-
-   与欢迎屏（.chat-empty）的分工：欢迎屏是介绍页（logo + 引导卡），
-   这里是「我已经在了，你说」—— 所以只用两行字，不加图形与卡片。
-   ============================================================ */
-.draft-hello {
-  /*
-   * 垂直居中：草稿态下它是消息区里唯一的元素，贴顶会像一条被遗忘的提示。
-   * 靠上下 auto 外边距居中，一旦有消息进来（v-if 变假）它就消失，
-   * 不影响正常排版。
-   */
-  margin: auto 0;
-  text-align: center;
-  padding: 40px 16px;
-}
-.draft-hello__title {
-  margin: 0 0 8px;
-  font-family: var(--font-display);
-  font-size: 1.32rem;
-  font-weight: 700;
-  color: var(--text);
-}
-.draft-hello__hint {
-  margin: 0;
-  font-size: 0.86rem;
-  line-height: 1.7;
-  color: var(--text3);
-}
-
 .chat-scroll {
   flex: 1;
   overflow-y: auto;
   padding: 22px 20px;
   scroll-behavior: smooth;
-}
-
-/*
- * min-height: 100% 是草稿态问候能垂直居中所需：
- * .draft-hello 用上下 auto 外边距居中，前提是父容器有富余高度。
- * 没有这一条时它只按内容高度撑开，问候会贴在顶部。
- */
-.chat-stream { max-width: 820px; margin-inline: auto; min-height: 100%; display: flex; flex-direction: column; gap: 22px; }
-
-/* 历史截断提示：居中细字，不抢消息的视觉重心 */
-.chat-truncated {
-  text-align: center;
-  font-size: 0.76rem;
-  color: var(--text3);
-  padding: 2px 0 6px;
-  position: relative;
-}
-.chat-truncated::before,
-.chat-truncated::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  width: 42px;
-  height: 1px;
-  background: var(--hairline);
-}
-.chat-truncated::before { left: calc(50% - 110px); }
-.chat-truncated::after { right: calc(50% - 110px); }
-
-.msg {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  /* 消息进入时轻微上移淡入。新消息硬出现会让人猝不及防，
-     尤其实时对话里用户的注意力正在输入框上 */
-  animation: msgIn 0.32s cubic-bezier(0.2, 0.7, 0.2, 1) both;
-}
-
-/*
- * 历史消息的虚拟化：让浏览器跳过**屏幕外**消息的渲染。
- *
- * 为什么不用固定高度的虚拟滚动：聊天消息高度完全不定（一段话可能两三行，
- * 也可能是一张表格 + 十几条行程条目），固定高度会算错位置导致滚动跳动；
- * 动态测量又要引入依赖与一套高度缓存。content-visibility 把「哪些元素需要
- * 渲染」交给浏览器，它自己知道视口在哪，比在 JS 里重算更准也更省。
- *
- * 为什么排除 :last-child：末条是**正在流式输出**的消息，它的高度每来一个字
- * 都在变。若也按估算值占位，估算与实测会交替生效，滚动位置就会抖。
- * 一条消息不参与虚拟化对性能没有影响。
- *
- * contain-intrinsic-size 用 `auto 200px` 而非单纯 `200px`：
- *   · 不写这一项，未渲染元素高度会被当成 0，滚动条长度随滚动不断跳变
- *     ——这是启用 content-visibility 最常见的副作用
- *   · `auto` 让浏览器**记住元素上次渲染的真实高度**，此后按真实值占位；
- *     只写 200px 则每次都重新估算，长消息多的会话往回滚会位置跳动
- *   · 200px 仅作为「尚未渲染过」时的初始估算
- *
- * 浏览器不支持时（如较老的 Safari）该规则被忽略，退化为全部渲染，
- * 也就是当前行为 —— 没有兼容性风险。
- */
-.msg:not(:last-child) {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 200px;
-}
-@keyframes msgIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .msg { animation: none; }
-}
-.msg--user { flex-direction: row-reverse; }
-.msg--assistant { flex-direction: row; }
-
-.msg__avatar {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  /* 同 chat-empty__logo：图标自带完整方形底，故容器不再叠渐变 */
-  background: var(--panel);
-  border: 1px solid var(--border);
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  margin-top: 2px;
-  overflow: hidden;
-}
-.msg__avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
-
-.msg__col { display: flex; flex-direction: column; gap: 8px; min-width: 0; max-width: min(680px, 88%); }
-.msg--user .msg__col { align-items: flex-end; max-width: min(600px, 84%); }
-
-/* ---- 气泡（仅用户消息）----
-   助手消息不再用气泡包裹：结构化内容自己就是排版，
-   再套一层圆角底色只会让小节标题、列表、提示块挤在一个框里，
-   既不像文档也不像对话。改成无底色直接铺开，
-   靠 MessageBody 内部的标题竖线与列表缩进建立层次。 */
-.msg__bubble {
-  padding: 12px 16px;
-  border-radius: 14px;
-  font-size: 0.92rem;
-  line-height: 1.7;
-  overflow-wrap: break-word;
-  position: relative;
-}
-
-.msg--user .msg__bubble {
-  background: var(--grad);
-  color: #fff;
-  border-radius: 16px 16px 5px 16px;
-  box-shadow: 0 6px 18px var(--glow);
-}
-
-/* ---- 助手消息卡片 ----
-   原先这里有一条左侧竖边（悬停时浮出蓝色），实测很干扰：
-   鼠标划过内容就冒出一道蓝线，像是选中状态，且与文内的小节标题
-   竖线叠在一起更显杂乱。现改为完全无装饰，让内容自己成立。 */
-.msg__card {
-  padding: 2px 0;
-}
-
-/* 出错时整块转为错误色——这个保留：它表达的是真实状态而非装饰 */
-.msg__card--err {
-  background: rgba(229, 72, 77, 0.06);
-  border-radius: 10px;
-  padding: 10px 13px;
-  color: var(--danger);
-}
-
-/* ---- 消息操作条 ----
-   默认隐藏、悬停浮现，并轻微下移淡入——常驻会持续占用视线，
-   而这类操作的使用频率远低于阅读正文。 */
-.msg__ops {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 2px;
-  opacity: 0;
-  transform: translateY(-4px);
-  transition: opacity 0.22s, transform 0.22s;
-}
-.msg:hover .msg__ops,
-.msg:focus-within .msg__ops {
-  opacity: 1;
-  transform: none;
-}
-@media (hover: none) {
-  /* 触屏没有悬停，操作条直接常驻，否则永远点不到 */
-  .msg__ops { opacity: 1; transform: none; }
-}
-
-.op-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 10px;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text3);
-  font-size: 0.75rem;
-  transition: background-color 0.18s, color 0.18s, border-color 0.18s;
-}
-.op-btn:hover {
-  background: var(--panel2);
-  border-color: var(--border);
-  color: var(--text);
-}
-.op-btn--accent:hover {
-  background: var(--primary-soft);
-  border-color: var(--blue-200);
-  color: var(--prim);
-}
-
-/* ---- 思考过程 ---- */
-.reason {
-  border-left: 3px solid rgba(245, 158, 11, 0.7);
-  background: rgba(245, 158, 11, 0.06);
-  border-radius: 5px 12px 12px 5px;
-  padding: 9px 13px;
-  font-size: 0.82rem;
-  color: var(--text2);
-  max-width: min(640px, 100%);
-}
-.reason summary {
-  cursor: pointer;
-  font-weight: 650;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  list-style: none;
-}
-.reason summary::-webkit-details-marker { display: none; }
-.reason__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); flex-shrink: 0; }
-.reason__len { margin-left: auto; font-size: 0.7rem; color: var(--text3); font-weight: 400; }
-.reason p { margin-top: 8px; white-space: pre-wrap; line-height: 1.7; }
-
-/*
- * Markdown 相关样式已随 v-html 渲染一并移除。
- * 助手消息改由 MessageBody 组件渲染，其样式封装在该组件内（scoped），
- * 这里再留一份 .md-body 规则只会成为永远不会命中的死代码。
- */
-
-/* ---- 等待状态：三点 + 当前阶段 ---- */
-.waiting {
-  display: inline-flex;
-  align-items: center;
-  gap: 11px;
-  padding: 13px 17px;
-  background: var(--bubble-ai);
-  border: 1px solid var(--border);
-  border-radius: 5px 16px 16px 16px;
-  width: fit-content;
-}
-.waiting__dots {
-  display: inline-flex;
-  gap: 5px;
-  flex-shrink: 0;
-}
-.waiting__dots i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--prim);
-  animation: bounce 1.2s ease-in-out infinite;
-}
-.waiting__dots i:nth-child(2) { animation-delay: 0.15s; }
-.waiting__dots i:nth-child(3) { animation-delay: 0.3s; }
-/* 阶段文字用主题色并与点同步呼吸，整体像「正在处理」而非静止 */
-.waiting__text {
-  font-size: 0.85rem;
-  color: var(--prim);
-  font-weight: 550;
-  animation: waitFade 1.6s ease-in-out infinite;
-}
-@keyframes waitFade {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.62; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .waiting__dots i,
-  .waiting__text { animation: none; }
-}
-/* bounce 关键帧由 .waiting__dots 使用；旧的 .typing span 规则已随
-   等待组件改造移除（改为 .waiting__dots i） */
-@keyframes bounce {
-  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
-  40% { transform: translateY(-7px); opacity: 1; }
-}
-
-/* ============================================================
-   输入区（composer）
-   ------------------------------------------------------------
-   结构：一个容器里放三行
-     ① 快捷芯片行（可横向滚动，按需出现）
-     ② 输入行：textarea + 发送按钮
-     ③ 提示行：键帽 + 字数（按需出现）
-   ①② 共享同一层边框与聚焦环 —— 这是「快捷芯片是用来填这个框的」
-   这层关系唯一的视觉依据；原先两者各自独立，只能靠相邻去猜。
-   ============================================================ */
-.composer {
-  flex-shrink: 0;
-  /*
-   * 最大宽度与消息流（.chat-stream 的 820px）对齐并居中。
-   *
-   * 原先是整块铺满可用宽度 —— 在宽屏上输入框会被拉到一千多像素，
-   * 一行能塞下好几个句子，视觉上又长又空，与上方消息的宽度也对不齐。
-   * 收窄到与消息同宽后，输入区与对话内容形成同一条中轴。
-   */
-  width: 100%;
-  max-width: 820px;
-  margin: 0 auto 16px;
-  padding: 6px 8px 8px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: var(--panel);
-  box-shadow: var(--shadow-sm);
-  transition: border-color 0.2s, box-shadow 0.22s, background-color 0.2s;
-}
-/* 聚焦态：主色描边 + 柔和外环。整组一起亮，而不是只给 textarea 描边 */
-.composer:focus-within {
-  border-color: var(--prim);
-  box-shadow: 0 0 0 3px var(--primary-soft), var(--shadow-sm);
-}
-/* 生成中降低视觉存在感，暗示此刻不该输入 */
-.composer:has(.composer__box:disabled) {
-  opacity: 0.72;
-}
-
-/* ---- ① 快捷芯片行 ---- */
-.composer__chips {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 4px 8px 8px;
-  border-bottom: 1px dashed var(--hairline);
-  margin-bottom: 4px;
-}
-.composer__chips-label {
-  flex-shrink: 0;
-  font-size: 0.72rem;
-  color: var(--text3);
-  user-select: none;
-}
-/*
- * 芯片横向滚动而不换行。
- * 换行会让输入区在小屏上长高好几行、把消息区挤扁；
- * 横滚则始终保持一行高度，用户滑动即可看到其余建议。
- * 隐藏滚动条：它在这么窄的条里很扎眼，而横滚本身有「切了一半的芯片」作暗示。
- */
-.composer__chips-scroll {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  /* 右端渐隐，暗示「还能往右滑」 */
-  mask-image: linear-gradient(90deg, #000 calc(100% - 20px), transparent);
-  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 20px), transparent);
-}
-.composer__chips-scroll::-webkit-scrollbar { display: none; }
-
-/* ---- ② 输入行：textarea 在上、底部条在下，按钮收在框内 ---- */
-.composer__row {
-  display: flex;
-  flex-direction: column;
-}
-.composer__box {
-  width: 100%;
-  /* 单行时约 40px 高，比原先的 34px 更好点、也更接近常见的聊天输入框 */
-  min-height: 40px;
-  /* 高度由 JS 按内容撑开（见 resizeInput），到 INPUT_MAX_HEIGHT 封顶后
-     转为内部滚动；这里的上限是 JS 失效时的兜底，两处数值需保持一致 */
-  max-height: 180px;
-  overflow-y: auto;
-  resize: none;
-  border: none;
-  background: transparent;
-  padding: 8px 8px 4px;
-  font-size: 0.95rem;
-  line-height: 1.55;
-  color: var(--text);
-}
-.composer__box:focus { outline: none; }
-.composer__box::placeholder { color: var(--text3); }
-.composer__box:disabled { cursor: not-allowed; }
-
-/* ---- ③ 底部条：左键帽、右发送 ---- */
-.composer__foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 32px;
-  padding: 0 2px 0 8px;
-}
-.composer__foot-right {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-/*
- * 键帽提示：仍然「按需出现」的语义 —— 静息时淡出，聚焦或有内容时淡入。
- * 但它所在的位置**始终占位**（不是 v-if），这样按钮不会随提示显隐而左右跳动。
- */
-.kbd-hint {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 0.68rem;
-  color: var(--text3);
-  user-select: none;
-  transition: opacity 0.2s ease;
-}
-.kbd-hint--hidden { opacity: 0; }
-.kbd-hint kbd {
-  font-family: var(--mono);
-  font-size: 0.64rem;
-  line-height: 1;
-  padding: 3px 5px;
-  border-radius: 5px;
-  border: 1px solid var(--border);
-  background: var(--panel2);
-  color: var(--text2);
-  box-shadow: 0 1px 0 var(--border);
-}
-.kbd-hint__sep { opacity: 0.5; }
-
-.charcount {
-  font-family: var(--mono);
-  font-size: 0.68rem;
-  color: var(--text3);
-  font-variant-numeric: tabular-nums;
-}
-/* 接近上限才变色提醒，平时不打扰 */
-.charcount--warn { color: var(--gold-600); }
-
-/* ---- 发送按钮 ----
- *
- * 主次由**背景**区分，而不只是透明度：
- *   无内容 → 淡灰底、灰箭头、无光晕：明确是「还不能点」
- *   有内容 → 主题渐变实心 + 光晕 + 轻微放大：明确是「可以发了」
- * 原先两种情况共用同一套渐变底，只靠 opacity 0.42 区分 ——
- * 在浅色界面上「半透明的蓝按钮」仍然像可点，主次不够清晰。
- */
-.send-btn {
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 13px;
-  background: var(--panel2);
-  color: var(--text3);
-  border: 1px solid var(--border);
-  box-shadow: none;
-  transition: transform 0.2s, box-shadow 0.22s, background-color 0.22s,
-    color 0.22s, border-color 0.22s;
-}
-/* 有内容：实心主色 + 光晕 */
-.send-btn--ready {
-  background: var(--grad);
-  color: #fff;
-  border-color: transparent;
-  box-shadow: 0 6px 18px var(--glow);
-}
-.send-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  filter: saturate(1.08);
-}
-.send-btn--ready:hover:not(:disabled) {
-  box-shadow: 0 10px 24px var(--glow);
-}
-.send-btn:active:not(:disabled) {
-  transform: translateY(0);
-}
-.send-btn:disabled {
-  cursor: not-allowed;
-}
-
-/*
- * 生成中的「停止」状态。
- *
- * 刻意用中性深灰而不是红色：中断是正常操作（用户改主意、发现需求说错了），
- * 不是危险动作。红色会让人以为「点下去会丢失什么」而不敢用。
- * 同时去掉渐变与光晕 —— 生成期间焦点应落在内容上，按钮不该持续发光吸引注意。
- */
-.send-btn--stop {
-  background: var(--slate-700);
-  box-shadow: 0 4px 12px rgba(16, 24, 40, 0.18);
-}
-.send-btn--stop:hover {
-  background: var(--slate-800);
-  transform: translateY(-1px);
-}
-/* 方块＝停止，是播放器的通用符号，无需文字说明 */
-.send-btn__stop {
-  width: 13px;
-  height: 13px;
-  border-radius: 3px;
-  background: #fff;
-}
-
-/* 生成中的转圈：用边框缺口旋转，比三点更安静 */
-.send-btn__spin {
-  width: 17px;
-  height: 17px;
-  border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.35);
-  border-top-color: #fff;
-  animation: sendSpin 0.72s linear infinite;
-}
-@keyframes sendSpin {
-  to { transform: rotate(360deg); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .send-btn__spin { animation: none; }
-  .send-btn--stop:hover { transform: none; }
-}
-
-/* ---- 快捷示例条 ---- */
-/*
- * 旧样式已清理：
- *   .quick-bar / .quick-bar__label  → .composer__chips / .composer__chips-label
- *     （布局由 flex-wrap 改为横向滚动，见 .composer__chips-scroll）
- *   .quick-chip--sm                 → 并入 .quick-chip（现在只有一个尺寸）
- * 保留说明是为了下次改这块时知道东西搬到哪了。
- */
-.chips-enter-active,
-.chips-leave-active {
-  transition: opacity 0.22s, transform 0.22s;
-}
-.chips-enter-from,
-.chips-leave-to {
-  opacity: 0;
-  transform: translateY(5px);
 }
 
 /* ==================== 响应式 ==================== */
@@ -3643,13 +2339,6 @@ watch(streaming, (v) => {
   }
 
   .tool-btn { padding: 8px 10px; font-size: 0.78rem; }
-  .msg__col { max-width: 92%; }
-  .msg--user .msg__col { max-width: 88%; }
-  /* 窄屏没有物理键盘，键帽提示没有意义，收起以省一行高度 */
-  .kbd-hint { display: none; }
-  /* 输入区在窄屏贴着容器边（不再叠加自身外边距，避免双重留白） */
-  .composer { margin: 0 auto 12px; padding: 6px 6px 8px; }
-  .composer__chips-scroll { gap: 5px; }
 }
 
 @media (max-width: 560px) {
