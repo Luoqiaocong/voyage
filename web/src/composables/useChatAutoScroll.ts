@@ -96,6 +96,26 @@ export function useChatAutoScroll(scrollEl: Ref<HTMLElement | null>) {
       if (!force && awayFromBottom.value) return
       el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
       awayFromBottom.value = false
+
+      /*
+       * 瞬时滚动后再校正一次。
+       *
+       * 原因：调用这一刻的 scrollHeight 可能还不是最终值——
+       *   · 发送时输入框清空，自适应高度会把它从多行收回单行，
+       *     消息区随之变高（否则会停在离底部约「收缩量」的位置）；
+       *   · content-visibility 让未进入过视口的历史消息按估算高度占位，
+       *     真正渲染后高度会变大，底部随之外移。
+       * 这些布局变化都发生在本次布局之后，等一帧再按新的 scrollHeight 落一次，
+       * 才能停在真正的底部。期间若用户主动上翻（away=false→true）则放弃校正。
+       */
+      if (!smooth) {
+        requestAnimationFrame(() => {
+          const e2 = scrollEl.value
+          if (e2 && !awayFromBottom.value) {
+            e2.scrollTo({ top: e2.scrollHeight, behavior: 'auto' })
+          }
+        })
+      }
     })
   }
 
