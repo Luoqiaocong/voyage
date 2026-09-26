@@ -35,16 +35,30 @@ export function useChatAutoScroll(scrollEl: Ref<HTMLElement | null>) {
   /** 距底部多少像素内仍视为「在底部」（仅用于判断按钮显隐，不再用于自动复位） */
   const NEAR_BOTTOM_PX = 80
 
+  /** 上一次观察到的 scrollTop，用于识别「用户主动上滑」 */
+  let lastScrollTop = 0
+
   /**
-   * 容器滚动时只维护一个事实：**用户如果已经滚回最底，就恢复自动跟随**。
+   * 容器滚动时维护两件事：
+   *   1. 识别**用户主动上滑**（位置相对上次变小）→ 停止自动跟随；
+   *   2. 用户已滚回最底 → 恢复自动跟随。
    *
-   * 注意方向是单向的 —— 这里只可能把 true 变 false，绝不由位置把 false 变 true。
-   * 置 true 只由下面的用户意图处理函数负责。
+   * 为什么用「scrollTop 变小」而不是「gap 变大」来判定用户上滑：
+   *   流式输出会让内容变长，gap 被动变大，但这不代表用户想看历史。
+   *   而 scrollTop 变小只可能来自用户（拖动滚动条、滚轮、键盘翻页、触摸），
+   *   内容增长只改变 scrollHeight、不改变 scrollTop。
+   *   这样就不必依赖某个输入设备，拖动滚动条也能被识别。
+   *   （此前只监听 wheel/touch/key，拖动滚动条时不会被识别为「在查看历史」，
+   *     于是流式输出会把它反复拉回底部。）
    */
   function onStreamScroll() {
     const el = scrollEl.value
     if (!el) return
-    const gap = el.scrollHeight - el.scrollTop - el.clientHeight
+    const top = el.scrollTop
+    if (top < lastScrollTop - 2) markUserScrolledUp()
+    lastScrollTop = top
+
+    const gap = el.scrollHeight - top - el.clientHeight
     // 已到底（容差内）→ 视为用户回到了跟随状态
     if (awayFromBottom.value && gap <= NEAR_BOTTOM_PX) {
       awayFromBottom.value = false
@@ -121,7 +135,24 @@ export function useChatAutoScroll(scrollEl: Ref<HTMLElement | null>) {
 
   /** 点箭头：回到底部并恢复自动跟随 */
   function jumpToBottom() {
-    scrollToBottom(true, true)
+    awayFromBottom.value = false
+    nextTick(() => {
+      const el = scrollEl.value
+      if (!el) return
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+      /*
+       * 平滑动画的目标高度在发起时就已确定；动画期间若有新内容渲染
+       * （content-visibility 展开历史、流式追加），真实底部会继续下移，
+       * 动画结束会停在半途。等动画结束后按最新 scrollHeight 补一次瞬时校正。
+       * 若用户已再次上翻（away=true）则放弃。
+       */
+      window.setTimeout(() => {
+        const e2 = scrollEl.value
+        if (e2 && !awayFromBottom.value) {
+          e2.scrollTo({ top: e2.scrollHeight, behavior: 'auto' })
+        }
+      }, 420)
+    })
   }
 
   return {
