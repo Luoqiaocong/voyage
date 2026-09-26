@@ -3,6 +3,7 @@ from langchain.agents import create_agent
 
 from app.core.ai.llm import TaskKind, get_task_llm
 from app.core.ai.mcp import get_namespace_tools
+from app.core.ai.middleware import SUBAGENT_MIDDLEWARE
 
 WEATHER_AGENT_PROMPT = """你是一个气象与出行环境分析专家（Weather Agent）。
 查询目的地指定日期范围的天气，给出出行建议。
@@ -34,6 +35,7 @@ async def get_weather_agent():
             name="weather_agent",
             model=get_task_llm(TaskKind.FACT),
             tools=tools,
+            middleware=SUBAGENT_MIDDLEWARE,
             system_prompt=WEATHER_AGENT_PROMPT,
         )
     return _weather_agent_cache

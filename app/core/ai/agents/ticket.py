@@ -3,6 +3,7 @@ from langchain.agents import create_agent
 
 from app.core.ai.llm import TaskKind, get_task_llm
 from app.core.ai.mcp import get_namespace_tools
+from app.core.ai.middleware import SUBAGENT_MIDDLEWARE
 
 TICKET_AGENT_PROMPT = """你是一个交通票务查询专家（Ticket Agent）。
 精准过滤出发时间段与坐席偏好，按价格或历时排序，列出前 3-5 趟车次。
@@ -35,6 +36,7 @@ async def get_ticket_agent():
             name="ticket_agent",
             model=get_task_llm(TaskKind.FACT),
             tools=tools,
+            middleware=SUBAGENT_MIDDLEWARE,
             system_prompt=TICKET_AGENT_PROMPT,
         )
     return _ticket_agent_cache

@@ -2,10 +2,46 @@ from datetime import datetime
 
 from langchain.messages import HumanMessage
 from langchain.tools import tool
+from langgraph.errors import GraphRecursionError
 
 from app.core.ai.agents.ticket import get_ticket_agent
 from app.core.ai.agents.travel import get_travel_agent
 from app.core.ai.agents.weather import get_weather_agent
+from app.shared.utils import log
+
+#: 子 Agent 单次运行的步数上限（langgraph super-step 计数）。
+#:
+#: 为什么必须显式设置：langchain 的 create_agent 默认把 recursion_limit
+#: 设成 9_999（见 langchain/agents/factory.py），等于没有上限。真实事故里
+#: 「珠海 → 澳门」查票的票务子 Agent 因此空转 274 轮，单次问答烧掉约
+#: 1380 万 token。这里按各子 Agent 的正常工作量给上限：正常一轮查票约
+#: 4-8 个 super-step，12 足够；天气更简单；travel 要做多次搜索/抓取，给宽些。
+SUBAGENT_RECURSION_LIMITS = {
+    "ticket": 12,
+    "weather": 8,
+    "travel": 40,
+}
+
+
+async def _invoke_subagent(agent, prompt: str, *, kind: str, fallback: str) -> str:
+    """调用子 Agent，并用步数上限兜底。
+
+    超过上限时 langgraph 抛 GraphRecursionError —— 这里**就地转成友好文案**，
+    而不是继续上抛：上抛会被主 Agent 的 ToolRetryMiddleware 重试整条链路，
+    每次重试又要跑满上限，等于把一次失控放大成数次。降级为一句「暂时查不到」
+    既符合提示词里「失败不要用相同参数重试」的预期，也真正止住开销。
+    """
+    try:
+        response = await agent.ainvoke(
+            {"messages": [HumanMessage(content=prompt)]},
+            config={"recursion_limit": SUBAGENT_RECURSION_LIMITS[kind]},
+        )
+    except GraphRecursionError:
+        log.warning(
+            f"[{kind}] 子 Agent 超过步数上限 {SUBAGENT_RECURSION_LIMITS[kind]}，已终止"
+        )
+        return fallback
+    return response["messages"][-1].content
 
 
 @tool
@@ -51,8 +87,12 @@ async def ticket_schedule(
 
     agent = await get_ticket_agent()
     msg = f"帮我查一下 {date} 从 {origin} 到 {destination} 的车票。细化要求：{requirements}"
-    response = await agent.ainvoke({"messages": [HumanMessage(content=msg)]})
-    return response["messages"][-1].content
+    return await _invoke_subagent(
+        agent,
+        msg,
+        kind="ticket",
+        fallback="车次信息暂时查询不到（查询步骤过多已中止），请稍后再试或缩小查询范围。",
+    )
 
 
 @tool
@@ -74,8 +114,12 @@ async def weather_forecast(
 
     agent = await get_weather_agent()
     msg = f"帮我查一下 {destination} 在 {date_range} 的天气，并给出是否适合户外的建议。"
-    response = await agent.ainvoke({"messages": [HumanMessage(content=msg)]})
-    return response["messages"][-1].content
+    return await _invoke_subagent(
+        agent,
+        msg,
+        kind="weather",
+        fallback="目的地天气暂时查不到，请稍后再试。",
+    )
 
 
 @tool
@@ -121,5 +165,9 @@ async def travel_recommend(
         msg += "请只输出精简要点（每个维度 1-2 条，不要长篇幅、不要完整攻略框架），突出最推荐的可执行建议。"
     else:
         msg += "请结合以上信息，推荐景点、美食和酒店。"
-    response = await agent.ainvoke({"messages": [HumanMessage(content=msg)]})
-    return response["messages"][-1].content
+    return await _invoke_subagent(
+        agent,
+        msg,
+        kind="travel",
+        fallback="暂无足够信息生成推荐，请稍后再试。",
+    )
