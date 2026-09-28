@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -119,6 +120,13 @@ class Conversation(Base):
     )
     # 一个会话可保存多份行程；删除会话不影响已保存的行程（行程是用户资产）
 
+    # 会话列表按「用户 + 创建时间倒序」查询，是最频繁的路径之一。
+    # 单列 user_id 索引无法同时满足排序，会退化为「取出该用户全部会话再排序」；
+    # 复合索引让过滤与排序走同一个索引。
+    __table_args__ = (
+        Index("ix_conversations_user_created", "user_id", "created_at"),
+    )
+
 
 class Itinerary(Base):
     """行程表：一次「保存」的完整行程计划，plan 列存 ItineraryPlan 的 JSON。"""
@@ -164,6 +172,11 @@ class Itinerary(Base):
     # cascade 让行程删除时分享链接一并清除，避免留下指向空行程的僵尸链接。
     shares: Mapped[list["ItineraryShare"]] = relationship(
         back_populates="itinerary", cascade="all, delete-orphan"
+    )
+
+    # 行程列表按「用户 + 更新时间倒序」查询，复合索引同时覆盖过滤与排序。
+    __table_args__ = (
+        Index("ix_itineraries_user_updated", "user_id", "updated_at"),
     )
 
 
