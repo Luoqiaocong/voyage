@@ -1,66 +1,105 @@
-# 会话交接 · 2026-09-26
+# 会话交接 · 2026-09-28
 
-HEAD 仍是 `766c498` / `feature/complete-demo`。本轮重构已落盘，**尚未 git commit**。
+分支 `feature/complete-demo`。已推送的 HEAD 为 `b09ad59`（前端重构 → 模型切换 → 滚动修复）。
+**本轮「最大范围优化」的全部改动仍在工作区，未 git commit。**
+唯一入库产物是 untracked 新文件，见下。
 
-## 本轮已完成：巨型组件拆分 + 死代码清理
+## 本轮目标
 
-目标：ChatView.vue 3632 行、HomeView.vue 2424 行，职责过多、难测试。
+在既有系统上做尽可能广的前后端行为优化：安全、正确性、性能、无障碍。
+优先修真实缺陷，不做无收益的「脚手架式完备」。
 
-ChatView.vue **3632 → 2351 行**，按「会话流 / 提取 / 搜索弹窗 / 输入区」拆出：
+## 已完成（按主题）
 
-- `components/MessageStream.vue`（会话流：消息、思考过程、工具时间线、等待态）
-- `chat/composables/useItineraryExtract.ts`（提取：条件判断 + 二次确认 + 调用 + 结果引导）
-- `components/SearchModal.vue`（搜索弹窗：标题/内容检索、命中片段）
-- `components/ChatComposer.vue`（输入区：快捷芯片、自适应高度、按键处理）
+### 后端 · 安全与正确性
+- `user/dependencies.py` `_authenticate_token` 拒绝停用用户（`USER_ACCOUNT_DISABLED`）
+- `auth/service.py` `issue_access_token` 复查用户存在且 `is_active`
+- `user/auth.py` `PasswordManager.verify_uniform`：用户不存在也跑等价 Argon2，抹平登录时间侧信道；`user/service.py` 登录改用它
+- `auth/service.py` `issue_reset_token` 改为「先验验证码再查用户」，未注册与验证码错误同码，防邮箱枚举
+- `audit.py` `record` 不再吞异常（吞掉只会造成「改了却没记」），`json.dumps(default=str)`
+- `conversation/repo.py` 新增 `increment_message_count`（原子自增）、`remove_owned`（`DELETE...RETURNING` 返回真正删除的 id，防越权清 checkpoint）；`service.py` 改用
+- `itinerary/share_repo.py` `bump_view_count` 改 `UPDATE...RETURNING` 原子计数
 
-HomeView.vue **2424 → 2160 行**：
+### 后端 · 隐私（HIGH）
+- 新增 `core/ai/memory_context.py`：ContextVar + `use_memory_context` + `inject_memory` dynamic_prompt 中间件
+- `core/ai/agent.py` 移除 `AgentFactory` 上全局可变的 `_memory_context` / `apply_memory` / `_compose_prompt`
+- `conversation/gateway.py` `_load_memory_context`，`stream_message` 用 `use_memory_context(...)` 包裹
+- 效果：跨并发用户不再串记忆，且不必每轮重建 agent
 
-- `composables/useVoiceInput.ts`（Web Speech 语音输入，含卸载时停止识别）
-- `composables/useHomeReveal.ts`（首屏展开闸门 + 入场所见即现揭示 + 滚动/触摸意图）
+### 后端 · 性能
+- `user/auth.py` 新增 `hash_password_async` / `verify_password_async` / `verify_password_uniform_async`（`anyio.to_thread.run_sync`），把 Argon2（单次约 70ms）移出事件循环；`user/service.py`、`itinerary/share_service.py` 全部改异步调用
+- `shared/db/models.py` 加复合索引：Conversation `ix_conversations_user_created`、Itinerary `ix_itineraries_user_updated`
+- 新迁移 `alembic/versions/c4d9e7a1b2f3_add_list_query_indexes.py`，已 `upgrade head`
 
-死代码清理：
+### 后端 · 配置化
+- `config.py` `ZHIPU_ALWAYS_THINKING_MODELS=["glm-5","glm-5.*"]`；`core/ai/llm.py` 新增 `_matches_model_pattern`，`_zhipu_always_thinking` 改配置驱动（不再硬编码）
+- `shared/utils/datetime_util.py` `LOCAL_TZ=ZoneInfo(config.APP_TIMEZONE)`；`core/ai/tasks/gen_title.py` 去硬编码时区
 
-- 删除 `api/conversation.ts` 中零引用的 `getMessages`（原类型标注还写错）
-- 删除只写不读的 `showReasoning`，以及 ChatView 内已失效的 `.chat-empty__quick` 样式
-- 新增 `types/message.ts` 承载 `RdMsg`，供 ChatView 与提取 composable 共用
+### 前端 · 无障碍
+- `ItineraryDetailView.vue`、`SharePanel.vue`、`ProfileView.vue` 补输入控件 `aria-label`
+- `ChatView` 侧栏抽屉：Esc 关闭
+- `ConfirmHost.vue`：补全对话框键盘可达性 —— 打开时聚焦首个按钮、Tab 在框内循环（焦点陷阱）、Esc 取消、关闭后把焦点归还触发元素
 
-## 验证（已通过）
+### 前端 · 竞态与清理
+- `ChatView.vue`：onUnmounted `abortCtl?.abort()`；会话切换竞态用代次 `convReq` 校验（`openConversation` / `newConversation`）
+- `useChatAutoScroll.ts` `jumpTimer` 卸载清理
+- `ItinerariesView.vue`、`admin/AdminUsers.vue`、`admin/AdminAudit.vue` 防抖定时器 onUnmounted 清理
 
-- `cd web && npx vue-tsc --noEmit` 通过
-- `cd web && npx vite build` 通过
-- `python3 tests/test_vue_sfc.py` 2 通过 / 0 失败
-- `python3 tests/test_frontend_a11y.py`：5 通过 / 1 失败，失败项为既有问题
-  （`ItineraryDetailView.vue:664` 的 textarea 缺少可访问名称，与本轮改动无关）
+### 前端 · 渲染性能
+- `MessageBody.vue`：把模板里的 `toSpans` / `groupBySlot` / `detectSlot` / `stripSlotPrefix`
+  全部前置进 `view` computed（表格几十个单元格、行程多天时每次重渲染都要重跑），模板不再调用函数
+- `ItineraryDetailView.vue`：`groupBySlot + sortGroupsBySlot` 从模板搬进 `groupedDays` computed
 
-## 运行
+### 测试
+- 新增 `tests/test_hardening.py`（16 通过）：密码时间侧信道、模型匹配、记忆隔离、时区口径、单例无可变记忆
+- `tests/test_frontend_a11y.py` 扫描器加强（识别自闭合输入控件），6 通过 / 0 失败
 
-- 四容器 healthy
-- 预览 `https://80-44a00f9a57bbbed4.monkeycode-ai.online`
-- SPA `/` `/itineraries` `/share/demo` 200
+## 验证（本轮已通过）
 
-## 手测清单（登录后）
+- `cd web && npx vue-tsc --noEmit` → 通过
+- `cd web && npx vite build` → 通过
+- `python3 tests/test_frontend_a11y.py` → 6 / 0
+- 后端批量（容器内，`--network container:voyage-backend`）：
+  `test_admin_roles` `test_admin_roles_e2e` `test_audit_privacy` `test_config_cleanup`
+  `test_date_context` `test_deploy_config` `test_docker_consistency` `test_itinerary_dates`
+  `test_itinerary_extract_limit` `test_memory_dedup` `test_role_consistency`
+  `test_session_refresh` `test_share_patch` `test_share_privacy_health`
+  `test_token_attribution` `test_validation_messages` `test_admin_time_format`
+  `test_tool_metrics` `test_tool_metric_shape` `test_subagent_loop_guard`
+  `test_mcp_platform` `test_hardening` → 全部 PASS
 
-- 首页输入 → 规划页开新会话并自动发送
-- 输入区：快捷芯片、Enter 发送、Shift+Enter 换行、生成中 Esc/按钮停止
-- 消息区：复制、重新生成、思考过程折叠、工具时间线
-- 提取：确认框、防连点、覆盖/另存、完成后不自动跳
-- 搜索弹窗：标题与对话内容命中、片段预览
-- 首页：滚动/上滑展开、收起回顶、语音输入（如浏览器支持）
+基线既有失败（非本轮引入，已确认）：`test_resend`（交互式 EOFError）、
+`test_supervisor_agent`（镜像无 pytest）、`test_vue_sfc`（镜像无 node）。
 
-## 模型切换：全量改用 glm-5.3-flash（2026-09-26）
+## 运行照抄命令
 
-- `.env`（gitignored）：`LLM_CHANNEL=zhipu`、`ZHIPU_LLM_MODEL=glm-5.3-flash`、
-  `LLM_DISABLE_REASONING=false`，并更新了 `ZHIPU_API_KEY`
-- 智谱直连的 `glm-5.3-flash` 为「始终思考」：关闭思考会 400，只接受
-  `reasoning_effort` 的 low/high/max。故本模型**接受思考**（会有 `reasoning_content`）
-- `app/core/ai/llm.py` 新增 `_zhipu_always_thinking`：对始终思考模型自动跳过
-  禁用参数（含 EXTRACT 强制 tool_choice 场景），避免整体 400；警告按模型去重
-- 实测：CHAT 正常；EXTRACT 的强制 `tool_choice` 返回原生 tool_calls，走主路径
-- 备选：`glm-4.5-air`（智谱直连）可真正关思考，但其强制 tool_choice 不返回原生
-  tool_calls，提取会退到提示词回退路径；`senseaudio` 网关的 glm-5.3-flash 可关思考
-  且原生 tool_calls 可用
-- 相关文档已同步：`app/config.py` 注释、`.env.example`、`deploy/RUNBOOK.md`
+```bash
+# 后端测试（共享网络命名空间，127.0.0.1:8000 命中运行中的后端）
+docker run --rm --network container:voyage-backend \
+  -e REDIS_URL=redis://redis:6379/7 \
+  -e DATABASE_URL=postgresql+asyncpg://voyage:voyage@postgres:5432/voyage \
+  -v /workspace:/src -w /src voyage-backend:latest \
+  python tests/test_hardening.py
+```
+
+## 待办 / 未做
+
+- 运行中的后端仍是旧镜像，本轮改动需重建容器才生效（前端 dist 已重建）
+- 评估后降优先级（未做）：记忆提取 N+1、会话列表分页、`get_task_llm` 缓存、
+  ChatView/HomeView 再拆分、`SearchModal` 焦点陷阱、前端 lint/format 工具
+
+## 入库产物（untracked，需 add）
+
+- `app/core/ai/memory_context.py`
+- `alembic/versions/c4d9e7a1b2f3_add_list_query_indexes.py`
+- `tests/test_hardening.py`
+
+## 模型（沿用，未改）
+
+- `.env`（gitignored）：`LLM_CHANNEL=zhipu`、`ZHIPU_LLM_MODEL=glm-5.3-flash`、思考强度固定 low
+- 该模型「始终思考」，关闭会 400；`_zhipu_always_thinking` 对其跳过禁用参数
 
 ## 约束
 
 - `docker-compose`；仅宿主 80；密钥勿提交；勿 publish-website
+- 本轮改动默认**不 commit**，等明确指示
