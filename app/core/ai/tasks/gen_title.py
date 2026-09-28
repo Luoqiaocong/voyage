@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 from langchain.messages import HumanMessage
 
+from app.config import config
 from app.core.ai.llm import TaskKind, get_task_llm
 
 
@@ -36,9 +37,9 @@ async def generate_conversation_title(conversation_text: str) -> str:
     response = await get_task_llm(TaskKind.TITLE).ainvoke([HumanMessage(content=prompt)])
     title = response.content.strip() if isinstance(response.content, str) else ""
 
-    # 兜底：AI 返回空或过长时给默认标题（展示用本地时间）
+    # 兜底：AI 返回空或过长时给默认标题（展示用配置时区）
     if not title or len(title) > 30:
-        local_date = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
+        local_date = datetime.now(ZoneInfo(config.APP_TIMEZONE)).strftime("%Y-%m-%d")
         title = f"新对话-{local_date}"
 
     return title

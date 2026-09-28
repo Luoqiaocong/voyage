@@ -22,8 +22,19 @@ class VoyageConfig(BaseSettings):
     # 该类模型只接受 low/high/max，无法关闭思考。实测不传档位时走默认档，
     # 会大量思考（正文首字可到 40s+、reasoning token 很高）；low 档实测
     # reasoning token 归零、正文首字约 0.7s。仅在 LLM_CHANNEL=zhipu 且
-    # 模型命中 glm-5.x 时生效，用于在「关不掉思考」前提下把成本与延迟压下来。
+    # 模型命中 ZHIPU_ALWAYS_THINKING_MODELS 时生效，用于在「关不掉思考」
+    # 前提下把成本与延迟压下来。
     ZHIPU_ALWAYS_THINKING_EFFORT: str = "low"
+
+    # 智谱直连下「始终思考」（无法关闭思考）的模型匹配列表，大小写不敏感。
+    # 匹配规则：
+    #   精确值（如 "glm-5"）——只匹配同名；
+    #   以 "*" 结尾（如 "glm-5.*"）——按前缀匹配（glm-5.3-flash、glm-5.4 等）；
+    #   含通配 "*" 的其它形式（如 "glm-5*"）——按前缀匹配去掉 "*" 的部分。
+    # 不在列表中的模型视为可关闭思考（走 thinking=disabled / reasoning_effort=none）。
+    # 新增始终思考模型时只改这里，不必改代码；此前这段判断硬编码在
+    # app/core/ai/llm.py 里，模型命名一变就会漏判并导致上游 400。
+    ZHIPU_ALWAYS_THINKING_MODELS: list[str] = ["glm-5", "glm-5.*"]
 
     # ---------- 模型配置 ----------
     # 全任务统一使用该模型（OpenCode Go 通道）：速度快、成本低、月度额度高

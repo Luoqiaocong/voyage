@@ -111,15 +111,34 @@ TASK_REASONING_OFF: frozenset[TaskKind] = frozenset({TaskKind.EXTRACT})
 _warned_always_thinking: set[str] = set()
 
 
+def _matches_model_pattern(model_name: str, pattern: str) -> bool:
+    """单个匹配模式：精确名、后缀通配（glm-5.*）或前缀通配（glm-5*）。"""
+    name = (model_name or "").strip().lower()
+    pat = (pattern or "").strip().lower()
+    if not name or not pat:
+        return False
+    if pat.endswith("*"):
+        return name.startswith(pat[:-1])
+    return name == pat
+
+
 def _zhipu_always_thinking(model_name: str) -> bool:
     """智谱直连网关下，该模型是否「始终思考」（无法关闭）。
 
     glm-5.x 系（如 glm-5.3-flash）不接受 thinking={"type":"disabled"}，
     传了会直接 400（"该模型始终思考..."）。glm-4.x / glm-5-turbo 可以关闭。
+
+    匹配哪些模型由配置 ZHIPU_ALWAYS_THINKING_MODELS 决定，不再硬编码模型名——
+    先前写死 "glm-5" / startswith("glm-5.")，模型命名一变（大小写、新变体、
+    带 provider 前缀）就会漏判，进而给始终思考模型发送禁用参数导致整条请求 400。
+
     注意：这条限制只属于**智谱直连**；同一模型经 SenseAudio 网关时
     支持 reasoning_effort="none"（实测），故不要在别处复用此判断。
     """
-    return model_name == "glm-5" or model_name.startswith("glm-5.")
+    return any(
+        _matches_model_pattern(model_name, pattern)
+        for pattern in config.ZHIPU_ALWAYS_THINKING_MODELS
+    )
 
 
 def get_task_llm(task: TaskKind, **overrides) -> BaseChatModel:
