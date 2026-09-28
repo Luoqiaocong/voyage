@@ -19,7 +19,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.business import BusinessCode, ItineraryException
-from app.modules.user.auth import PasswordManager
+from app.modules.user.auth import hash_password_async, verify_password_async
 from app.shared.db import get_db
 from app.shared.utils import TransactionMixin
 
@@ -72,13 +72,16 @@ class ShareService(TransactionMixin):
         return share
 
     @staticmethod
-    def _verify_password(share, password: str | None) -> None:
-        """校验访问密码；未设密码则直接通过。"""
+    async def _verify_password(share, password: str | None) -> None:
+        """校验访问密码；未设密码则直接通过。
+
+        Argon2 校验放到线程池（verify_password_async），避免阻塞事件循环。
+        """
         if not share.password_hash:
             return
         if not password:
             raise ItineraryException(BusinessCode.ITINERARY_SHARE_PASSWORD_REQUIRED)
-        if not PasswordManager.verify(password, share.password_hash):
+        if not await verify_password_async(password, share.password_hash):
             raise ItineraryException(BusinessCode.ITINERARY_SHARE_PASSWORD_WRONG)
 
     # ==================== 分享者侧：管理分享 ====================
@@ -113,7 +116,7 @@ class ShareService(TransactionMixin):
                 token=generate_share_token(),
                 allow_copy=allow_copy,
                 allow_edit=allow_edit,
-                password_hash=PasswordManager.hash(password) if password else None,
+                password_hash=await hash_password_async(password) if password else None,
                 expires_at=expires_at,
             )
 
@@ -152,7 +155,7 @@ class ShareService(TransactionMixin):
             # 让存量库里的明文随用户操作逐步消失
             share.password_plain = None
         elif password:
-            share.password_hash = PasswordManager.hash(password)
+            share.password_hash = await hash_password_async(password)
             share.password_plain = None
 
         if clear_expiry:
@@ -228,7 +231,7 @@ class ShareService(TransactionMixin):
             (行程字段字典, 分享者昵称)
         """
         share = await self._resolve_share(token)
-        self._verify_password(share, password)
+        await self._verify_password(share, password)
 
         itinerary = await self.itinerary_repo.get(share.itinerary_id)
         if itinerary is None:
@@ -261,7 +264,7 @@ class ShareService(TransactionMixin):
         这正是「可复制」与「可编辑」的区别——前者产生副本，后者改原件。
         """
         share = await self._resolve_share(token)
-        self._verify_password(share, password)
+        await self._verify_password(share, password)
         if not share.allow_copy:
             raise ItineraryException(BusinessCode.ITINERARY_SHARE_NOT_ALLOWED)
 
@@ -295,7 +298,7 @@ class ShareService(TransactionMixin):
             (是否已写入原件, 合并后的 plan)
         """
         share = await self._resolve_share(token)
-        self._verify_password(share, password)
+        await self._verify_password(share, password)
         if not share.allow_edit:
             raise ItineraryException(BusinessCode.ITINERARY_SHARE_NOT_ALLOWED)
 

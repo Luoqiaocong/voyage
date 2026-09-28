@@ -30,9 +30,11 @@ from app.shared.redis import reset_counter
 from app.shared.utils import TransactionMixin, log
 
 from .auth import (
-    PasswordManager,
     get_hashed_id,
+    hash_password_async,
     validate_password_strength,
+    verify_password_async,
+    verify_password_uniform_async,
 )
 from .constants import ROLE_SUPER_ADMIN, ROLE_USER, SELF_EDITABLE_FIELDS
 from .repo import UserRepo
@@ -122,7 +124,7 @@ class UserService(TransactionMixin):
         await self._verify_email_code(email, code)
 
         # 密码哈希处理
-        hashed_pwd = PasswordManager.hash(pwd)
+        hashed_pwd = await hash_password_async(pwd)
 
         # 创建用户（事务）；并发注册同一邮箱时数据库唯一约束报错，转成业务码
         try:
@@ -155,7 +157,9 @@ class UserService(TransactionMixin):
         user = await self.repo.get_user_dynamic(email=email)
 
         # 登录失败计数：同一邮箱 15 分钟内失败超过 5 次则限流（防暴力破解）
-        if user is None or not PasswordManager.verify(pwd, user.password):
+        # verify_uniform 在用户不存在时也会做一次等价哈希校验，抹平时间差，
+        # 避免通过响应快慢判断邮箱是否注册。
+        if not await verify_password_uniform_async(pwd, user.password if user else None):
             if await check_rate_limit(login_fail_key(email), LOGIN_FAIL_LIMIT, LOGIN_FAIL_WINDOW):
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -189,7 +193,7 @@ class UserService(TransactionMixin):
         # 1. 先验证用户身份（旧密码是否正确）
         user = await self._get_user(user_id=user_id)
 
-        if not PasswordManager.verify(current_pwd, user.password):
+        if not await verify_password_async(current_pwd, user.password):
             raise UserException(code=BusinessCode.USER_PWD_AUTH_FAILED)
         
         # 2. 身份验证通过后，再检查新密码强度
@@ -200,7 +204,7 @@ class UserService(TransactionMixin):
             raise UserException(code=BusinessCode.USER_PWD_SAME)
         
         # 4. 哈希新密码
-        new_pwd_hash = PasswordManager.hash(new_pwd)
+        new_pwd_hash = await hash_password_async(new_pwd)
         
         # 5. 更新密码（事务）
         async with self.transaction_scope():
@@ -216,7 +220,7 @@ class UserService(TransactionMixin):
 
         validate_password_strength(pwd)
 
-        new_pwd_hash = PasswordManager.hash(pwd)
+        new_pwd_hash = await hash_password_async(pwd)
 
         # 先提交密码更新；事务成功后再消费令牌（避免 DB 失败导致有效令牌被白白烧掉）
         async with self.transaction_scope():
