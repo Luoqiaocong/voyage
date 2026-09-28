@@ -65,6 +65,19 @@ class A11y(HTMLParser):
     def _named(a: dict) -> bool:
         return any(k in a for k in NAME_ATTRS)
 
+    def _check_input(self, tag: str, a: dict, line: int) -> None:
+        """input/textarea/select 是否有可访问名称。
+
+        被 <label> 包裹同样是合法的名称来源 —— 只判 id 与 aria-label
+        会把它们误报（第三版扫描器的坑）。
+        """
+        if tag not in ("input", "textarea", "select"):
+            return
+        if a.get("type") in ("hidden", "submit", "button"):
+            return
+        if not (self._named(a) or "id" in a or ":id" in a or self.in_label):
+            self.input_bad.append(f"{line} <{tag}>")
+
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
         line = self.getpos()[0]
@@ -77,11 +90,7 @@ class A11y(HTMLParser):
         if tag == "img" and "alt" not in a and ":alt" not in a:
             self.img_bad.append(f"{line} {a.get('src', '?')}")
         elif tag in ("input", "textarea", "select"):
-            if a.get("type") not in ("hidden", "submit", "button"):
-                # 被 <label> 包裹同样是合法的名称来源 —— 只判 id 与
-                # aria-label 会把它们误报（第三版扫描器的坑）
-                if not (self._named(a) or "id" in a or ":id" in a or self.in_label):
-                    self.input_bad.append(f"{line} <{tag}>")
+            self._check_input(tag, a, line)
         elif tag == "div" and ("@click" in a or "v-on:click" in a):
             # aria-hidden 的纯装饰遮罩不算交互控件（它有 Esc 等价操作）
             if a.get("aria-hidden") != "true" and not any(
@@ -94,14 +103,19 @@ class A11y(HTMLParser):
             self.stack.append(tag)
 
     def handle_startendtag(self, tag, attrs):
-        """"自闭合标签只做 img 检查，**不入栈**。
+        """自闭合标签只做 img / 输入控件检查，**不入栈**。
 
         之前直接复用 handle_starttag 会让自闭合标签永不弹出，
-        污染 in_label 判断。
+        污染 in_label 判断。但只做 img 检查会漏掉写法为 `<input ... />`
+        的表单控件 —— 这类写法在本项目里很常见，于是「输入控件必须有
+        可访问名称」这一项实际上形同虚设（自闭合 input 从未被检查）。
         """
         a = dict(attrs)
+        line = self.getpos()[0]
         if tag == "img" and "alt" not in a and ":alt" not in a:
-            self.img_bad.append(f"{self.getpos()[0]} {a.get('src', '?')}")
+            self.img_bad.append(f"{line} {a.get('src', '?')}")
+        else:
+            self._check_input(tag, a, line)
         if self._btn is not None:
             self._btn["tags"].append(tag)
 

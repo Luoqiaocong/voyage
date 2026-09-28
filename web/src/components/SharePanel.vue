@@ -350,6 +350,7 @@ defineExpose({ reload: load })
                   class="input input--sm row__pwd-input"
                   type="text"
                   placeholder="新密码（4-32 位）"
+                  aria-label="分享新密码"
                   maxlength="32"
                   @keydown.enter="savePassword(s)"
                   @keydown.esc="cancelPwdEdit"

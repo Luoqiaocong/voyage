@@ -630,6 +630,7 @@ onUnmounted(stopDeleteTimer)
               autocomplete="one-time-code"
               maxlength="6"
               placeholder="6 位验证码"
+              aria-label="注销账号确认验证码"
               :disabled="deleting"
               @keyup.enter="confirmDeleteAccount"
             />

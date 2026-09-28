@@ -1,4 +1,4 @@
-import { nextTick, ref, type Ref } from 'vue'
+import { nextTick, onUnmounted, ref, type Ref } from 'vue'
 
 /**
  * 对话流的「自动跟随」行为。
@@ -37,6 +37,16 @@ export function useChatAutoScroll(scrollEl: Ref<HTMLElement | null>) {
 
   /** 上一次观察到的 scrollTop，用于识别「用户主动上滑」 */
   let lastScrollTop = 0
+
+  /** jumpToBottom 的补正定时器句柄；卸载时需清理，避免作用于已销毁组件 */
+  let jumpTimer: number | null = null
+
+  onUnmounted(() => {
+    if (jumpTimer !== null) {
+      window.clearTimeout(jumpTimer)
+      jumpTimer = null
+    }
+  })
 
   /**
    * 容器滚动时维护两件事：
@@ -146,7 +156,8 @@ export function useChatAutoScroll(scrollEl: Ref<HTMLElement | null>) {
        * 动画结束会停在半途。等动画结束后按最新 scrollHeight 补一次瞬时校正。
        * 若用户已再次上翻（away=true）则放弃。
        */
-      window.setTimeout(() => {
+      jumpTimer = window.setTimeout(() => {
+        jumpTimer = null
         const e2 = scrollEl.value
         if (e2 && !awayFromBottom.value) {
           e2.scrollTo({ top: e2.scrollHeight, behavior: 'auto' })

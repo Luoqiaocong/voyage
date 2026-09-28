@@ -194,14 +194,25 @@ function mergeAssistantRuns(list: RdMsg[]): RdMsg[] {
   return out
 }
 
+/**
+ * 会话切换的请求代次。
+ *
+ * 快速点开 A 再点 B 时，A 的历史请求可能晚于 B 返回；若只看 activeId
+ * 已被改成 B 就直接赋值，会把 A 的消息灌进 B 的窗口（内容与标题错位）。
+ * 每次切换自增，回调里比对代次，过期响应直接丢弃。
+ */
+let convReq = 0
+
 async function openConversation(id: string) {
   if (streaming.value) return
+  const req = ++convReq
   activeId.value = id
   messages.value = []
   resetStream()
   try {
     // 用带 limit 的分页版本：长会话不必一次拉全量，减少首屏等待
     const page = (await getMessagesPage(id, HISTORY_ROUNDS)) as MessagesPage
+    if (req !== convReq) return // 已切换到别的会话，丢弃本次结果
     messages.value = normalizeMessages(page)
     historyTruncated.value = page.truncated
 
@@ -212,10 +223,12 @@ async function openConversation(id: string) {
       convSummary.value = { ...convSummary.value, [id]: summarize(firstUser.content) }
     }
   } catch (e: any) {
+    if (req !== convReq) return
     ui.toast(e?.message ?? '历史消息加载失败', 'error')
     // 历史没取到，摘要也补一次（独立请求，失败静默）
     void cacheSummary(id)
   }
+  if (req !== convReq) return
   // 切换会话是用户主动操作，强制到底（不受「此前是否在翻历史」影响）
   scrollToBottom(false, true)
 }
@@ -248,6 +261,8 @@ function resetStream() {
  */
 async function newConversation() {
   if (streaming.value) return
+  // 切到草稿态即作废「正在加载的历史」请求，避免它稍后回来覆盖空白对话
+  convReq++
   /*
    * 点「新会话」就等于告诉系统：欢迎屏的使命结束了。
    *
@@ -980,6 +995,10 @@ watch(shouldShowWelcome, (show) => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onGlobalKeydown)
+  // 离开页面时中断仍在进行的流式请求：否则后端会继续生成、前端也会在
+  // 组件已卸载后继续收到 chunk 并写状态（finally 里的赋值全部作用在
+  // 已销毁组件上），既浪费 token 也可能报错。
+  abortCtl?.abort()
 })
 
 watch(streaming, (v) => {

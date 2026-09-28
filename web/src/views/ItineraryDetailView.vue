@@ -40,6 +40,23 @@ const loading = ref(true)
 const detailTransport = computed(() => parseTransport(detail.value?.plan.transport))
 const saving = ref(false)
 
+/**
+ * 展示态的分日数据：把「按时段归组并排序」从模板搬进 computed。
+ *
+ * 原先把 groupBySlot + sortGroupsBySlot 直接写在模板里，组件每次重渲染
+ * 都会重跑这两步——分享面板开合、导出下拉、编辑态切换、甚至无关的状态
+ * 变化都会触发。而归组结果只依赖 detail，不该跟着重算。搬进 computed
+ * 后由 Vue 缓存，只有 detail 变化时才重新分组。
+ */
+const groupedDays = computed(() =>
+  (detail.value?.plan.daily_plans ?? []).map((day) => ({
+    day,
+    groups: sortGroupsBySlot(
+      groupBySlot(day.activities, (a: ItineraryActivity) => a.time_slot)
+    )
+  }))
+)
+
 /** 分享面板默认收起：它不是高频操作，展开会挤掉行程正文 */
 const showShare = ref(false)
 /** 导出进行中标记：同一个时刻只允许一个导出任务 */
@@ -658,14 +675,14 @@ function cancelEdit() {
                   <select v-model="act.kind" class="input" aria-label="类型">
                     <option v-for="k in KIND_OPTIONS" :key="k.value" :value="k.value">{{ k.label }}</option>
                   </select>
-                  <input v-model="act.name" class="input act-edit__name" placeholder="地点 / 活动名称" />
+                  <input v-model="act.name" class="input act-edit__name" placeholder="地点 / 活动名称" aria-label="活动名称" />
                   <button class="chip-x" type="button" aria-label="删除活动" @click="removeActivity(di, ai)">✕</button>
                 </div>
-                <textarea v-model="act.description" class="input" rows="2" placeholder="简要描述"></textarea>
+                <textarea v-model="act.description" class="input" rows="2" placeholder="简要描述" aria-label="活动描述"></textarea>
                 <div class="act-edit__meta">
                   <input v-model.number="act.duration_hours" class="input" type="number" min="0" step="0.5" placeholder="小时" aria-label="时长小时" />
                   <input v-model.number="act.cost" class="input" type="number" min="0" step="1" placeholder="花费（元）" aria-label="花费" />
-                  <input v-model="act.note" class="input" placeholder="备注（可选）" />
+                  <input v-model="act.note" class="input" placeholder="备注（可选）" aria-label="活动备注" />
                 </div>
               </div>
               <button class="btn btn-ghost btn--sm" type="button" @click="addActivity(di)">添加活动</button>
@@ -673,12 +690,12 @@ function cancelEdit() {
             </article>
           </section>
 
-          <section v-for="day in detail.plan.daily_plans" v-show="!editing" :key="day.day_no" class="day card">
+          <section v-for="entry in groupedDays" v-show="!editing" :key="entry.day.day_no" class="day card">
             <header class="day__head">
-              <span class="day__no">Day {{ day.day_no }}</span>
+              <span class="day__no">Day {{ entry.day.day_no }}</span>
               <div>
-                <h2 class="day__theme">{{ day.theme }}</h2>
-                <p class="day__date">{{ day.date || '第 ' + day.day_no + ' 天' }}</p>
+                <h2 class="day__theme">{{ entry.day.theme }}</h2>
+                <p class="day__date">{{ entry.day.date || '第 ' + entry.day.day_no + ' 天' }}</p>
               </div>
             </header>
 
@@ -686,14 +703,11 @@ function cancelEdit() {
               按时段归组渲染，而不是每条活动前面都挂「上午/下午/晚上」。
               一天内常有多条属于同一时段，逐条挂标签会让同一个词重复出现，
               真正的内容反而被淹没。归组后时段只作分组标题出现一次。
-              这里用 sortGroupsBySlot 按时间排序（数据是结构化的，
-              按「上午→下午→晚上」阅读更自然）。
+              分组与排序已在 groupedDays 中算好，这里直接用。
             -->
             <div class="day__slots">
               <section
-                v-for="(grp, gi) in sortGroupsBySlot(
-                  groupBySlot(day.activities, (a: ItineraryActivity) => a.time_slot)
-                )"
+                v-for="(grp, gi) in entry.groups"
                 :key="gi"
                 class="slotgrp"
               >
@@ -723,7 +737,7 @@ function cancelEdit() {
               </section>
             </div>
 
-            <p class="day__summary">{{ day.summary }}</p>
+            <p class="day__summary">{{ entry.day.summary }}</p>
           </section>
 
           <section v-if="detail.plan.tips?.length && !editing" class="card tips">

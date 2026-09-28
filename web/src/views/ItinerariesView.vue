@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AppNavbar from '@/components/AppNavbar.vue'
 import BackToTop from '@/components/BackToTop.vue'
@@ -94,10 +94,20 @@ let searchTimer: number | null = null
 watch(keyword, () => {
   if (searchTimer) window.clearTimeout(searchTimer)
   searchTimer = window.setTimeout(() => {
+    searchTimer = null
     const next = keyword.value.trim()
     if (next === query.value) return
     applySearch()
   }, 320)
+})
+
+// 离开页面时取消挂起的防抖请求：否则 320ms 内的跳转会让已销毁组件
+// 仍然发起/处理一次列表请求（既是资源浪费也可能在卸载后写状态）
+onUnmounted(() => {
+  if (searchTimer) {
+    window.clearTimeout(searchTimer)
+    searchTimer = null
+  }
 })
 
 onMounted(load)
