@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ai import AgentFactory
+from app.core.ai.memory_context import use_memory_context
 from app.core.ai.opencode import use_session, use_user
 from app.core.ai.tool_metrics import ToolCallCounter
 from app.core.business import BusinessCode, ConversationException
@@ -47,10 +48,11 @@ class ConversationGateway:
         # 需要 session 来加载当前会话所属用户的长期记忆（注入 system prompt）
         self.db = db
 
-    async def _apply_memory(self, conversation_id: str) -> None:
-        """把该会话所属用户的长期记忆装载到 AgentFactory。
+    async def _load_memory_context(self, conversation_id: str) -> str:
+        """加载该会话所属用户的长期记忆文本，供本轮系统提示词注入。
 
         失败不阻断对话：记忆属于增强项，缺失时应降级为「没有记忆」而不是报错。
+        返回空串即表示无记忆。
         """
         from app.modules.memory.repo import MemoryRepo
         from app.modules.memory.service import MemoryService
@@ -62,11 +64,12 @@ class ConversationGateway:
                 )
             ).scalar_one_or_none()
             if user_id is None:
-                return
+                return ""
             service = MemoryService(repo=MemoryRepo(db=self.db), db=self.db)
-            AgentFactory.apply_memory(await service.build_memory_context(user_id))
+            return await service.build_memory_context(user_id)
         except Exception:
             log.exception("[memory] 加载记忆上下文失败，本次对话按无记忆处理")
+            return ""
 
     # -------------------- 1. 查询历史消息 --------------------
     async def get_messages(self, conversation_id: str):
@@ -195,8 +198,8 @@ class ConversationGateway:
         拿不到请求参数，只能通过上下文变量读（见 use_user）。
         为 0 时表示无法归属（如后台预热），此时只计模型维度不写用户维度。
         """
-        # 注入长期记忆后再取 agent：apply_memory 可能重建 agent 实例
-        await self._apply_memory(conversation_id)
+        # 记忆随请求经上下文变量注入（不再改写全局 agent），故先取文本再取 agent
+        memory_context = await self._load_memory_context(conversation_id)
         agent = AgentFactory.get_agent()
         config = _thread_config(conversation_id)
 
@@ -206,7 +209,11 @@ class ConversationGateway:
         started = time.perf_counter()
         ok = True
         try:
-            with use_session(conversation_id), use_user(user_id):
+            with (
+                use_session(conversation_id),
+                use_user(user_id),
+                use_memory_context(memory_context),
+            ):
                 stream = agent.astream(
                     {"messages": [HumanMessage(content=message)]},
                     stream_mode="messages",

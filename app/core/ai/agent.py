@@ -5,10 +5,9 @@ from typing import TYPE_CHECKING
 from langchain.agents import create_agent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
-from app.shared.utils import log
-
 from .date_context import inject_current_date
 from .llm import TaskKind, get_task_llm
+from .memory_context import inject_memory
 from .middleware import CUSTOM_MIDDLEWARE
 from .tools import (
     ticket_schedule_cached,
@@ -17,7 +16,7 @@ from .tools import (
 )
 
 # supervisor 的工具集：带缓存与埋点的版本（见 tools/__init__.py 说明）。
-# 抽成模块级常量，避免 initialize 与 apply_memory 两处各写一遍导致漏改。
+# 抽成模块级常量，避免 initialize 与其它构建点各写一遍导致漏改。
 #
 # 这里**不再包含 get_today**：当前日期改由 date_context 中间件注入系统提示词。
 # 日期是服务端每次调用都确切知道的常量，让模型为此跑一次完整工具链路
@@ -30,11 +29,14 @@ AGENT_TOOLS = [
     travel_recommend_cached,
 ]
 
-# 中间件清单 = 通用中间件 + 日期注入。
-# 日期注入放在最后：它在每轮模型调用前把原始 system message 重新组装
-# （原提示词 + 当前日期），若放在其它中间件之前，那些中间件看到的
-# system message 就会是带日期的版本，不利于各自独立判断。
-AGENT_MIDDLEWARE = [*CUSTOM_MIDDLEWARE, inject_current_date]
+# 中间件清单 = 通用中间件 + 记忆注入 + 日期注入。
+#
+# 两个 dynamic_prompt 中间件的顺序不能随意：
+#   · inject_memory 先执行，它把用户记忆接到基础提示词之后；
+#   · inject_current_date 后执行，它看到的是「已含记忆」的 system message，
+#     再把日期接在其后。若反过来，日期段会夹在提示词与记忆之间。
+# 二者都按请求上下文取值，故 agent 实例可全局复用、无需按用户重建。
+AGENT_MIDDLEWARE = [*CUSTOM_MIDDLEWARE, inject_memory, inject_current_date]
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
@@ -112,9 +114,14 @@ SUPERVISOR_PROMPT = """你是 Voyage 的旅行顾问，一位既专业又亲切�
 
 
 class AgentFactory:
+    """全局复用的 supervisor Agent 工厂。
+
+    记忆不再作为实例状态：它随每次请求经上下文变量注入（见 memory_context），
+    因此同一个编译好的 agent 可在所有用户之间安全共享。
+    """
+
     _instance: CompiledStateGraph | None = None
     _checkpointer: BaseCheckpointSaver | None = None
-    _memory_context: str = ""
 
     @classmethod
     def initialize(cls, checkpointer: BaseCheckpointSaver) -> None:
@@ -127,41 +134,8 @@ class AgentFactory:
             tools=AGENT_TOOLS,
             checkpointer=checkpointer,
             middleware=AGENT_MIDDLEWARE,
-            system_prompt=cls._compose_prompt(),
+            system_prompt=SUPERVISOR_PROMPT,
         )
-
-    @classmethod
-    def _compose_prompt(cls) -> str:
-        """把长期记忆拼到监督提示词之后。
-
-        为什么用「拼接」而不是让模型调用工具去查记忆：
-        旅行场景的记忆量很小（通常 5-15 条），全量注入开销可忽略；
-        工具方式需要模型自己想起去查，实测容易被忽略。代价是条数必须收敛，
-        故 MemoryService 侧设了上限并按置信度截断。
-        """
-        if not cls._memory_context:
-            return SUPERVISOR_PROMPT
-        return f"{SUPERVISOR_PROMPT}\n\n{cls._memory_context}"
-
-    @classmethod
-    def apply_memory(cls, memory_context: str) -> None:
-        """按当前用户设置长期记忆上下文；仅在文本真正变化时重建 agent。
-
-        同一用户的连续多轮对话不会重复构建，避免每轮都付出 create_agent 开销。
-        """
-        new_context = memory_context or ""
-        if new_context == cls._memory_context:
-            return
-        cls._memory_context = new_context
-        if cls._checkpointer is not None:
-            cls._instance = create_agent(
-                model=get_task_llm(TaskKind.CHAT),
-                tools=AGENT_TOOLS,
-                checkpointer=cls._checkpointer,
-                middleware=AGENT_MIDDLEWARE,
-                system_prompt=cls._compose_prompt(),
-            )
-            log.info(f"[memory] agent 已按新记忆重建（长度 {len(new_context)}）")
 
     @classmethod
     def get_agent(cls) -> CompiledStateGraph:
@@ -177,7 +151,5 @@ class AgentFactory:
 
     @classmethod
     def reset(cls) -> None:
-        
         cls._instance = None
         cls._checkpointer = None
-        cls._memory_context = ""
