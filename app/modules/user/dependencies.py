@@ -26,6 +26,14 @@ async def _authenticate_token(token: str, repo: UserRepo) -> User:
     if not user:
         raise UserException(code=BusinessCode.TOKEN_INVALID)
 
+    # 被停用的账号即便持有有效令牌也必须拒绝。
+    # 原实现只在 get_current_admin 里判 is_active，普通用户接口完全绕过，
+    # 导致管理员停用某人后，对方凭旧 access token 仍可继续操作用户端点，
+    # 最多到令牌自然过期（默认 30 分钟）才失效。
+    # 放在这里而不是各端点：依赖是统一入口，漏判会直接表现为「接口无鉴权」。
+    if not user.is_active:
+        raise UserException(code=BusinessCode.USER_ACCOUNT_DISABLED)
+
     return user
 
 

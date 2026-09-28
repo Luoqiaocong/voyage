@@ -108,18 +108,19 @@ class AuthService:
         """两步重置第一步：校验验证码后签发一次性重置令牌。
 
         要求邮箱已注册（user_exists=True）。
+
+        校验顺序刻意是「先验证码、后查用户」：若先查用户，未注册邮箱会
+        在验证码校验前直接返回 USER_NOT_FOUND，攻击者无需有效验证码即可
+        枚举哪些邮箱已注册。先过验证码这一关后，未注册与验证码错误都返回
+        同一业务码，无法据此区分。
         """
-        # 邮箱维度限流（防枚举与滥用）：先限流再查用户
+        # 邮箱维度限流（防枚举与滥用）：先限流再处理
         if await check_rate_limit(reset_token_email_key(email), RESET_EMAIL_LIMIT, RESET_EMAIL_WINDOW):
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="操作过于频繁，请稍后再试",
                 headers={"Retry-After": str(RESET_EMAIL_WINDOW)},
             )
-
-        user = await self.repo.get_user_dynamic(email=email)
-        if not user:
-            raise UserException(code=BusinessCode.USER_NOT_FOUND)
 
         if not await consume_code(email, code):
             # 区分两种「验不过」：邮件根本没发出去 vs 验证码填错了。
@@ -129,6 +130,11 @@ class AuthService:
                 raise AuthException(code=BusinessCode.MAIL_SEND_FAILED)
             raise UserException(code=BusinessCode.CODE_VERIFY_FAILED)
 
+        user = await self.repo.get_user_dynamic(email=email)
+        if not user:
+            # 不暴露「邮箱未注册」：与验证码错误返回同一业务码，避免枚举。
+            raise UserException(code=BusinessCode.CODE_VERIFY_FAILED)
+
         token = await issue_reset_token(email)
         return {"token": token}
     
@@ -136,5 +142,12 @@ class AuthService:
         user_id = await get_refresh_token_user(refresh_token)
         if user_id is None:
             raise AuthException(code=BusinessCode.TOKEN_INVALID)
+
+        # Refresh Token 有效期内账号可能已被停用或删除，续期前必须复查，
+        # 否则「停用用户」能靠刷新一直拿到新的 access token（最长 7 天）。
+        user = await self.repo.get_user_dynamic(user_id)
+        if not user or not user.is_active:
+            raise AuthException(code=BusinessCode.TOKEN_INVALID)
+
         access_token = create_access_token({"sub": get_hashed_id(user_id)})
         return {"access_token": access_token, "token_type": "bearer"}
