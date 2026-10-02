@@ -3,6 +3,7 @@ from langchain.agents import create_agent
 
 from app.core.ai.llm import TaskKind, get_task_llm
 from app.core.ai.mcp import get_namespace_tools
+from app.core.ai.middleware import SUBAGENT_MIDDLEWARE
 from app.core.ai.tools.wrap_cache import with_cache
 
 TRAVEL_AGENT_PROMPT = """你是一个目的地综合规划专家（Travel Agent）。
@@ -49,6 +50,7 @@ async def get_travel_agent():
             name="travel_agent",
             model=get_task_llm(TaskKind.PLAN),
             tools=tools,
+            middleware=SUBAGENT_MIDDLEWARE,
             system_prompt=TRAVEL_AGENT_PROMPT,
         )
     return _travel_agent_cache

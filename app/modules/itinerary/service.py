@@ -1,12 +1,20 @@
 from typing import Annotated, Any
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette import status
 
 from app.core.business import BusinessCode, ItineraryException
 from app.modules.conversation.gateway import ConversationGateway
 from app.shared.db import get_db
+from app.shared.ratelimit import (
+    EXTRACT_USER_LIMIT,
+    EXTRACT_USER_WINDOW,
+    check_rate_limit,
+    extract_user_key,
+)
+from app.shared.redis import redis_client
 from app.shared.utils import TransactionMixin
 
 from .extractor import extract_itinerary_plan
@@ -87,37 +95,74 @@ class ItineraryService(TransactionMixin):
             return True
         return False
 
-    async def save_from_conversation(self, conversation_id: str, user_id: int):
+    async def save_from_conversation(
+        self,
+        conversation_id: str,
+        user_id: int,
+        *,
+        overwrite: bool = False,
+    ):
         # 会话归属与存在的校验已由路由层 conversation 域的 verify_conversation_owner 完成，
         # service 只负责：总结会话历史 → 结构化提取 → 落库。
+        lock_key = f"itinerary:extract:{user_id}:{conversation_id}"
+        redis = redis_client.get_client()
+        acquired = await redis.set(lock_key, "1", nx=True, ex=180)
+        if not acquired:
+            raise ItineraryException(BusinessCode.ITINERARY_EXTRACT_BUSY)
 
-        # 1. 取整段会话转录（含用户与助手两侧文本）
-        transcript = await self.conv_gateway.get_conversation_transcript(conversation_id)
-        if not transcript.strip():
-            raise ItineraryException(BusinessCode.ITINERARY_GEN_FAILED)
+        try:
+            # 用户维度配额：放在拿到会话锁之后，这样「同会话并发被锁挡掉」
+            # 的请求不会白扣一次额度。计次覆盖成功与失败两种结果 ——
+            # 无论提取是否成功，模型都已经被调用过，成本已经产生。
+            if await check_rate_limit(
+                extract_user_key(user_id), EXTRACT_USER_LIMIT, EXTRACT_USER_WINDOW
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="行程提取过于频繁，请稍后再试",
+                    headers={"Retry-After": str(EXTRACT_USER_WINDOW)},
+                )
 
-        # 2. 结构化提取（由模型总结会话，产出结构化行程）
-        plan = await extract_itinerary_plan(transcript)
+            transcript = await self.conv_gateway.get_conversation_transcript(conversation_id)
+            if not transcript.strip():
+                raise ItineraryException(BusinessCode.ITINERARY_GEN_FAILED)
 
-        # 3. 先检查是否成功
-        if plan is None or self._looks_fabricated(plan):
-            raise ItineraryException(BusinessCode.ITINERARY_GEN_FAILED)
+            plan = await extract_itinerary_plan(transcript)
+            if plan is None or self._looks_fabricated(plan):
+                raise ItineraryException(BusinessCode.ITINERARY_GEN_FAILED)
 
-        # 4. 转换为字典
-        plan_dict = plan.model_dump() if isinstance(plan, BaseModel) else plan
+            plan_dict = plan.model_dump() if isinstance(plan, BaseModel) else plan
 
-        # 5. 存入数据库
-        async with self.transaction_scope():
-            return await self.repo.insert(
-                conversation_id=conversation_id,
-                user_id=user_id,
-                plan=plan_dict,
-            )
+            async with self.transaction_scope():
+                existing = await self.repo.get_latest_by_conversation(user_id, conversation_id)
+                if overwrite and existing is not None:
+                    return await self.repo.update(existing, plan=plan_dict)
+                return await self.repo.insert(
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    plan=plan_dict,
+                )
+        finally:
+            await redis.delete(lock_key)
 
     # ---------- 查询 ----------
-    async def get_itineraries(self, user_id: int):
-        """查询当前用户的全部行程。"""
-        return await self.repo.list_by_user(user_id)
+    async def get_itineraries_page(
+        self,
+        user_id: int,
+        *,
+        page: int = 1,
+        page_size: int = 12,
+        q: str | None = None,
+    ):
+        return await self.repo.list_by_user_page(
+            user_id, page=page, page_size=page_size, q=q
+        )
+
+    async def count_itineraries(self, user_id: int) -> int:
+        return await self.repo.count_by_user(user_id)
+
+    async def get_latest_for_conversation(self, user_id: int, conversation_id: str):
+        return await self.repo.get_latest_by_conversation(user_id, conversation_id)
 
     async def get_itinerary(self, itinerary_id: int):
         """查询单个行程详情。"""

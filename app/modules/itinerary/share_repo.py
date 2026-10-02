@@ -6,7 +6,7 @@
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.db import get_db
@@ -65,14 +65,21 @@ class ShareRepo:
         return share
 
     async def bump_view_count(self, share: ItineraryShare) -> int:
-        """访问计数 +1。
+        """访问计数 +1，返回自增后的值。
 
-        用「读取-加一-写回」而非 SQL 自增表达式：分享访问频率极低，
-        且这里与业务读在同一会话中，简单实现足够；不追求高并发下的原子性。
+        用数据库侧 `view_count = view_count + 1 RETURNING view_count`，
+        而不是「读取-加一-写回」：同一条链接被并发打开时后者会互相覆盖，
+        丢计数。单条 UPDATE 由数据库保证原子性，返回值为最新计数。
         """
-        share.view_count = (share.view_count or 0) + 1
+        stmt = (
+            update(ItineraryShare)
+            .where(ItineraryShare.id == share.id)
+            .values(view_count=ItineraryShare.view_count + 1)
+            .returning(ItineraryShare.view_count)
+        )
+        new_count = (await self.db.execute(stmt)).scalar_one()
         await self.db.flush()
-        return share.view_count
+        return int(new_count)
 
     async def delete(self, share: ItineraryShare) -> None:
         """物理删除分享记录。

@@ -12,7 +12,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.db.models import AdminAuditLog, utc_now
-from app.shared.utils import log
 
 
 async def record(
@@ -30,24 +29,29 @@ async def record(
 
     刻意不 commit：由调用方放在同一事务里，保证「业务变更成功」与
     「审计留痕」要么都生效、要么都不生效，不会出现改了却没记录的缺口。
-    审计写入失败只记日志，不阻断业务（留痕重要，但不该让管理操作不可用）。
+
+    这里**不再吞掉写入异常**：原实现用 try/except 记日志后继续，
+    但 flush 失败后会话已进入失败状态，事务随后 commit 必然报错——
+    所谓「留痕失败但业务继续」根本不会发生，只是把错误推迟、并让
+    「改了却没记录」的缺口看起来被兜住了。改为让异常向上抛，
+    由 transaction_scope 回滚整笔操作，语义与事务保证一致。
+    detail 用 default=str 兜底，非 JSON 原生类型不会成为新的失败点。
     """
-    try:
-        session.add(
-            AdminAuditLog(
-                operator_id=operator_id,
-                operator_email=operator_email,
-                action=action,
-                target_type=target_type,
-                target_id=str(target_id),
-                detail=json.dumps(detail, ensure_ascii=False) if detail else None,
-                ip=ip,
-                created_at=utc_now(),
-            )
+    session.add(
+        AdminAuditLog(
+            operator_id=operator_id,
+            operator_email=operator_email,
+            action=action,
+            target_type=target_type,
+            target_id=str(target_id),
+            detail=(
+                json.dumps(detail, ensure_ascii=False, default=str) if detail else None
+            ),
+            ip=ip,
+            created_at=utc_now(),
         )
-        await session.flush()
-    except Exception:
-        log.exception("[audit] 写入审计日志失败")
+    )
+    await session.flush()
 
 
 async def list_logs(

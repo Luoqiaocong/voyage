@@ -99,6 +99,7 @@ class BusinessCode(Enum):
     ITINERARY_SHARE_PASSWORD_REQUIRED = (60007, "该分享需要访问密码")
     ITINERARY_SHARE_PASSWORD_WRONG = (60008, "访问密码错误")
     ITINERARY_SHARE_NOT_ALLOWED = (60009, "该分享未开放此操作")
+    ITINERARY_EXTRACT_BUSY = (60010, "该会话正在提取行程，请稍候")
 
     @property
     def code(self) -> int:

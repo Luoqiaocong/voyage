@@ -12,8 +12,9 @@ import {
   exportItineraryMarkdown,
   getItinerary,
   openItineraryPrintView,
-  patchItinerary,
+  updateItinerary,
   type ItineraryActivity,
+  type ItineraryDay,
   type ItineraryDetail
 } from '@/api/itinerary'
 import { useUiStore } from '@/stores/ui'
@@ -39,6 +40,23 @@ const loading = ref(true)
 const detailTransport = computed(() => parseTransport(detail.value?.plan.transport))
 const saving = ref(false)
 
+/**
+ * 展示态的分日数据：把「按时段归组并排序」从模板搬进 computed。
+ *
+ * 原先把 groupBySlot + sortGroupsBySlot 直接写在模板里，组件每次重渲染
+ * 都会重跑这两步——分享面板开合、导出下拉、编辑态切换、甚至无关的状态
+ * 变化都会触发。而归组结果只依赖 detail，不该跟着重算。搬进 computed
+ * 后由 Vue 缓存，只有 detail 变化时才重新分组。
+ */
+const groupedDays = computed(() =>
+  (detail.value?.plan.daily_plans ?? []).map((day) => ({
+    day,
+    groups: sortGroupsBySlot(
+      groupBySlot(day.activities, (a: ItineraryActivity) => a.time_slot)
+    )
+  }))
+)
+
 /** 分享面板默认收起：它不是高频操作，展开会挤掉行程正文 */
 const showShare = ref(false)
 /** 导出进行中标记：同一个时刻只允许一个导出任务 */
@@ -55,6 +73,39 @@ const edit = reactive({
   accommodationCost: 0,
   accommodationNote: ''
 })
+const editDays = ref<ItineraryDay[]>([])
+
+const SLOT_OPTIONS = [
+  { value: 'morning', label: '上午' },
+  { value: 'afternoon', label: '下午' },
+  { value: 'evening', label: '晚上' }
+] as const
+const KIND_OPTIONS = [
+  { value: 'attraction', label: '景点' },
+  { value: 'restaurant', label: '美食' },
+  { value: 'hotel', label: '住宿' },
+  { value: 'transport', label: '交通' },
+  { value: 'rest', label: '休整' }
+] as const
+
+function emptyActivity(): ItineraryActivity {
+  return {
+    time_slot: 'morning',
+    kind: 'attraction',
+    name: '',
+    description: '',
+    duration_hours: 2,
+    cost: 0,
+    note: null
+  }
+}
+
+function cloneDays(days: ItineraryDay[] | undefined): ItineraryDay[] {
+  return (days ?? []).map((d) => ({
+    ...d,
+    activities: (d.activities ?? []).map((a) => ({ ...a }))
+  }))
+}
 
 const kindLabel: Record<string, string> = {
   attraction: '景点',
@@ -144,6 +195,33 @@ function syncEdit() {
   edit.accommodationDuration = p.accommodation?.duration_hours ?? 2
   edit.accommodationCost = p.accommodation?.cost ?? 0
   edit.accommodationNote = p.accommodation?.note ?? ''
+  editDays.value = cloneDays(p.daily_plans)
+}
+
+function addDay() {
+  const n = editDays.value.length + 1
+  editDays.value.push({
+    day_no: n,
+    date: null,
+    theme: `第 ${n} 天`,
+    activities: [emptyActivity()],
+    summary: ''
+  })
+}
+
+function removeDay(i: number) {
+  editDays.value.splice(i, 1)
+  editDays.value.forEach((d, idx) => {
+    d.day_no = idx + 1
+  })
+}
+
+function addActivity(dayIndex: number) {
+  editDays.value[dayIndex].activities.push(emptyActivity())
+}
+
+function removeActivity(dayIndex: number, actIndex: number) {
+  editDays.value[dayIndex].activities.splice(actIndex, 1)
 }
 
 function addChip(target: 'preferences' | 'tips') {
@@ -163,6 +241,27 @@ function removeChip(target: 'preferences' | 'tips', i: number) {
 
 async function saveEdits() {
   if (!detail.value) return
+  const days = editDays.value.map((d, i) => ({
+    ...d,
+    day_no: i + 1,
+    theme: d.theme.trim() || `第 ${i + 1} 天`,
+    summary: d.summary.trim(),
+    date: d.date?.trim() || null,
+    activities: d.activities
+      .filter((a) => a.name.trim())
+      .map((a) => ({
+        ...a,
+        name: a.name.trim(),
+        description: a.description.trim(),
+        duration_hours: Number(a.duration_hours) || 0,
+        cost: Number(a.cost) || 0,
+        note: a.note?.trim() || null
+      }))
+  }))
+  if (!days.length) {
+    ui.toast('至少保留一天行程', 'error')
+    return
+  }
   saving.value = true
   try {
     const accommodation: ItineraryActivity | null = edit.accommodationName.trim()
@@ -176,14 +275,17 @@ async function saveEdits() {
           note: edit.accommodationNote.trim() || null
         }
       : null
-    const patch = {
+    const plan = {
+      ...detail.value.plan,
+      days: days.length,
       budget: edit.budget === null || Number.isNaN(Number(edit.budget)) ? null : Number(edit.budget),
       preferences: edit.preferences,
       transport: edit.transport.trim() || null,
       tips: edit.tips,
-      accommodation
+      accommodation,
+      daily_plans: days
     }
-    const updated = await patchItinerary(id, patch)
+    const updated = await updateItinerary(id, plan)
     detail.value = updated
     editing.value = false
     syncEdit()
@@ -239,6 +341,8 @@ const budgetDraft = computed({
 
 function openEditor() {
   syncEdit()
+  showShare.value = false
+  exportOpen.value = false
   editing.value = true
 }
 
@@ -359,16 +463,9 @@ function cancelEdit() {
             </div>
           </div>
 
-          <!-- 分享面板：默认收起，展开时置于概览之上 -->
-          <SharePanel v-if="showShare" :itinerary-id="id" />
+          <SharePanel v-if="showShare && !editing" :itinerary-id="id" />
 
-          <!--
-            概览卡片组。四块共用一套「小标题 + 内容」的语言，
-            视觉上与列表页的卡片保持一致（同样的标签配色、同样的票据块）。
-            目的地块承载天数与预算 —— 它们是对目的地的定量描述，
-            与列表页头部「城市名 + N 天 · 预算」的层级完全一致。
-          -->
-          <section class="ov">
+          <section v-show="!editing" class="ov">
             <!-- 目的地 -->
             <div class="ov__card ov__card--dest ov__card--center">
               <p class="ov__label">
@@ -484,7 +581,7 @@ function cancelEdit() {
           </section>
 
           <section v-if="editing" class="card edit-panel">
-            <h2 class="edit-panel__title">编辑行程信息（仅修改独立字段；每日安排请在对话中重新生成）</h2>
+            <h2 class="edit-panel__title">编辑行程信息</h2>
 
             <div class="edit-grid">
               <div class="field">
@@ -558,12 +655,47 @@ function cancelEdit() {
             </div>
           </section>
 
-          <section v-for="day in detail.plan.daily_plans" :key="day.day_no" class="day card">
+          <section v-if="editing" class="card edit-panel day-editor">
+            <div class="day-editor__head">
+              <h2 class="edit-panel__title">每日安排</h2>
+              <button class="btn btn-ghost btn--sm" type="button" @click="addDay">加一天</button>
+            </div>
+            <article v-for="(day, di) in editDays" :key="di" class="day-edit">
+              <header class="day-edit__head">
+                <span class="day__no">Day {{ di + 1 }}</span>
+                <input v-model="day.theme" class="input" placeholder="当天主题" aria-label="当天主题" />
+                <input v-model="day.date" class="input day-edit__date" placeholder="日期，如 2026-10-01" aria-label="当天日期" />
+                <button class="chip-x" type="button" :disabled="editDays.length <= 1" aria-label="删除这一天" @click="removeDay(di)">✕</button>
+              </header>
+              <div v-for="(act, ai) in day.activities" :key="ai" class="act-edit">
+                <div class="act-edit__row">
+                  <select v-model="act.time_slot" class="input" aria-label="时段">
+                    <option v-for="s in SLOT_OPTIONS" :key="s.value" :value="s.value">{{ s.label }}</option>
+                  </select>
+                  <select v-model="act.kind" class="input" aria-label="类型">
+                    <option v-for="k in KIND_OPTIONS" :key="k.value" :value="k.value">{{ k.label }}</option>
+                  </select>
+                  <input v-model="act.name" class="input act-edit__name" placeholder="地点 / 活动名称" aria-label="活动名称" />
+                  <button class="chip-x" type="button" aria-label="删除活动" @click="removeActivity(di, ai)">✕</button>
+                </div>
+                <textarea v-model="act.description" class="input" rows="2" placeholder="简要描述" aria-label="活动描述"></textarea>
+                <div class="act-edit__meta">
+                  <input v-model.number="act.duration_hours" class="input" type="number" min="0" step="0.5" placeholder="小时" aria-label="时长小时" />
+                  <input v-model.number="act.cost" class="input" type="number" min="0" step="1" placeholder="花费（元）" aria-label="花费" />
+                  <input v-model="act.note" class="input" placeholder="备注（可选）" aria-label="活动备注" />
+                </div>
+              </div>
+              <button class="btn btn-ghost btn--sm" type="button" @click="addActivity(di)">添加活动</button>
+              <textarea v-model="day.summary" class="input" rows="2" placeholder="当天小结" aria-label="当天小结"></textarea>
+            </article>
+          </section>
+
+          <section v-for="entry in groupedDays" v-show="!editing" :key="entry.day.day_no" class="day card">
             <header class="day__head">
-              <span class="day__no">Day {{ day.day_no }}</span>
+              <span class="day__no">Day {{ entry.day.day_no }}</span>
               <div>
-                <h2 class="day__theme">{{ day.theme }}</h2>
-                <p class="day__date">{{ day.date || '第 ' + day.day_no + ' 天' }}</p>
+                <h2 class="day__theme">{{ entry.day.theme }}</h2>
+                <p class="day__date">{{ entry.day.date || '第 ' + entry.day.day_no + ' 天' }}</p>
               </div>
             </header>
 
@@ -571,14 +703,11 @@ function cancelEdit() {
               按时段归组渲染，而不是每条活动前面都挂「上午/下午/晚上」。
               一天内常有多条属于同一时段，逐条挂标签会让同一个词重复出现，
               真正的内容反而被淹没。归组后时段只作分组标题出现一次。
-              这里用 sortGroupsBySlot 按时间排序（数据是结构化的，
-              按「上午→下午→晚上」阅读更自然）。
+              分组与排序已在 groupedDays 中算好，这里直接用。
             -->
             <div class="day__slots">
               <section
-                v-for="(grp, gi) in sortGroupsBySlot(
-                  groupBySlot(day.activities, (a: ItineraryActivity) => a.time_slot)
-                )"
+                v-for="(grp, gi) in entry.groups"
                 :key="gi"
                 class="slotgrp"
               >
@@ -608,10 +737,10 @@ function cancelEdit() {
               </section>
             </div>
 
-            <p class="day__summary">{{ day.summary }}</p>
+            <p class="day__summary">{{ entry.day.summary }}</p>
           </section>
 
-          <section v-if="detail.plan.tips?.length" class="card tips">
+          <section v-if="detail.plan.tips?.length && !editing" class="card tips">
             <h2>出行提醒</h2>
             <ul>
               <li v-for="(t, i) in detail.plan.tips" :key="i">{{ t }}</li>
@@ -1064,6 +1193,51 @@ function cancelEdit() {
 .edit-panel { padding: 22px 24px; margin-bottom: 24px; }
 .edit-panel__title { font-size: 1.1rem; margin-bottom: 16px; }
 
+.day-editor { margin-top: 8px; }
+.day-editor__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.day-editor__head .edit-panel__title { margin-bottom: 0; }
+
+.day-edit {
+  padding: 16px 0;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.day-edit:first-of-type { border-top: none; padding-top: 4px; }
+
+.day-edit__head {
+  display: grid;
+  grid-template-columns: auto 1fr minmax(140px, 0.6fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+.day-edit__date { font-family: var(--mono); }
+
+.act-edit {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.act-edit__row,
+.act-edit__meta {
+  display: grid;
+  gap: 8px;
+  align-items: center;
+}
+.act-edit__row { grid-template-columns: 110px 110px 1fr auto; }
+.act-edit__meta { grid-template-columns: 110px 110px 1fr; }
+
 .edit-grid { display: grid; grid-template-columns: 1fr 1.6fr; gap: 14px; }
 .edit-grid--2col { grid-template-columns: 1fr 1fr; }
 .edit-field-gap { margin-top: 16px; }
@@ -1166,9 +1340,20 @@ function cancelEdit() {
 .tips h2 { font-size: 1.1rem; margin-bottom: 10px; }
 .tips ul { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; color: var(--ink-soft); }
 
+@media (max-width: 860px) {
+  .page-head { flex-direction: column; align-items: stretch; gap: 14px; }
+  .it-actions { justify-content: flex-start; }
+  .it-actions__group--main { padding-left: 0; border-left: none; }
+}
+
 @media (max-width: 700px) {
   .act { grid-template-columns: 1fr; gap: 6px; }
   .edit-grid, .edit-grid--2col { grid-template-columns: 1fr; }
   .page-head { align-items: flex-start; }
+  .day-edit__head,
+  .act-edit__row,
+  .act-edit__meta { grid-template-columns: 1fr; }
+  .it-head__chips { flex-wrap: wrap; }
+  .exp__menu { right: auto; left: 0; }
 }
 </style>

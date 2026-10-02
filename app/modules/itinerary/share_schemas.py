@@ -35,7 +35,10 @@ class CreateShareRequest(BaseModel):
 
 
 class ShareItem(BaseModel):
-    """分享链接详情（仅分享者可见，含明文密码便于再次查看）。"""
+    """分享链接详情（仅分享者可见）。
+
+    不回传密码：明文不落库，只回 has_password 让前端知道是否设了密码。
+    """
 
     id: Annotated[int, Field(description="分享 ID")]
     itinerary_id: Annotated[int, Field(description="行程 ID")]
@@ -44,7 +47,6 @@ class ShareItem(BaseModel):
     allow_copy: Annotated[bool, Field(description="是否允许复制")]
     allow_edit: Annotated[bool, Field(description="是否允许编辑")]
     has_password: Annotated[bool, Field(description="是否设置了访问密码")]
-    password: Annotated[str | None, Field(description="访问密码明文（便于分享者再次查看）")] = None
     expires_at: Annotated[datetime | None, Field(description="过期时间（UTC）")] = None
     revoked_at: Annotated[datetime | None, Field(description="撤销时间（UTC）")] = None
     view_count: Annotated[int, Field(description="访问次数")]

@@ -12,7 +12,9 @@ import {
   groupBySlot,
   detectSlot,
   stripSlotPrefix,
-  type Block
+  type Block,
+  type ListItem,
+  type Span
 } from '@/utils/messageParse'
 
 interface Props {
@@ -24,6 +26,34 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), { streaming: false })
 
 const emit = defineEmits<{ (e: 'extract'): void }>()
+
+/** 已切好行内 span 的表格 */
+interface ViewTable {
+  headers: Span[][]
+  rows: Span[][][]
+}
+/** 已归组、已去时段前缀的一天 */
+interface ViewDay {
+  no: string
+  theme: string
+  groups: { label: string; items: string[] }[]
+}
+/**
+ * 渲染就绪的块。
+ *
+ * 与 parseMessage 的 Block 一一对应，区别在于**把模板里的函数调用
+ * 全部前置到这里**：toSpans / groupBySlot / stripSlotPrefix 原先写在
+ * 模板表达式中，组件每次重渲染都会逐块重跑（表格有几十个单元格时尤其
+ * 明显）。放进 computed 后由 Vue 缓存，同一份 text 只算一次。
+ */
+type ViewBlock =
+  | { kind: 'heading'; level: number; text: string }
+  | { kind: 'divider' }
+  | { kind: 'tip'; text: string }
+  | { kind: 'para'; spans: Span[] }
+  | { kind: 'list'; items: ListItem[] }
+  | { kind: 'table'; table: ViewTable }
+  | { kind: 'itinerary'; days: ViewDay[] }
 
 /**
  * 流式期间**同样做结构化解析**，不要退化成纯文本。
@@ -41,12 +71,42 @@ const emit = defineEmits<{ (e: 'extract'): void }>()
  * 跳变问题实际很轻微：解析器把未写完的行当作普通段落，等换行符到达再
  * 归入列表。真正会变的只有最后一行，用户注意力本就在新增内容上。
  */
-const blocks = computed<Block[]>(() => parseMessage(props.text))
+const view = computed<ViewBlock[]>(() =>
+  parseMessage(props.text).map((b: Block): ViewBlock => {
+    if (b.kind === 'table' && b.table) {
+      return {
+        kind: 'table',
+        table: {
+          headers: b.table.headers.map(toSpans),
+          rows: b.table.rows.map((row) => row.map(toSpans))
+        }
+      }
+    }
+    if (b.kind === 'itinerary' && b.days) {
+      return {
+        kind: 'itinerary',
+        days: b.days.map((d) => ({
+          no: d.no,
+          theme: d.theme,
+          groups: groupBySlot(d.slots, detectSlot).map((g) => ({
+            label: g.label,
+            items: g.items.map(stripSlotPrefix)
+          }))
+        }))
+      }
+    }
+    if (b.kind === 'para') return { kind: 'para', spans: toSpans(b.text) }
+    if (b.kind === 'list') return { kind: 'list', items: b.items ?? [] }
+    if (b.kind === 'heading') return { kind: 'heading', level: b.level ?? 2, text: b.text }
+    if (b.kind === 'tip') return { kind: 'tip', text: b.text }
+    return { kind: 'divider' }
+  })
+)
 </script>
 
 <template>
   <div class="mb">
-    <template v-for="(b, i) in blocks" :key="i">
+    <template v-for="(b, i) in view" :key="i">
       <!-- 小节标题 -->
       <h4 v-if="b.kind === 'heading'" class="mb__h" :class="`mb__h--${b.level}`">
         {{ b.text }}
@@ -67,13 +127,13 @@ const blocks = computed<Block[]>(() => parseMessage(props.text))
         一堆竖线与短横线的原始文本，看起来「很乱」。
         首列用等宽字体并加粗：车次号、日期这类标识符最需要纵向对齐比对。
       -->
-      <div v-else-if="b.kind === 'table' && b.table" class="mb__table-wrap">
+      <div v-else-if="b.kind === 'table'" class="mb__table-wrap">
         <table class="mb__table">
           <thead>
             <tr>
               <th v-for="(h, hi) in b.table.headers" :key="hi">
                 <span
-                  v-for="(sp, si) in toSpans(h)"
+                  v-for="(sp, si) in h"
                   :key="si"
                   :class="{ 'mb__b': sp.bold }"
                 >{{ sp.text }}</span>
@@ -88,7 +148,7 @@ const blocks = computed<Block[]>(() => parseMessage(props.text))
                 :class="{ 'mb__table-first': ci === 0 }"
               >
                 <span
-                  v-for="(sp, si) in toSpans(cell)"
+                  v-for="(sp, si) in cell"
                   :key="si"
                   :class="{ 'mb__b': sp.bold }"
                 >{{ sp.text }}</span>
@@ -117,13 +177,13 @@ const blocks = computed<Block[]>(() => parseMessage(props.text))
                 组内条目保持原有顺序（那通常就是模型给的合理安排）。
               -->
               <span
-                v-for="(g, gi) in groupBySlot(d.slots, detectSlot)"
+                v-for="(g, gi) in d.groups"
                 :key="gi"
                 class="mb__slot-group"
               >
                 <em v-if="g.label" class="mb__slot-label">{{ g.label }}</em>
                 <span v-for="(s, si) in g.items" :key="si" class="mb__slot-item">
-                  {{ stripSlotPrefix(s) }}
+                  {{ s }}
                 </span>
               </span>
             </span>
@@ -147,7 +207,7 @@ const blocks = computed<Block[]>(() => parseMessage(props.text))
 
       <!-- 普通段落（支持行内粗体） -->
       <p v-else class="mb__p">
-        <template v-for="(s, si) in toSpans(b.text)" :key="si">
+        <template v-for="(s, si) in b.spans" :key="si">
           <b v-if="s.bold">{{ s.text }}</b>
           <template v-else>{{ s.text }}</template>
         </template>
@@ -160,7 +220,7 @@ const blocks = computed<Block[]>(() => parseMessage(props.text))
         工具条有状态文字、首字等待区有三点动画，光标只是锦上添花。
       -->
       <span
-        v-if="streaming && i === blocks.length - 1 && b.kind === 'para'"
+        v-if="streaming && i === view.length - 1 && b.kind === 'para'"
         class="mb__caret"
         aria-hidden="true"
       ></span>
