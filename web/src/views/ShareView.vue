@@ -18,8 +18,12 @@ import {
 } from '@/api/share'
 import type { ItineraryActivity } from '@/api/itinerary'
 import BackToTop from '@/components/BackToTop.vue'
+import TravelIcon from '@/components/TravelIcon.vue'
 import { useUserStore } from '@/stores/user'
 import { useUiStore } from '@/stores/ui'
+import { groupBySlot, sortGroupsBySlot } from '@/utils/messageParse'
+import { preferenceTone } from '@/utils/preferenceTone'
+import { parseTransport } from '@/utils/transportParse'
 
 const route = useRoute()
 const router = useRouter()
@@ -37,14 +41,14 @@ const copying = ref(false)
 const errorText = ref('')
 
 const plan = computed(() => data.value?.plan ?? null)
+const shareTransport = computed(() => parseTransport(plan.value?.transport))
 
-const slotLabel: Record<string, string> = { morning: '上午', afternoon: '下午', evening: '晚上' }
 const kindLabel: Record<string, string> = {
   attraction: '景点',
-  restaurant: '餐饮',
+  restaurant: '美食',
   hotel: '住宿',
   transport: '交通',
-  rest: '休息'
+  rest: '休整'
 }
 
 async function bootstrap() {
@@ -103,16 +107,8 @@ async function copyToMine() {
   }
 }
 
-/**
- * 活动的费用文案。
- *
- * cost 是整数、单位元，**0 表示免费**（后端与 ItineraryDetailView 都按此约定）。
- * 原先写 `a.cost ? ... : ''`，0 是假值 → 免费活动返回空串，
- * 模板里的 v-if 便整个不渲染，看起来像费用数据缺失。
- * 现改为明确返回「免费」。
- */
 function activityCost(a: ItineraryActivity): string {
-  return a.cost ? `约 ${a.cost} 元` : '免费'
+  return a.cost ? `¥${a.cost}` : '免费'
 }
 
 onMounted(bootstrap)
@@ -170,10 +166,8 @@ onMounted(bootstrap)
             </p>
             <h1 class="share__title">{{ plan.destination }} · {{ plan.days }} 天行程</h1>
             <ul class="share__meta">
-              <!-- 用 != null 而非真值判断：预算为 0 时也应展示，与列表页口径一致 -->
-              <li v-if="plan.budget != null">预算 {{ plan.budget }} 元</li>
-              <li v-if="plan.transport">交通：{{ plan.transport }}</li>
-              <li v-if="plan.preferences?.length">偏好：{{ plan.preferences.join('、') }}</li>
+              <li>{{ plan.days }} 天</li>
+              <li v-if="plan.budget != null">预算 ¥{{ plan.budget }}</li>
             </ul>
           </div>
           <div class="share__actions">
@@ -190,37 +184,93 @@ onMounted(bootstrap)
           </div>
         </header>
 
-        <div v-if="plan.accommodation" class="card share__panel">
-          <h2 class="share__panel-title">住宿</h2>
-          <p class="share__acc">
-            <strong>{{ plan.accommodation.name }}</strong>
-            <span v-if="plan.accommodation.description"> — {{ plan.accommodation.description }}</span>
-          </p>
-          <p v-if="plan.accommodation.note" class="share__note">⚠️ {{ plan.accommodation.note }}</p>
-        </div>
+        <section class="ov">
+          <div class="ov__card">
+            <p class="ov__label"><TravelIcon name="train" :size="14" />往返交通</p>
+            <template v-if="shareTransport.primary">
+              <div class="ticket">
+                <div class="ticket__route">
+                  <span v-if="shareTransport.primary.from" class="ticket__station">{{ shareTransport.primary.from }}</span>
+                  <TravelIcon name="arrow-right" :size="13" class="ticket__arrow" />
+                  <span v-if="shareTransport.primary.to" class="ticket__station">{{ shareTransport.primary.to }}</span>
+                  <span v-if="shareTransport.primary.trainNo" class="ticket__no">{{ shareTransport.primary.trainNo }}</span>
+                  <span v-if="shareTransport.primary.recommended" class="ticket__rec">推荐</span>
+                </div>
+                <div class="ticket__facts">
+                  <span v-if="shareTransport.primary.depart" class="ticket__time">{{ shareTransport.primary.depart }} – {{ shareTransport.primary.arrive }}</span>
+                  <span v-if="shareTransport.primary.seat" class="ticket__seat">{{ shareTransport.primary.seat }}</span>
+                  <span v-if="shareTransport.primary.price" class="ticket__price">{{ shareTransport.primary.price }}</span>
+                </div>
+                <ul v-if="shareTransport.alternatives.length" class="ticket__alts">
+                  <li v-for="(alt, ai) in shareTransport.alternatives" :key="ai" class="ticket__alt">
+                    <span class="ticket__alt-label">备选</span>
+                    <span v-if="alt.trainNo" class="ticket__alt-no">{{ alt.trainNo }}</span>
+                    <span v-if="alt.depart" class="ticket__alt-time">{{ alt.depart }}–{{ alt.arrive }}</span>
+                    <span v-if="alt.to" class="ticket__alt-to">{{ alt.to }}</span>
+                    <span v-if="alt.price" class="ticket__alt-price">{{ alt.price }}</span>
+                  </li>
+                </ul>
+              </div>
+            </template>
+            <p v-else class="ov__plain">{{ plan.transport || '未指定' }}</p>
+          </div>
+
+          <div v-if="plan.accommodation" class="ov__card">
+            <p class="ov__label"><TravelIcon name="bed" :size="14" />住宿</p>
+            <p class="ov__stay-name">{{ plan.accommodation.name }}</p>
+            <p v-if="plan.accommodation.description" class="ov__stay-desc">{{ plan.accommodation.description }}</p>
+            <p class="ov__stay-facts">
+              <span v-if="plan.accommodation.cost" class="ov__cost">¥{{ plan.accommodation.cost }} / 晚</span>
+              <span v-if="plan.accommodation.note" class="ov__stay-note">{{ plan.accommodation.note }}</span>
+            </p>
+          </div>
+
+          <div v-if="plan.preferences?.length" class="ov__card">
+            <p class="ov__label"><TravelIcon name="star" :size="14" />偏好</p>
+            <div class="ov__tags">
+              <span
+                v-for="p in plan.preferences"
+                :key="p"
+                class="ptag"
+                :class="`ptag--${preferenceTone(p)}`"
+              >{{ p }}</span>
+            </div>
+          </div>
+        </section>
 
         <section v-for="day in plan.daily_plans" :key="day.day_no" class="card share__day">
           <header class="share__day-head">
-            <h2>第 {{ day.day_no }} 天 · {{ day.theme }}</h2>
-            <span v-if="day.date" class="share__day-date">{{ day.date }}</span>
+            <span class="day__no">Day {{ day.day_no }}</span>
+            <div>
+              <h2>{{ day.theme }}</h2>
+              <span class="share__day-date">{{ day.date || '第 ' + day.day_no + ' 天' }}</span>
+            </div>
           </header>
-          <p class="share__summary">{{ day.summary }}</p>
 
-          <ul class="acts">
-            <li v-for="(a, i) in day.activities" :key="i" class="acts__item">
-              <span class="acts__slot">{{ slotLabel[a.time_slot] ?? a.time_slot }}</span>
-              <div class="acts__body">
-                <p class="acts__name">
-                  {{ a.name }}
-                  <span class="acts__kind">{{ kindLabel[a.kind] ?? a.kind }}</span>
-                  <span v-if="a.duration_hours" class="acts__dur">{{ a.duration_hours }} 小时</span>
-                  <span v-if="activityCost(a)" class="acts__cost">{{ activityCost(a) }}</span>
-                </p>
-                <p class="acts__desc">{{ a.description }}</p>
-                <p v-if="a.note" class="share__note">⚠️ {{ a.note }}</p>
-              </div>
-            </li>
-          </ul>
+          <div class="day__slots">
+            <section
+              v-for="(grp, gi) in sortGroupsBySlot(groupBySlot(day.activities, (a: ItineraryActivity) => a.time_slot))"
+              :key="gi"
+              class="slotgrp"
+            >
+              <h4 v-if="grp.label" class="slotgrp__label">{{ grp.label }}</h4>
+              <ul class="acts">
+                <li v-for="(a, i) in grp.items" :key="i" class="acts__item">
+                  <span class="badge-kind badge-tag">{{ kindLabel[a.kind] ?? a.kind }}</span>
+                  <div class="acts__body">
+                    <p class="acts__name">{{ a.name }}</p>
+                    <p class="acts__desc">{{ a.description }}</p>
+                    <p class="acts__meta">
+                      <span v-if="a.duration_hours">约 {{ a.duration_hours }} 小时</span>
+                      <span :class="{ 'acts__free': !a.cost }">{{ activityCost(a) }}</span>
+                      <span v-if="a.note" class="acts__note">{{ a.note }}</span>
+                    </p>
+                  </div>
+                </li>
+              </ul>
+            </section>
+          </div>
+          <p v-if="day.summary" class="share__summary">{{ day.summary }}</p>
         </section>
 
         <section v-if="plan.tips?.length" class="card share__tips">
@@ -295,50 +345,131 @@ onMounted(bootstrap)
 }
 .share__badge--edit { background: var(--primary-soft); color: var(--prim); }
 
-.share__panel, .share__day, .share__tips { padding: 20px 22px; margin-bottom: 16px; }
+.share__day, .share__tips { padding: 20px 22px; margin-bottom: 16px; }
 .share__panel-title { font-size: 0.95rem; font-weight: 700; margin-bottom: 10px; }
-.share__acc { font-size: 0.9rem; }
-.share__note { font-size: 0.8rem; color: var(--danger); margin-top: 4px; }
 
+.ov {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.ov__card {
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+.ov__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--text3);
+  margin-bottom: 8px;
+}
+.ov__stay-name { font-size: 1rem; font-weight: 700; }
+.ov__stay-desc { font-size: 0.84rem; color: var(--text2); margin-top: 4px; }
+.ov__stay-facts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: 0.82rem; color: var(--text2); }
+.ov__cost { font-weight: 650; color: var(--text); }
+.ov__plain { font-size: 0.88rem; color: var(--text2); line-height: 1.6; }
+.ov__tags { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.ticket { display: flex; flex-direction: column; gap: 6px; }
+.ticket__route { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.ticket__station { font-weight: 700; }
+.ticket__arrow { opacity: 0.7; }
+.ticket__no { font-family: var(--mono); font-weight: 650; }
+.ticket__rec {
+  font-size: 0.68rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--gold-soft);
+  color: var(--gold-600);
+}
+.ticket__facts { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.79rem; color: var(--text2); }
+.ticket__time { font-family: var(--mono); }
+.ticket__price { margin-left: auto; font-weight: 750; color: var(--text); }
+.ticket__alts {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ticket__alt { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.76rem; color: var(--text3); }
+.ticket__alt-label {
+  font-size: 0.68rem;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+.ticket__alt-no, .ticket__alt-time { font-family: var(--mono); }
+
+.day__no {
+  font-family: var(--display);
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--primary);
+  padding: 2px 10px;
+  border: 1.5px solid var(--primary);
+  border-radius: 10px;
+}
 .share__day-head {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
   gap: 12px;
   padding-bottom: 10px;
   border-bottom: 2px solid var(--hairline);
-  margin-bottom: 10px;
+  margin-bottom: 14px;
 }
-.share__day-head h2 { font-size: 1rem; font-weight: 700; }
+.share__day-head h2 { font-size: 1.1rem; font-weight: 700; }
 .share__day-date { font-size: 0.78rem; color: var(--text3); font-family: var(--mono); }
-.share__summary { font-size: 0.84rem; color: var(--text2); margin-bottom: 14px; line-height: 1.6; }
+.share__summary {
+  margin-top: 12px;
+  font-size: 0.84rem;
+  color: var(--text2);
+  line-height: 1.6;
+  border-top: 1px dashed var(--line);
+  padding-top: 10px;
+}
 
-.acts { display: flex; flex-direction: column; }
+.day__slots { display: flex; flex-direction: column; gap: 16px; }
+.slotgrp { display: flex; flex-direction: column; gap: 8px; }
+.slotgrp__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--blue-700);
+}
+.slotgrp__label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--blue-200), transparent);
+}
+
+.acts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .acts__item {
   display: grid;
-  grid-template-columns: 52px 1fr;
-  gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px dashed var(--hairline);
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
 }
-.acts__item:last-child { border-bottom: none; }
-.acts__slot {
-  font-size: 0.78rem;
-  color: var(--prim);
-  font-weight: 650;
-}
-.acts__name { font-weight: 600; font-size: 0.9rem; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
-.acts__kind {
-  font-size: 0.7rem;
-  font-weight: 500;
-  padding: 1px 7px;
-  border-radius: 5px;
-  background: var(--surface-soft);
-  color: var(--text2);
-}
-.acts__dur, .acts__cost { font-size: 0.75rem; color: var(--text3); font-weight: 500; }
-.acts__cost { color: var(--gold-600); }
+.acts__name { font-weight: 600; font-size: 0.95rem; }
 .acts__desc { font-size: 0.83rem; color: var(--text2); margin-top: 3px; line-height: 1.6; }
+.acts__meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; font-size: 0.8rem; color: var(--text3); }
+.acts__free { color: var(--success); }
+.acts__note { font-style: italic; }
 
 .share__tips ul { display: flex; flex-direction: column; gap: 8px; }
 .share__tips li {
@@ -361,8 +492,13 @@ onMounted(bootstrap)
 
 .share__foot { text-align: center; font-size: 0.78rem; color: var(--text3); margin-top: 24px; }
 
-@media (max-width: 620px) {
+@media (max-width: 720px) {
+  .share { padding: 24px 0 56px; }
+  .share__head { flex-direction: column; align-items: stretch; }
+  .share__actions { flex-wrap: wrap; }
+  .ov { grid-template-columns: 1fr; }
   .share__form { flex-direction: column; }
-  .acts__item { grid-template-columns: 1fr; gap: 4px; }
+  .acts__item { grid-template-columns: 1fr; gap: 6px; }
+  .share__day-head { align-items: flex-start; }
 }
 </style>

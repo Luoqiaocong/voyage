@@ -92,12 +92,14 @@ class ConversationService(TransactionMixin):
                 updated_data["title"] = title
             except Exception as exc:
                 log.error(f"[send_message] title failed: {exc}")
-            
-            
-        updated_data["message_count"] = conversation.message_count + 1
 
         async with self.transaction_scope():
-            await self.repo.update_conversation(conversation_id, updated_data)
+            # 标题按值写入；消息数走原子自增，避免并发下丢失计数（见 repo 说明）
+            if updated_data.get("title"):
+                await self.repo.update_conversation(
+                    conversation_id, {"title": updated_data["title"]}
+                )
+            await self.repo.increment_message_count(conversation_id)
 
         # 提交后台记忆提炼（不等待结果）：
         # 提炼要再调一次 LLM，若同步等待会让用户多等一次模型往返才能收到结束帧。
@@ -144,11 +146,10 @@ class ConversationService(TransactionMixin):
         """批量删除会话：只删除属于当前用户的会话，其余 id 静默跳过（先删行，再清 checkpoint）。"""
         if not conversation_ids:
             return
-        owned = await self.repo.get_by_user_id(user_id)
-        own_ids = {c.id for c in owned}  # 当前用户持有的所有会话
-        targets = [cid for cid in conversation_ids if cid in own_ids]  # 取交集，越权 id 静默跳过
-        if not targets:
-            return  # 没有可删除的会话，静默返回
+        # 归属校验交给 DELETE 的 WHERE，并拿回真正删掉的 id；越权 id 不会进入
+        # checkpoint 清理环节（否则可借越权 id 清掉他人的对话状态）。
         async with self.transaction_scope():
-            await self.repo.remove(targets)
+            targets = await self.repo.remove_owned(user_id, conversation_ids)
+        if not targets:
+            return
         await self._delete_checkpoints(targets)

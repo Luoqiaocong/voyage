@@ -1,8 +1,13 @@
-"""时间展示工具：数据库统一存 UTC，对外展示统一转上海时区（东八区）。"""
+"""时间展示工具：数据库统一存 UTC，对外展示统一转配置时区（默认东八区）。"""
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-LOCAL_TZ = ZoneInfo("Asia/Shanghai")
+from app.config import config
+
+# 展示时区来自配置，而不是写死 Asia/Shanghai。
+# 写死会导致：改 APP_TIMEZONE 后，AI 侧（date_context / usage_query）已按新时区，
+# 而展示侧仍按东八区，同一条数据出现两种时间口径。
+LOCAL_TZ = ZoneInfo(config.APP_TIMEZONE)
 
 
 def to_local_display(dt: datetime) -> str:

@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, Depends, Path, Query
 from fastapi_utils.cbv import cbv
 from starlette import status
 
@@ -11,7 +11,14 @@ from app.shared.annotations import ConversationId, ItineraryId
 from app.shared.db.models import User
 
 from .dependencies import verify_itinerary_owner
-from .schemas import ItinerariesResponse, ItineraryDetailResponse, ItineraryPatch, UpdateItineraryRequest
+from .schemas import (
+    ExtractItineraryRequest,
+    ItinerariesResponse,
+    ItineraryDetailResponse,
+    ItineraryMaybeResponse,
+    ItineraryPatch,
+    UpdateItineraryRequest,
+)
 from .service import ItineraryService
 
 router = APIRouter(prefix="/itineraries", tags=["itineraries"], route_class=UnifiedRoute)
@@ -32,11 +39,38 @@ class ItineraryRouter:
     async def extract_and_save_itinerary(
         self,
         id: Annotated[ConversationId, Path(description="对话 ID")],
+        req: ExtractItineraryRequest | None = None,
     ):
         # 同步等待：LLM 提取 + 落库一次完成；失败抛业务异常由统一响应返回错误码。
+        overwrite = bool(req.overwrite) if req else False
         return ItineraryDetailResponse.model_validate(
-            await self.service.save_from_conversation(id, self.current_user.id)
+            await self.service.save_from_conversation(
+                id, self.current_user.id, overwrite=overwrite
+            )
         )
+
+    @router.get(
+        "/by-conversation/{id}",
+        status_code=status.HTTP_200_OK,
+        summary="查询某会话最近一份行程",
+        dependencies=[Depends(verify_conversation_owner)],
+    )
+    async def get_itinerary_by_conversation(
+        self,
+        id: Annotated[ConversationId, Path(description="对话 ID")],
+    ):
+        itinerary = await self.service.get_latest_for_conversation(self.current_user.id, id)
+        return ItineraryMaybeResponse(
+            itinerary=ItineraryDetailResponse.model_validate(itinerary) if itinerary else None
+        )
+
+    @router.get(
+        "/count",
+        status_code=status.HTTP_200_OK,
+        summary="当前用户行程总数",
+    )
+    async def count_itineraries(self):
+        return {"total": await self.service.count_itineraries(self.current_user.id)}
 
     # ---------- 查询 ----------
     @router.get(
@@ -44,10 +78,20 @@ class ItineraryRouter:
         status_code=status.HTTP_200_OK,
         summary="获取行程列表",
     )
-    async def get_itineraries(self):
-        itineraries = await self.service.get_itineraries(self.current_user.id)
+    async def get_itineraries(
+        self,
+        page: Annotated[int, Query(ge=1, description="页码，从 1 开始")] = 1,
+        page_size: Annotated[int, Query(ge=1, le=50, description="每页条数")] = 12,
+        q: Annotated[str | None, Query(max_length=40, description="按目的地/交通搜索")] = None,
+    ):
+        items, total = await self.service.get_itineraries_page(
+            self.current_user.id, page=page, page_size=page_size, q=q
+        )
         return ItinerariesResponse(
-            itineraries=[ItineraryDetailResponse.model_validate(i) for i in itineraries]
+            itineraries=[ItineraryDetailResponse.model_validate(i) for i in items],
+            total=total,
+            page=page,
+            page_size=page_size,
         )
 
     @router.get(

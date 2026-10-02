@@ -272,6 +272,15 @@ class ItineraryPatch(BaseModel):
     model_config = {"extra": "forbid"}  # 禁用额外字段
 
 
+class ExtractItineraryRequest(BaseModel):
+    """从会话提取行程。
+
+    overwrite=true 时覆盖该会话最近一份行程；false 则始终另存。
+    """
+
+    overwrite: bool = Field(default=False, description="是否覆盖该会话已有行程")
+
+
 class ItineraryDetailResponse(BaseModel):
     """行程详情响应。"""
 
@@ -290,6 +299,15 @@ class ItineraryDetailResponse(BaseModel):
 
 
 class ItinerariesResponse(BaseModel):
-    """行程列表响应。"""
+    """行程列表响应（分页）。"""
 
     itineraries: list[ItineraryDetailResponse]
+    total: Annotated[int, Field(description="符合条件的总条数")] = 0
+    page: Annotated[int, Field(description="当前页，从 1 开始")] = 1
+    page_size: Annotated[int, Field(description="每页条数")] = 12
+
+
+class ItineraryMaybeResponse(BaseModel):
+    """某会话最近一份行程；没有则为 null。"""
+
+    itinerary: ItineraryDetailResponse | None = None

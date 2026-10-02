@@ -11,7 +11,7 @@
  * 关于自我保护：后端会拒绝「停用自己」「操作同级或更高级」「降级最后一个
  * 超管」，前端把这些提示原样透出即可，不重复实现规则。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   getAdminMe,
   getUserDetail,
@@ -93,9 +93,18 @@ watch(keyword, () => {
   // 输入防抖：每敲一个字就请求一次会给后端带来无谓压力
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
+    searchTimer = null
     page.value = 1
     load()
   }, 320)
+})
+
+// 卸载时清理挂起的防抖请求，避免离开后台后仍触发一次列表加载
+onUnmounted(() => {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
 })
 
 watch([roleFilter, activeFilter], () => {

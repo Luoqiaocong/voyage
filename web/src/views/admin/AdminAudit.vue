@@ -5,7 +5,7 @@
  * detail 字段后端存的是 JSON 字符串，这里解析出来渲染成易读的「改前 → 改后」，
  * 解析失败则退回原文展示，避免因格式意外变化而丢信息。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { AUDIT_ACTION_LABEL, listAuditLogs, type AuditLogItem } from '@/api/admin'
 import { formatDateTime } from '@/utils/datetime'
 import { roleLabel } from '@/utils/role'
@@ -76,9 +76,18 @@ let targetTimer: ReturnType<typeof setTimeout> | null = null
 watch(targetFilter, () => {
   if (targetTimer) clearTimeout(targetTimer)
   targetTimer = setTimeout(() => {
+    targetTimer = null
     page.value = 1
     load()
   }, 320)
+})
+
+// 卸载时清理挂起的防抖请求，避免离开后台后仍触发一次列表加载
+onUnmounted(() => {
+  if (targetTimer) {
+    clearTimeout(targetTimer)
+    targetTimer = null
+  }
 })
 
 watch(page, load)

@@ -22,8 +22,6 @@ export interface ShareItem {
   allow_copy: boolean
   allow_edit: boolean
   has_password: boolean
-  /** 明文密码：便于分享者再次查看自己设的密码 */
-  password: string | null
   expires_at: string | null
   revoked_at: string | null
   view_count: number
